@@ -18,7 +18,7 @@ async function initializeDatabase() {
     console.log('Clearing existing data...');
     await session.run('MATCH (n) DETACH DELETE n');
     
-    const cypherScript = fs.readFileSync('catalog_2.cypher', 'utf8');
+    const cypherScript = fs.readFileSync('catalog.cypher', 'utf8');
     
     // Split into logical blocks
     const blocks = cypherScript.split(/\n\s*\n/).filter(block => 

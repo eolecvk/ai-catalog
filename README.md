@@ -37,51 +37,63 @@ A comprehensive SaaS platform for AI software vendors to discover and sell AI pr
 - Docker and Docker Compose
 - npm or yarn package manager
 
-### Quick Start with Docker
+### Quick Start (Recommended)
 
-1. **Clone and install dependencies**:
+1. **Install dependencies**:
    ```bash
    npm run install-all
    ```
 
-2. **Start Neo4j with Docker**:
-   ```bash
-   docker-compose up -d
-   ```
-   
-   This starts Neo4j on:
-   - Browser interface: http://localhost:7474
-   - Bolt connection: bolt://localhost:7687
-   - Login: neo4j/password123
-
-3. **Wait for Neo4j to be ready** (about 30 seconds), then initialize the database:
-   ```bash
-   # The app will start on port 5000, so initialize the database
-   npm run server &
-   sleep 5
-   curl -X POST http://localhost:5000/api/init-database
-   pkill -f "node server"
-   ```
-
-4. **Run the application**:
+2. **Start everything with one command**:
    ```bash
    npm run dev
    ```
+   
+   This automatically:
+   - Starts Neo4j via Docker Compose
+   - Waits for Neo4j to be ready
+   - Starts both server (port 5000) and client (port 3000)
 
-   This starts both the backend server (port 5000) and frontend (port 3000).
+3. **Access the application**:
+   - Frontend: http://localhost:3000
+   - Neo4j Browser: http://localhost:7474 (neo4j/password123)
 
-### Manual Neo4j Setup (Alternative)
+### Development Commands
 
-If you prefer to install Neo4j manually:
+- **`npm run dev`** - Start Neo4j + full application
+- **`npm run dev:full`** - Fresh start with database reset
+- **`npm run reset:db`** - Reset and repopulate database
+- **`npm run start:services`** - Start only Neo4j
+- **`npm run stop:services`** - Stop Neo4j
 
-1. Install Neo4j Desktop or Server (v4.4 or higher)
-2. Set up environment variables:
+### Database Management
+
+The database reset utility (`npm run reset:db`) will:
+- Clear all existing data
+- Load from `catalog.cypher`
+- Show detailed progress and node counts
+- Perfect for schema experimentation
+
+### Manual Setup (Alternative)
+
+If you need manual control:
+
+1. **Start Neo4j manually**:
    ```bash
-   cp .env.example .env
-   # Edit .env with your Neo4j credentials
+   docker-compose up -d
+   npm run wait:neo4j  # Wait for readiness
    ```
-3. Ensure Neo4j is running on `bolt://localhost:7687`
-4. Continue with steps 3-4 above
+
+2. **Initialize database** (if needed):
+   ```bash
+   npm run reset:db
+   ```
+
+3. **Run application**:
+   ```bash
+   npm run server  # Terminal 1
+   npm run client  # Terminal 2
+   ```
 
 ### API Endpoints
 
@@ -97,6 +109,9 @@ If you prefer to install Neo4j manually:
 ```
 ai-catalog/
 ├── catalog.cypher          # Neo4j graph schema and data
+├── docker-compose.yml      # Neo4j container setup
+├── scripts/
+│   └── reset-db.js        # Database reset utility
 ├── server/
 │   └── index.js           # Express API server
 ├── client/
@@ -135,7 +150,7 @@ The Neo4j graph models the following entities and relationships:
 ### Adding New Projects
 
 1. Update `catalog.cypher` with new nodes and relationships
-2. Re-run database initialization
+2. Reset database: `npm run reset:db`
 3. Projects will automatically appear in recommendations
 
 ### Customizing UI

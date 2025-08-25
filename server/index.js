@@ -13,7 +13,7 @@ const driver = neo4j.driver(
   process.env.NEO4J_URI || 'bolt://localhost:7687',
   neo4j.auth.basic(
     process.env.NEO4J_USERNAME || 'neo4j',
-    process.env.NEO4J_PASSWORD || 'password'
+    process.env.NEO4J_PASSWORD || 'password123'
   )
 );
 
@@ -46,7 +46,7 @@ app.get('/api/industries', async (req, res) => {
   }
 });
 
-// Get sectors for selected industries
+// Get sectors for selected industries, grouped by industry
 app.post('/api/sectors', async (req, res) => {
   const session = driver.session();
   const { industries } = req.body;
@@ -55,13 +55,24 @@ app.post('/api/sectors', async (req, res) => {
     const query = `
       MATCH (i:Industry)-[:HAS_SECTOR]->(s:Sector)
       WHERE i.name IN $industries
-      RETURN DISTINCT s.name as name ORDER BY s.name
+      RETURN i.name as industry, s.name as sector 
+      ORDER BY i.name, s.name
     `;
     const result = await session.run(query, { industries });
-    const sectors = result.records.map(record => ({
-      name: record.get('name')
-    }));
-    res.json(sectors);
+    
+    // Group sectors by industry
+    const groupedSectors = {};
+    result.records.forEach(record => {
+      const industry = record.get('industry');
+      const sector = record.get('sector');
+      
+      if (!groupedSectors[industry]) {
+        groupedSectors[industry] = [];
+      }
+      groupedSectors[industry].push({ name: sector });
+    });
+    
+    res.json(groupedSectors);
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {
@@ -148,12 +159,14 @@ app.post('/api/projects', async (req, res) => {
     let params;
     
     if (viewMode === 'sector') {
-      // Sector-based projects
+      // Sector-based projects: find projects that address selected pain points
+      // and are either connected to selected sectors OR not connected to any sector
       query = `
-        MATCH (s:Sector)-[:HAS_OPPORTUNITY]->(po:ProjectOpportunity)
-        MATCH (po)-[:ADDRESSES]->(pp:PainPoint)
+        MATCH (po:ProjectOpportunity)-[:ADDRESSES]->(pp:PainPoint)
         MATCH (po)-[:IS_INSTANCE_OF]->(pb:ProjectBlueprint)
-        WHERE s.name IN $sectors AND pp.name IN $painPoints
+        WHERE pp.name IN $painPoints
+        OPTIONAL MATCH (s:Sector)-[:HAS_OPPORTUNITY]->(po)
+        WHERE s IS NULL OR s.name IN $sectors
         OPTIONAL MATCH (po)-[r:REQUIRES_ROLE]->(role:Role)
         OPTIONAL MATCH (po)-[:NEEDS_SUBMODULE]->(sm:SubModule)
         RETURN DISTINCT po.title as title, 

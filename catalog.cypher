@@ -1,6 +1,7 @@
 // =================================================================
-// COMPLETE SCRIPT - BANKING & INSURANCE WITH DEPARTMENTS (v2)
-// This version decouples Departments from Sectors/Industries.
+// COMPLETE SCRIPT - BANKING & INSURANCE WITH DEPARTMENTS (v3)
+// This version includes proper dual linking for pain points and
+// project opportunities between sectors and departments
 // =================================================================
 
 // Clear existing graph for a clean run (Optional)
@@ -338,9 +339,62 @@ MATCH (pp_reg_tracking:PainPoint {name: 'Manual Regulatory Tracking'})
 MERGE (dept_risk)-[:EXPERIENCES]->(pp_aml_false_positives)
 MERGE (dept_risk)-[:EXPERIENCES]->(pp_reg_tracking);
 
-// --- [REMOVED] Link Sectors to Departments ---
-// This section has been removed as per the new data model requirements.
-// Departments are now independent of sectors.
+// =================================================================
+// SECTION 3.5: DUAL LINKING - PAIN POINTS TO BOTH SECTORS & DEPARTMENTS
+// =================================================================
+
+// These pain points are relevant to both specific sectors AND departments
+// Creating dual links where appropriate
+
+// Cross-sell/up-sell is relevant to Retail Banking sectors and Marketing dept
+MATCH (rb:Sector {name: 'Retail Banking'})
+MATCH (pp_cross_sell:PainPoint {name: 'Ineffective Cross-Sell/Up-Sell'})
+MERGE (rb)-[:EXPERIENCES]->(pp_cross_sell);
+
+MATCH (ob:Sector {name: 'Online Banking'})
+MATCH (pp_cross_sell:PainPoint {name: 'Ineffective Cross-Sell/Up-Sell'})
+MERGE (ob)-[:EXPERIENCES]->(pp_cross_sell);
+
+// High turnover affects Commercial Banking (relationship managers)
+MATCH (cb:Sector {name: 'Commercial Banking'})
+MATCH (pp_turnover:PainPoint {name: 'High First-Year Turnover'})
+MERGE (cb)-[:EXPERIENCES]->(pp_turnover);
+
+MATCH (ib:Sector {name: 'Investment Banking'})
+MATCH (pp_turnover:PainPoint {name: 'High First-Year Turnover'})
+MERGE (ib)-[:EXPERIENCES]->(pp_turnover);
+
+// Invoice processing affects Health Insurance sectors
+MATCH (hi:Sector {name: 'Health Insurance'})
+MATCH (pp_invoice_manual:PainPoint {name: 'Manual Invoice Processing'})
+MERGE (hi)-[:EXPERIENCES]->(pp_invoice_manual);
+
+// Security alerts affect Online Banking
+MATCH (ob:Sector {name: 'Online Banking'})
+MATCH (pp_alert_fatigue:PainPoint {name: 'Security Alert Fatigue'})
+MERGE (ob)-[:EXPERIENCES]->(pp_alert_fatigue);
+
+// Call handle time affects multiple insurance sectors
+MATCH (hi:Sector {name: 'Health Insurance'})
+MATCH (pp_handle_time:PainPoint {name: 'Long Call Center Handle Time'})
+MERGE (hi)-[:EXPERIENCES]->(pp_handle_time);
+
+MATCH (li:Sector {name: 'Life Insurance'})
+MATCH (pp_handle_time:PainPoint {name: 'Long Call Center Handle Time'})
+MERGE (li)-[:EXPERIENCES]->(pp_handle_time);
+
+// AML affects all banking sectors
+MATCH (rb:Sector {name: 'Retail Banking'})
+MATCH (pp_aml_false_positives:PainPoint {name: 'AML Alert Inefficiency'})
+MERGE (rb)-[:EXPERIENCES]->(pp_aml_false_positives);
+
+MATCH (cb:Sector {name: 'Commercial Banking'})
+MATCH (pp_aml_false_positives:PainPoint {name: 'AML Alert Inefficiency'})
+MERGE (cb)-[:EXPERIENCES]->(pp_aml_false_positives);
+
+MATCH (pb:Sector {name: 'Private Banking'})
+MATCH (pp_aml_false_positives:PainPoint {name: 'AML Alert Inefficiency'})
+MERGE (pb)-[:EXPERIENCES]->(pp_aml_false_positives);
 
 // =================================================================
 // SECTION 4: CREATE PROJECT OPPORTUNITIES
@@ -410,7 +464,6 @@ CREATE (opp_rb_cs:ProjectOpportunity {
     priority: 'Medium',
     business_case: 'Reduce call center volume by 30% and improve first-call resolution by automating common queries and empowering agents.'
 })
-CREATE (rb)-[:HAS_OPPORTUNITY]->(opp_rb_cs)
 CREATE (opp_rb_cs)-[:IS_INSTANCE_OF]->(bp_cs)
 CREATE (opp_rb_cs)-[:ADDRESSES]->(pp_call_volume)
 CREATE (opp_rb_cs)-[:REQUIRES_ROLE]->(ai)
@@ -591,3 +644,165 @@ CREATE (opp_rb_aml)-[:REQUIRES_ROLE]->(mlOps)
 CREATE (opp_rb_aml)-[:NEEDS_SUBMODULE]->(sm_fd_a)
 CREATE (opp_rb_aml)-[:NEEDS_SUBMODULE]->(sm_fd_c)
 CREATE (rb)-[:HAS_OPPORTUNITY]->(opp_rb_aml);
+
+// --- Additional Cross-Department & Cross-Sector Opportunities ---
+
+// **Marketing Personalization for Life Insurance**
+MATCH (li:Sector {name: 'Life Insurance'})
+MATCH (dept_mkt:Department {name: 'Marketing'})
+MATCH (bp_personalization:ProjectBlueprint {title: 'Content Personalization Platform'})
+MATCH (pp_generic_comm:PainPoint {name: 'Generic Customer Communications'})
+MATCH (ai:Role {name: 'AI Engineer'})
+MATCH (sm_nba_a:SubModule {name: 'Customer 360 Data Layer'})
+MATCH (sm_nba_d:SubModule {name: 'A/B Testing Framework'})
+CREATE (opp_li_pers:ProjectOpportunity {
+    title: 'Life Insurance Customer Journey Personalization',
+    priority: 'Medium',
+    business_case: 'Increase policy conversion rates by 25% through personalized communications and targeted content delivery.',
+    budget_range: '$1.5-2M',
+    duration: '5 months'
+})
+CREATE (dept_mkt)-[:HAS_OPPORTUNITY]->(opp_li_pers)
+CREATE (opp_li_pers)-[:IS_INSTANCE_OF]->(bp_personalization)
+CREATE (opp_li_pers)-[:ADDRESSES]->(pp_generic_comm)
+CREATE (opp_li_pers)-[:REQUIRES_ROLE]->(ai)
+CREATE (opp_li_pers)-[:NEEDS_SUBMODULE]->(sm_nba_a)
+CREATE (opp_li_pers)-[:NEEDS_SUBMODULE]->(sm_nba_d)
+CREATE (li)-[:HAS_OPPORTUNITY]->(opp_li_pers);
+
+// **HR Talent Acquisition for Investment Banking**
+MATCH (ib:Sector {name: 'Investment Banking'})
+MATCH (dept_hr:Department {name: 'Human Resources'})
+MATCH (bp_talent:ProjectBlueprint {title: 'AI Talent Acquisition'})
+MATCH (pp_resume_volume:PainPoint {name: 'Overwhelming Resume Volume'})
+MATCH (pp_turnover:PainPoint {name: 'High First-Year Turnover'})
+MATCH (ai:Role {name: 'AI Engineer'})
+MATCH (ds:Role {name: 'Data Scientist'})
+MATCH (sm_hr_a:SubModule {name: 'Resume Parser & Matcher'})
+MATCH (sm_hr_c:SubModule {name: 'Skills Taxonomy Engine'})
+CREATE (opp_ib_talent:ProjectOpportunity {
+    title: 'AI-Powered Investment Banking Recruitment',
+    priority: 'High',
+    business_case: 'Screen 10,000+ applications monthly and identify top talent with 85% accuracy, reducing time-to-hire by 50%.',
+    budget_range: '$2-3M',
+    duration: '6 months'
+})
+CREATE (dept_hr)-[:HAS_OPPORTUNITY]->(opp_ib_talent)
+CREATE (opp_ib_talent)-[:IS_INSTANCE_OF]->(bp_talent)
+CREATE (opp_ib_talent)-[:ADDRESSES]->(pp_resume_volume)
+CREATE (opp_ib_talent)-[:ADDRESSES]->(pp_turnover)
+CREATE (opp_ib_talent)-[:REQUIRES_ROLE]->(ai)
+CREATE (opp_ib_talent)-[:REQUIRES_ROLE]->(ds)
+CREATE (opp_ib_talent)-[:NEEDS_SUBMODULE]->(sm_hr_a)
+CREATE (opp_ib_talent)-[:NEEDS_SUBMODULE]->(sm_hr_c)
+CREATE (ib)-[:HAS_OPPORTUNITY]->(opp_ib_talent);
+
+// **Finance Forecasting for Commercial Banking**
+MATCH (cb:Sector {name: 'Commercial Banking'})
+MATCH (dept_fin:Department {name: 'Finance'})
+MATCH (bp_forecast:ProjectBlueprint {title: 'AI-Powered Forecasting'})
+MATCH (pp_forecast_accuracy:PainPoint {name: 'Inaccurate Revenue Forecasting'})
+MATCH (ds:Role {name: 'Data Scientist'})
+MATCH (mlOps:Role {name: 'MLOps Engineer'})
+MATCH (sm_cr_a:SubModule {name: 'Data Foundation & Integration'})
+MATCH (sm_cr_b:SubModule {name: 'Feature Engineering Module'})
+CREATE (opp_cb_forecast:ProjectOpportunity {
+    title: 'Commercial Lending Revenue Forecasting',
+    priority: 'High',
+    business_case: 'Improve revenue forecast accuracy to within 5% variance using advanced ML models and external economic indicators.',
+    budget_range: '$1-1.5M',
+    duration: '4 months'
+})
+CREATE (dept_fin)-[:HAS_OPPORTUNITY]->(opp_cb_forecast)
+CREATE (opp_cb_forecast)-[:IS_INSTANCE_OF]->(bp_forecast)
+CREATE (opp_cb_forecast)-[:ADDRESSES]->(pp_forecast_accuracy)
+CREATE (opp_cb_forecast)-[:REQUIRES_ROLE]->(ds)
+CREATE (opp_cb_forecast)-[:REQUIRES_ROLE]->(mlOps)
+CREATE (opp_cb_forecast)-[:NEEDS_SUBMODULE]->(sm_cr_a)
+CREATE (opp_cb_forecast)-[:NEEDS_SUBMODULE]->(sm_cr_b)
+CREATE (cb)-[:HAS_OPPORTUNITY]->(opp_cb_forecast);
+
+// **Operations QA Automation for Property Insurance**
+MATCH (pi:Sector {name: 'Property Insurance'})
+MATCH (dept_ops:Department {name: 'Operations'})
+MATCH (bp_qa_auto:ProjectBlueprint {title: 'Automated Quality Assurance'})
+MATCH (pp_qa_sampling:PainPoint {name: 'Limited QA Coverage'})
+MATCH (ai:Role {name: 'AI Engineer'})
+MATCH (sm_cl_c:SubModule {name: 'Claims Triage & Routing'})
+MATCH (sm_cl_d:SubModule {name: 'Assessment Models'})
+CREATE (opp_pi_qa:ProjectOpportunity {
+    title: 'Automated Claims Quality Assurance',
+    priority: 'Medium',
+    business_case: 'Increase QA coverage from 2% to 50% of transactions through automated quality scoring and anomaly detection.',
+    budget_range: '$1.5-2M',
+    duration: '5 months'
+})
+CREATE (dept_ops)-[:HAS_OPPORTUNITY]->(opp_pi_qa)
+CREATE (opp_pi_qa)-[:IS_INSTANCE_OF]->(bp_qa_auto)
+CREATE (opp_pi_qa)-[:ADDRESSES]->(pp_qa_sampling)
+CREATE (opp_pi_qa)-[:REQUIRES_ROLE]->(ai)
+CREATE (opp_pi_qa)-[:NEEDS_SUBMODULE]->(sm_cl_c)
+CREATE (opp_pi_qa)-[:NEEDS_SUBMODULE]->(sm_cl_d)
+CREATE (pi)-[:HAS_OPPORTUNITY]->(opp_pi_qa);
+
+// **IT Predictive Maintenance for Private Banking**
+MATCH (pb:Sector {name: 'Private Banking'})
+MATCH (dept_it:Department {name: 'IT'})
+MATCH (bp_predictive_maint:ProjectBlueprint {title: 'Predictive Maintenance'})
+MATCH (pp_unplanned_downtime:PainPoint {name: 'Unplanned System Downtime'})
+MATCH (ds:Role {name: 'Data Scientist'})
+MATCH (devops:Role {name: 'DevOps Engineer'})
+MATCH (sm_secops_c:SubModule {name: 'Behavioral Anomaly Detection'})
+CREATE (opp_pb_maint:ProjectOpportunity {
+    title: 'Predictive System Health Monitoring',
+    priority: 'High',
+    business_case: 'Prevent 90% of unplanned downtime through predictive analytics on system performance metrics and preemptive maintenance.',
+    budget_range: '$2-2.5M',
+    duration: '6 months'
+})
+CREATE (dept_it)-[:HAS_OPPORTUNITY]->(opp_pb_maint)
+CREATE (opp_pb_maint)-[:IS_INSTANCE_OF]->(bp_predictive_maint)
+CREATE (opp_pb_maint)-[:ADDRESSES]->(pp_unplanned_downtime)
+CREATE (opp_pb_maint)-[:REQUIRES_ROLE]->(ds)
+CREATE (opp_pb_maint)-[:REQUIRES_ROLE]->(devops)
+CREATE (opp_pb_maint)-[:NEEDS_SUBMODULE]->(sm_secops_c)
+CREATE (pb)-[:HAS_OPPORTUNITY]->(opp_pb_maint);
+
+// **Risk Regulatory Intelligence for Health Insurance**
+MATCH (hi:Sector {name: 'Health Insurance'})
+MATCH (dept_risk:Department {name: 'Risk & Compliance'})
+MATCH (bp_reg_intel:ProjectBlueprint {title: 'Regulatory Intelligence Platform'})
+MATCH (pp_reg_tracking:PainPoint {name: 'Manual Regulatory Tracking'})
+MATCH (ai:Role {name: 'AI Engineer'})
+MATCH (sm_cl_a:SubModule {name: 'Claims Intake Portal'})
+CREATE (opp_hi_reg:ProjectOpportunity {
+    title: 'Healthcare Regulatory Compliance Automation',
+    priority: 'High',
+    business_case: 'Automate tracking of 200+ yearly regulatory updates and ensure 99% compliance through intelligent document processing.',
+    budget_range: '$2.5-3M',
+    duration: '7 months'
+})
+CREATE (dept_risk)-[:HAS_OPPORTUNITY]->(opp_hi_reg)
+CREATE (opp_hi_reg)-[:IS_INSTANCE_OF]->(bp_reg_intel)
+CREATE (opp_hi_reg)-[:ADDRESSES]->(pp_reg_tracking)
+CREATE (opp_hi_reg)-[:REQUIRES_ROLE]->(ai)
+CREATE (opp_hi_reg)-[:NEEDS_SUBMODULE]->(sm_cl_a)
+CREATE (hi)-[:HAS_OPPORTUNITY]->(opp_hi_reg);
+
+// =================================================================
+// END OF SCRIPT
+// =================================================================
+
+// Query examples to test the data model:
+// 1. Find all pain points experienced by both sectors and departments:
+// MATCH (s:Sector)-[:EXPERIENCES]->(pp:PainPoint)<-[:EXPERIENCES]-(d:Department)
+// RETURN s.name, d.name, pp.name;
+
+// 2. Find project opportunities that address cross-functional pain points:
+// MATCH (opp:ProjectOpportunity)-[:ADDRESSES]->(pp:PainPoint)
+// MATCH (s:Sector)-[:EXPERIENCES]->(pp)<-[:EXPERIENCES]-(d:Department)
+// RETURN opp.title, pp.name, s.name, d.name;
+
+// 3. Find all opportunities linked to both sectors and departments:
+// MATCH (s:Sector)-[:HAS_OPPORTUNITY]->(opp:ProjectOpportunity)<-[:HAS_OPPORTUNITY]-(d:Department)
+// RETURN s.name, d.name, opp.title, opp.business_case;
