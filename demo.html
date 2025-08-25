@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Project Catalog</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            color: white;
+        }
+        
+        .app-header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        
+        .app-header h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            margin-bottom: 0.5rem;
+        }
+        
+        .app-header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .progress-bar {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 3rem;
+            gap: 2rem;
+        }
+        
+        .step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            opacity: 0.5;
+            transition: all 0.3s ease;
+        }
+        
+        .step.active {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+        
+        .step-number {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            border: 2px solid transparent;
+        }
+        
+        .step.active .step-number {
+            background: rgba(255,255,255,0.9);
+            color: #667eea;
+            border-color: white;
+        }
+        
+        .step-label {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .selection-section {
+            max-width: 1200px;
+            margin: 0 auto 3rem;
+        }
+        
+        .selection-section h2 {
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        
+        .selection-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .selection-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 16px;
+            padding: 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            color: white;
+        }
+        
+        .selection-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.4);
+        }
+        
+        .selection-card.selected {
+            background: rgba(255,255,255,0.2);
+            border-color: #fff;
+            transform: scale(1.02);
+        }
+        
+        .card-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .selection-card h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0;
+        }
+        
+        .find-projects-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border: none;
+            color: white;
+            padding: 1rem 3rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(79, 172, 254, 0.3);
+            display: block;
+            margin: 2rem auto;
+        }
+        
+        .find-projects-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 35px rgba(79, 172, 254, 0.4);
+        }
+        
+        .project-card {
+            background: rgba(255,255,255,0.95);
+            color: #333;
+            border-radius: 16px;
+            padding: 2rem;
+            margin: 1rem 0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .project-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+        
+        .project-header h3 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin: 0;
+            color: #2c3e50;
+            flex: 1;
+            margin-right: 1rem;
+        }
+        
+        .priority-badge {
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            background: #e74c3c;
+        }
+        
+        .business-case {
+            font-size: 1rem;
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+            color: #555;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 3rem;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <h1>AI Project Catalog</h1>
+        <p>Discover AI solutions for Banking & Insurance</p>
+    </header>
+
+    <div class="progress-bar">
+        <div class="step active" id="step1">
+            <span class="step-number">1</span>
+            <span class="step-label">Industries</span>
+        </div>
+        <div class="step" id="step2">
+            <span class="step-number">2</span>
+            <span class="step-label">Sectors</span>
+        </div>
+        <div class="step" id="step3">
+            <span class="step-number">3</span>
+            <span class="step-label">Pain Points</span>
+        </div>
+        <div class="step" id="step4">
+            <span class="step-number">4</span>
+            <span class="step-label">Projects</span>
+        </div>
+    </div>
+
+    <main>
+        <!-- Industry Selection -->
+        <div class="selection-section" id="industrySection">
+            <h2>Select Industries</h2>
+            <div class="selection-grid" id="industryGrid">
+                <div class="selection-card" onclick="selectIndustry('Banking')">
+                    <div class="card-icon">🏦</div>
+                    <h3>Banking</h3>
+                </div>
+                <div class="selection-card" onclick="selectIndustry('Insurance')">
+                    <div class="card-icon">🏦</div>
+                    <h3>Insurance</h3>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sectors Section -->
+        <div class="selection-section hidden" id="sectorsSection">
+            <h2>Select Sectors</h2>
+            <div class="selection-grid" id="sectorsGrid"></div>
+        </div>
+
+        <!-- Pain Points Section -->
+        <div class="selection-section hidden" id="painPointsSection">
+            <h2>Select Pain Points</h2>
+            <div class="selection-grid" id="painPointsGrid"></div>
+            <button class="find-projects-btn hidden" id="findProjectsBtn" onclick="findProjects()">
+                Find AI Projects
+            </button>
+        </div>
+
+        <!-- Projects Section -->
+        <div class="selection-section hidden" id="projectsSection">
+            <h2>Recommended AI Projects</h2>
+            <div id="projectsGrid"></div>
+        </div>
+
+        <!-- Loading -->
+        <div class="loading hidden" id="loading">
+            <div class="spinner"></div>
+            <p>Loading...</p>
+        </div>
+    </main>
+
+    <script>
+        let selectedIndustries = [];
+        let selectedSectors = [];
+        let selectedPainPoints = [];
+
+        function showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        function activateStep(stepNum) {
+            document.querySelectorAll('.step').forEach(step => step.classList.remove('active'));
+            document.getElementById('step' + stepNum).classList.add('active');
+        }
+
+        async function selectIndustry(industry) {
+            const card = event.target.closest('.selection-card');
+            if (selectedIndustries.includes(industry)) {
+                selectedIndustries = selectedIndustries.filter(i => i !== industry);
+                card.classList.remove('selected');
+            } else {
+                selectedIndustries.push(industry);
+                card.classList.add('selected');
+            }
+
+            if (selectedIndustries.length > 0) {
+                await loadSectors();
+            } else {
+                document.getElementById('sectorsSection').classList.add('hidden');
+                document.getElementById('painPointsSection').classList.add('hidden');
+                document.getElementById('projectsSection').classList.add('hidden');
+                activateStep(1);
+            }
+        }
+
+        async function loadSectors() {
+            showLoading();
+            try {
+                const response = await fetch('/api/sectors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ industries: selectedIndustries })
+                });
+                const sectors = await response.json();
+                
+                const grid = document.getElementById('sectorsGrid');
+                grid.innerHTML = sectors.map(sector => `
+                    <div class="selection-card" onclick="selectSector('${sector.name}')">
+                        <div class="card-icon">🏢</div>
+                        <h3>${sector.name}</h3>
+                    </div>
+                `).join('');
+                
+                document.getElementById('sectorsSection').classList.remove('hidden');
+                activateStep(2);
+            } catch (error) {
+                console.error('Error loading sectors:', error);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function selectSector(sector) {
+            const card = event.target.closest('.selection-card');
+            if (selectedSectors.includes(sector)) {
+                selectedSectors = selectedSectors.filter(s => s !== sector);
+                card.classList.remove('selected');
+            } else {
+                selectedSectors.push(sector);
+                card.classList.add('selected');
+            }
+
+            if (selectedSectors.length > 0) {
+                await loadPainPoints();
+            } else {
+                document.getElementById('painPointsSection').classList.add('hidden');
+                document.getElementById('projectsSection').classList.add('hidden');
+                activateStep(2);
+            }
+        }
+
+        async function loadPainPoints() {
+            showLoading();
+            try {
+                const response = await fetch('/api/painpoints', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sectors: selectedSectors })
+                });
+                const painPoints = await response.json();
+                
+                const grid = document.getElementById('painPointsGrid');
+                grid.innerHTML = painPoints.map(pp => `
+                    <div class="selection-card" onclick="selectPainPoint('${pp.name}')">
+                        <div class="card-icon">⚠️</div>
+                        <h3>${pp.name}</h3>
+                    </div>
+                `).join('');
+                
+                document.getElementById('painPointsSection').classList.remove('hidden');
+                activateStep(3);
+            } catch (error) {
+                console.error('Error loading pain points:', error);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function selectPainPoint(painPoint) {
+            const card = event.target.closest('.selection-card');
+            if (selectedPainPoints.includes(painPoint)) {
+                selectedPainPoints = selectedPainPoints.filter(p => p !== painPoint);
+                card.classList.remove('selected');
+            } else {
+                selectedPainPoints.push(painPoint);
+                card.classList.add('selected');
+            }
+
+            const btn = document.getElementById('findProjectsBtn');
+            if (selectedPainPoints.length > 0) {
+                btn.classList.remove('hidden');
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+
+        async function findProjects() {
+            showLoading();
+            try {
+                const response = await fetch('/api/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        industries: selectedIndustries,
+                        sectors: selectedSectors,
+                        painPoints: selectedPainPoints
+                    })
+                });
+                const projects = await response.json();
+                
+                const grid = document.getElementById('projectsGrid');
+                grid.innerHTML = projects.map(project => `
+                    <div class="project-card">
+                        <div class="project-header">
+                            <h3>${project.title}</h3>
+                            <span class="priority-badge" style="background: ${getPriorityColor(project.priority)}">${project.priority}</span>
+                        </div>
+                        <div class="business-case">${project.businessCase}</div>
+                        <div><strong>Sector:</strong> ${project.sector}</div>
+                        <div><strong>Addresses:</strong> ${project.painPoint}</div>
+                        <div><strong>Blueprint:</strong> ${project.blueprintTitle}</div>
+                        ${project.requiredRoles.length > 0 ? `<div><strong>Required Roles:</strong> ${project.requiredRoles.join(', ')}</div>` : ''}
+                    </div>
+                `).join('');
+                
+                document.getElementById('projectsSection').classList.remove('hidden');
+                activateStep(4);
+            } catch (error) {
+                console.error('Error loading projects:', error);
+                alert('Error loading projects. Make sure the Neo4j database is running and initialized.');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function getPriorityColor(priority) {
+            switch (priority) {
+                case 'High': return '#e74c3c';
+                case 'Medium': return '#f39c12';
+                default: return '#95a5a6';
+            }
+        }
+
+        // Test backend connection on page load
+        fetch('/api/health')
+            .then(response => response.json())
+            .then(data => console.log('Backend connected:', data))
+            .catch(error => {
+                console.error('Backend connection failed:', error);
+                alert('Backend server not available. Please ensure the server is running on port 5000.');
+            });
+    </script>
+</body>
+</html>
