@@ -138,10 +138,7 @@ const App: React.FC = () => {
     const departments = currentDepartments || selections.departments;
     const sectors = currentSectors || selections.sectors;
     
-    // Combine pain points from both departments and sectors
-    const allPainPoints = new Set<string>();
-    
-    // Fetch department pain points if any departments selected
+    // If at least one department has been selected, show only pain points connected to selected departments
     if (departments.length > 0) {
       try {
         const response = await fetch('/api/department-painpoints', {
@@ -150,14 +147,12 @@ const App: React.FC = () => {
           body: JSON.stringify({ departments })
         });
         const deptPainPoints = await response.json();
-        deptPainPoints.forEach((pp: any) => allPainPoints.add(JSON.stringify(pp)));
+        setPainPoints(deptPainPoints);
       } catch (error) {
         console.error('Error fetching department pain points:', error);
       }
-    }
-    
-    // Fetch sector pain points if any sectors selected
-    if (sectors.length > 0) {
+    } else if (sectors.length > 0) {
+      // If no departments selected, fall back to sector pain points
       try {
         const response = await fetch('/api/sector-painpoints', {
           method: 'POST',
@@ -165,15 +160,11 @@ const App: React.FC = () => {
           body: JSON.stringify({ sectors })
         });
         const sectorPainPoints = await response.json();
-        sectorPainPoints.forEach((pp: any) => allPainPoints.add(JSON.stringify(pp)));
+        setPainPoints(sectorPainPoints);
       } catch (error) {
         console.error('Error fetching sector pain points:', error);
       }
     }
-    
-    // Convert back to array and remove duplicates
-    const uniquePainPoints = Array.from(allPainPoints).map(pp => JSON.parse(pp));
-    setPainPoints(uniquePainPoints);
   };
 
   const handleSectorSelection = (sectorName: string) => {
@@ -606,7 +597,6 @@ const App: React.FC = () => {
                   onClick={() => handlePainPointSelection(painPoint.name)}
                 >
                   <div className="card-content">
-                    <div className="card-icon">⚠️</div>
                     <h3>{painPoint.name}</h3>
                     {painPoint.impact && (
                       <div className="impact-badge">
