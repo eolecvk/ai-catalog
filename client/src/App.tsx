@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Industry, Sector, Department, PainPoint, Project, SelectionState } from './types';
+import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm } from './types';
 import './App.css';
 
 const App: React.FC = () => {
@@ -22,6 +22,33 @@ const App: React.FC = () => {
     departments: [],
     painPoints: []
   });
+  const [showPainPointModal, setShowPainPointModal] = useState(false);
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [newPainPointForm, setNewPainPointForm] = useState<NewPainPointForm>({
+    name: '',
+    impact: '',
+    departments: [],
+    sectors: []
+  });
+  const [showSectorDropdown, setShowSectorDropdown] = useState(false);
+  const [showDepartmentDropdown, setShowDepartmentDropdown] = useState(false);
+  const [suggestingImpact, setSuggestingImpact] = useState(false);
+  const [suggestingPainPoints, setSuggestingPainPoints] = useState(false);
+  const [showPainPointSuggestions, setShowPainPointSuggestions] = useState(false);
+  const [painPointSuggestions, setPainPointSuggestions] = useState<string[]>([]);
+  const [newProjectForm, setNewProjectForm] = useState<NewProjectForm>({
+    title: '',
+    priority: 'Medium',
+    businessCase: '',
+    blueprintTitle: '',
+    sector: '',
+    department: '',
+    painPoint: '',
+    budgetRange: '',
+    duration: '',
+    requiredRoles: [],
+    subModules: []
+  });
 
   useEffect(() => {
     fetchIndustries();
@@ -29,6 +56,37 @@ const App: React.FC = () => {
     // Load all sectors for both Banking and Insurance
     fetchSectors(['Banking', 'Insurance']);
   }, []);
+
+  // Initialize form with current selections when modal opens
+  useEffect(() => {
+    if (showPainPointModal) {
+      setNewPainPointForm({
+        name: '',
+        impact: '',
+        departments: [...selections.departments],
+        sectors: [...selections.sectors]
+      });
+    }
+  }, [showPainPointModal, selections.departments, selections.sectors]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.multiselect-container')) {
+        setShowSectorDropdown(false);
+        setShowDepartmentDropdown(false);
+      }
+      if (!target.closest('.name-suggestion-container')) {
+        setShowPainPointSuggestions(false);
+      }
+    };
+
+    if (showSectorDropdown || showDepartmentDropdown || showPainPointSuggestions) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showSectorDropdown, showDepartmentDropdown, showPainPointSuggestions]);
 
   const fetchIndustries = async () => {
     try {
@@ -335,6 +393,237 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSectorToggle = (sectorName: string) => {
+    const newSectors = newPainPointForm.sectors.includes(sectorName)
+      ? newPainPointForm.sectors.filter(s => s !== sectorName)
+      : [...newPainPointForm.sectors, sectorName];
+    setNewPainPointForm({...newPainPointForm, sectors: newSectors});
+  };
+
+  const handleDepartmentToggle = (departmentName: string) => {
+    const newDepartments = newPainPointForm.departments.includes(departmentName)
+      ? newPainPointForm.departments.filter(d => d !== departmentName)
+      : [...newPainPointForm.departments, departmentName];
+    setNewPainPointForm({...newPainPointForm, departments: newDepartments});
+  };
+
+  const removeSectorTag = (sectorName: string) => {
+    const newSectors = newPainPointForm.sectors.filter(s => s !== sectorName);
+    setNewPainPointForm({...newPainPointForm, sectors: newSectors});
+  };
+
+  const removeDepartmentTag = (departmentName: string) => {
+    const newDepartments = newPainPointForm.departments.filter(d => d !== departmentName);
+    setNewPainPointForm({...newPainPointForm, departments: newDepartments});
+  };
+
+  const handleSuggestPainPointNames = async () => {
+    if (newPainPointForm.sectors.length === 0 && newPainPointForm.departments.length === 0) {
+      alert('Please select at least one sector or department first');
+      return;
+    }
+    
+    setSuggestingPainPoints(true);
+    
+    try {
+      const response = await fetch('/api/suggest-painpoint-names', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sectors: newPainPointForm.sectors,
+          departments: newPainPointForm.departments
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPainPointSuggestions(data.suggestions);
+        setShowPainPointSuggestions(true);
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || 'Failed to generate suggestions');
+      }
+    } catch (error) {
+      console.error('Error getting pain point suggestions:', error);
+      alert('Failed to generate suggestions');
+    } finally {
+      setSuggestingPainPoints(false);
+    }
+  };
+
+  const handleSelectPainPointSuggestion = (suggestion: string) => {
+    setNewPainPointForm({ ...newPainPointForm, name: suggestion });
+    setShowPainPointSuggestions(false);
+  };
+
+  const handleSuggestImpact = async () => {
+    if (!newPainPointForm.name.trim()) {
+      alert('Please enter a pain point name first');
+      return;
+    }
+    
+    setSuggestingImpact(true);
+    
+    try {
+      const response = await fetch('/api/suggest-impact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          painPointName: newPainPointForm.name,
+          sectors: newPainPointForm.sectors,
+          departments: newPainPointForm.departments
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setNewPainPointForm({
+          ...newPainPointForm, 
+          impact: data.suggestion
+        });
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || 'Failed to generate suggestion');
+      }
+    } catch (error) {
+      console.error('Error getting impact suggestion:', error);
+      alert('Failed to generate suggestion');
+    } finally {
+      setSuggestingImpact(false);
+    }
+  };
+
+  const handleCreatePainPoint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    try {
+      const payload = {
+        ...newPainPointForm,
+        departments: newPainPointForm.departments.length > 0 ? newPainPointForm.departments : undefined,
+        sectors: newPainPointForm.sectors.length > 0 ? newPainPointForm.sectors : undefined
+      };
+      
+      const response = await fetch('/api/painpoints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        const newPainPoint = await response.json();
+        setPainPoints([...painPoints, newPainPoint]);
+        setSelections({...selections, painPoints: [...selections.painPoints, newPainPoint.name]});
+        setShowPainPointModal(false);
+        setNewPainPointForm({ name: '', impact: '', departments: [], sectors: [] });
+        setShowSectorDropdown(false);
+        setShowDepartmentDropdown(false);
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || 'Failed to create pain point');
+      }
+    } catch (error) {
+      console.error('Error creating pain point:', error);
+      alert('Failed to create pain point');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    try {
+      const payload = {
+        ...newProjectForm,
+        sector: selections.sectors.length > 0 ? selections.sectors[0] : undefined,
+        department: selections.departments.length > 0 ? selections.departments[0] : undefined,
+        painPoint: selections.painPoints.length > 0 ? selections.painPoints[0] : newProjectForm.painPoint
+      };
+      
+      const response = await fetch('/api/projects/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        await fetchProjects();
+        setShowProjectModal(false);
+        setNewProjectForm({
+          title: '',
+          priority: 'Medium',
+          businessCase: '',
+          blueprintTitle: '',
+          sector: '',
+          department: '',
+          painPoint: '',
+          budgetRange: '',
+          duration: '',
+          requiredRoles: [],
+          subModules: []
+        });
+      }
+    } catch (error) {
+      console.error('Error creating project:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const addRequiredRole = () => {
+    setNewProjectForm({
+      ...newProjectForm,
+      requiredRoles: [...newProjectForm.requiredRoles, { name: '', specialty: '' }]
+    });
+  };
+  
+  const removeRequiredRole = (index: number) => {
+    setNewProjectForm({
+      ...newProjectForm,
+      requiredRoles: newProjectForm.requiredRoles.filter((_, i) => i !== index)
+    });
+  };
+  
+  const updateRequiredRole = (index: number, field: 'name' | 'specialty', value: string) => {
+    const updatedRoles = [...newProjectForm.requiredRoles];
+    updatedRoles[index] = { ...updatedRoles[index], [field]: value };
+    setNewProjectForm({ ...newProjectForm, requiredRoles: updatedRoles });
+  };
+  
+  const addSubModule = () => {
+    setNewProjectForm({
+      ...newProjectForm,
+      subModules: [...newProjectForm.subModules, '']
+    });
+  };
+  
+  const removeSubModule = (index: number) => {
+    setNewProjectForm({
+      ...newProjectForm,
+      subModules: newProjectForm.subModules.filter((_, i) => i !== index)
+    });
+  };
+  
+  const updateSubModule = (index: number, value: string) => {
+    const updatedSubModules = [...newProjectForm.subModules];
+    updatedSubModules[index] = value;
+    setNewProjectForm({ ...newProjectForm, subModules: updatedSubModules });
+  };
+
+  const getAllSectors = () => {
+    const allSectors: string[] = [];
+    Object.values(sectors).forEach(sectorList => {
+      sectorList.forEach(sector => {
+        if (!allSectors.includes(sector.name)) {
+          allSectors.push(sector.name);
+        }
+      });
+    });
+    return allSectors;
+  };
+
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'High': return '#e74c3c';
@@ -606,6 +895,15 @@ const App: React.FC = () => {
                   </div>
                 </button>
               ))}
+              
+              {/* Add New Pain Point Button */}
+              <button
+                className="add-new-btn"
+                onClick={() => setShowPainPointModal(true)}
+              >
+                <div className="add-icon">+</div>
+                <h3>Add New Pain Point</h3>
+              </button>
             </div>
             
             {selections.painPoints.length > 0 && (
@@ -627,9 +925,17 @@ const App: React.FC = () => {
           <div className="results-section">
             <div className="results-header">
               <h2>Recommended AI Projects ({projects.length})</h2>
-              <button className="reset-btn" onClick={resetSelections}>
-                Start Over
-              </button>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button 
+                  className="modal-btn modal-btn-primary"
+                  onClick={() => setShowProjectModal(true)}
+                >
+                  Add Custom Project
+                </button>
+                <button className="reset-btn" onClick={resetSelections}>
+                  Start Over
+                </button>
+              </div>
             </div>
             
             <div className="projects-grid">
@@ -704,6 +1010,374 @@ const App: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Pain Point Creation Modal */}
+        {showPainPointModal && (
+          <div className="modal-backdrop" onClick={() => setShowPainPointModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Add New Pain Point</h2>
+                <button className="modal-close" onClick={() => setShowPainPointModal(false)}>×</button>
+              </div>
+              
+              <form onSubmit={handleCreatePainPoint}>
+                <div className="form-group">
+                  <label className="form-label">Pain Point Name *</label>
+                  <div className="name-suggestion-container">
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={newPainPointForm.name}
+                      onChange={(e) => setNewPainPointForm({...newPainPointForm, name: e.target.value})}
+                      required
+                      placeholder="e.g., Manual Process Bottlenecks, or click smart suggest"
+                      style={{ paddingRight: '6rem' }}
+                    />
+                    <button
+                      type="button"
+                      className="name-suggestion-btn"
+                      onClick={handleSuggestPainPointNames}
+                      disabled={suggestingPainPoints || (newPainPointForm.sectors.length === 0 && newPainPointForm.departments.length === 0)}
+                      title="Get AI-powered pain point suggestions based on selected sectors and departments"
+                    >
+                      {suggestingPainPoints ? (
+                        <>
+                          <div className="loading-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                          Suggesting...
+                        </>
+                      ) : (
+                        <>
+                          <span className="icon">🎯</span>
+                          Smart Suggest
+                        </>
+                      )}
+                    </button>
+                    
+                    {showPainPointSuggestions && (
+                      <div className="suggestion-dropdown">
+                        <div className="suggestion-dropdown-header">
+                          <span>AI-Addressable Pain Points</span>
+                          <button 
+                            type="button"
+                            className="suggestion-dropdown-close"
+                            onClick={() => setShowPainPointSuggestions(false)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        {painPointSuggestions.map((suggestion, index) => (
+                          <div
+                            key={index}
+                            className="suggestion-item"
+                            onClick={() => handleSelectPainPointSuggestion(suggestion)}
+                          >
+                            {suggestion}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Connect to Sectors</label>
+                  <div className="multiselect-container">
+                    <div 
+                      className={`multiselect-dropdown ${showSectorDropdown ? 'active' : ''}`}
+                      onClick={() => setShowSectorDropdown(!showSectorDropdown)}
+                    >
+                      <div className="multiselect-display">
+                        {newPainPointForm.sectors.length === 0 ? (
+                          <span className="multiselect-placeholder">Select sectors...</span>
+                        ) : (
+                          newPainPointForm.sectors.map(sector => (
+                            <div key={sector} className="multiselect-tag">
+                              <span>{sector}</span>
+                              <button 
+                                type="button"
+                                className="multiselect-tag-remove"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeSectorTag(sector);
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <div className={`multiselect-arrow ${showSectorDropdown ? 'open' : ''}`}>▼</div>
+                    </div>
+                    
+                    {showSectorDropdown && (
+                      <div className="multiselect-options">
+                        {getAllSectors().map(sector => (
+                          <div 
+                            key={sector}
+                            className={`multiselect-option ${newPainPointForm.sectors.includes(sector) ? 'selected' : ''}`}
+                            onClick={() => handleSectorToggle(sector)}
+                          >
+                            <div className="multiselect-checkbox"></div>
+                            <span>{sector}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Connect to Departments</label>
+                  <div className="multiselect-container">
+                    <div 
+                      className={`multiselect-dropdown ${showDepartmentDropdown ? 'active' : ''}`}
+                      onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}
+                    >
+                      <div className="multiselect-display">
+                        {newPainPointForm.departments.length === 0 ? (
+                          <span className="multiselect-placeholder">Select departments...</span>
+                        ) : (
+                          newPainPointForm.departments.map(department => (
+                            <div key={department} className="multiselect-tag">
+                              <span>{department}</span>
+                              <button 
+                                type="button"
+                                className="multiselect-tag-remove"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeDepartmentTag(department);
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <div className={`multiselect-arrow ${showDepartmentDropdown ? 'open' : ''}`}>▼</div>
+                    </div>
+                    
+                    {showDepartmentDropdown && (
+                      <div className="multiselect-options">
+                        {departments.map(department => (
+                          <div 
+                            key={department.name}
+                            className={`multiselect-option ${newPainPointForm.departments.includes(department.name) ? 'selected' : ''}`}
+                            onClick={() => handleDepartmentToggle(department.name)}
+                          >
+                            <div className="multiselect-checkbox"></div>
+                            <span>{department.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Impact Description</label>
+                  <div className="suggestion-container">
+                    <textarea
+                      className="form-textarea"
+                      value={newPainPointForm.impact}
+                      onChange={(e) => setNewPainPointForm({...newPainPointForm, impact: e.target.value})}
+                      placeholder="Describe the business impact of this pain point, or click the smart suggestion button"
+                      style={{ paddingRight: '6rem' }}
+                    />
+                    <button
+                      type="button"
+                      className="suggestion-btn"
+                      onClick={handleSuggestImpact}
+                      disabled={suggestingImpact || !newPainPointForm.name.trim()}
+                      title="Generate AI-powered impact description"
+                    >
+                      {suggestingImpact ? (
+                        <>
+                          <div className="loading-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                          Suggesting...
+                        </>
+                      ) : (
+                        <>
+                          <span className="icon">✨</span>
+                          Smart Suggest
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="modal-actions">
+                  <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowPainPointModal(false)}>
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="modal-btn modal-btn-primary" 
+                    disabled={
+                      loading || 
+                      !newPainPointForm.name ||
+                      (newPainPointForm.departments.length === 0 && newPainPointForm.sectors.length === 0)
+                    }
+                  >
+                    {loading ? 'Creating...' : 'Create Pain Point'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Project Creation Modal */}
+        {showProjectModal && (
+          <div className="modal-backdrop" onClick={() => setShowProjectModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Add Custom Project</h2>
+                <button className="modal-close" onClick={() => setShowProjectModal(false)}>×</button>
+              </div>
+              
+              <form onSubmit={handleCreateProject}>
+                <div className="form-group">
+                  <label className="form-label">Project Title *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.title}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, title: e.target.value})}
+                    required
+                    placeholder="e.g., AI-Powered Customer Service Bot"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Priority</label>
+                  <select
+                    className="form-select"
+                    value={newProjectForm.priority}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, priority: e.target.value as 'High' | 'Medium' | 'Low'})}
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Business Case *</label>
+                  <textarea
+                    className="form-textarea"
+                    value={newProjectForm.businessCase}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, businessCase: e.target.value})}
+                    required
+                    placeholder="Describe the business justification for this project"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Blueprint Title *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.blueprintTitle}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, blueprintTitle: e.target.value})}
+                    required
+                    placeholder="e.g., Conversational AI Platform"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Budget Range</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.budgetRange}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, budgetRange: e.target.value})}
+                    placeholder="e.g., $100K - $500K"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Duration</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.duration}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, duration: e.target.value})}
+                    placeholder="e.g., 6-12 months"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Required Roles</label>
+                  <div className="dynamic-list">
+                    {newProjectForm.requiredRoles.map((role, index) => (
+                      <div key={index} className="dynamic-list-item">
+                        <input
+                          type="text"
+                          placeholder="Role name"
+                          value={role.name}
+                          onChange={(e) => updateRequiredRole(index, 'name', e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Specialty (optional)"
+                          value={role.specialty || ''}
+                          onChange={(e) => updateRequiredRole(index, 'specialty', e.target.value)}
+                        />
+                        <button type="button" className="remove-item-btn" onClick={() => removeRequiredRole(index)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" className="add-item-btn" onClick={addRequiredRole}>
+                      Add Role
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Sub-modules</label>
+                  <div className="dynamic-list">
+                    {newProjectForm.subModules.map((module, index) => (
+                      <div key={index} className="dynamic-list-item">
+                        <input
+                          type="text"
+                          placeholder="Module name"
+                          value={module}
+                          onChange={(e) => updateSubModule(index, e.target.value)}
+                        />
+                        <button type="button" className="remove-item-btn" onClick={() => removeSubModule(index)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" className="add-item-btn" onClick={addSubModule}>
+                      Add Module
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="modal-actions">
+                  <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowProjectModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="modal-btn modal-btn-primary" disabled={loading || !newProjectForm.title || !newProjectForm.businessCase || !newProjectForm.blueprintTitle}>
+                    {loading ? 'Creating...' : 'Create Project'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

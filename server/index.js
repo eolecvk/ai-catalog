@@ -149,6 +149,482 @@ app.post('/api/department-painpoints', async (req, res) => {
   }
 });
 
+// Create new pain point
+app.post('/api/painpoints', async (req, res) => {
+  const session = driver.session();
+  const { name, impact, departments, sectors } = req.body;
+  
+  try {
+    // Validate that at least one department or sector is provided
+    if ((!departments || departments.length === 0) && (!sectors || sectors.length === 0)) {
+      return res.status(400).json({ 
+        error: 'Pain point must be connected to at least one department or sector' 
+      });
+    }
+    
+    // Create the pain point
+    const createQuery = `
+      CREATE (pp:PainPoint {name: $name, impact: $impact})
+      RETURN pp.name as name, pp.impact as impact
+    `;
+    const createResult = await session.run(createQuery, { name, impact });
+    
+    // Link to departments if provided
+    if (departments && departments.length > 0) {
+      const deptLinkQuery = `
+        MATCH (pp:PainPoint {name: $name})
+        MATCH (d:Department) WHERE d.name IN $departments
+        CREATE (d)-[:EXPERIENCES]->(pp)
+      `;
+      await session.run(deptLinkQuery, { name, departments });
+    }
+    
+    // Link to sectors if provided
+    if (sectors && sectors.length > 0) {
+      const sectorLinkQuery = `
+        MATCH (pp:PainPoint {name: $name})
+        MATCH (s:Sector) WHERE s.name IN $sectors
+        CREATE (s)-[:EXPERIENCES]->(pp)
+      `;
+      await session.run(sectorLinkQuery, { name, sectors });
+    }
+    
+    const painPoint = createResult.records[0];
+    res.json({
+      name: painPoint.get('name'),
+      impact: painPoint.get('impact')
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Create new project
+app.post('/api/projects/create', async (req, res) => {
+  const session = driver.session();
+  const { 
+    title, 
+    priority, 
+    businessCase, 
+    blueprintTitle, 
+    sector, 
+    department, 
+    painPoint, 
+    budgetRange, 
+    duration, 
+    requiredRoles, 
+    subModules 
+  } = req.body;
+  
+  try {
+    // Create the project opportunity
+    const createProjectQuery = `
+      CREATE (po:ProjectOpportunity {
+        title: $title,
+        priority: $priority,
+        business_case: $businessCase,
+        budget_range: $budgetRange,
+        duration: $duration
+      })
+      RETURN po
+    `;
+    await session.run(createProjectQuery, { 
+      title, 
+      priority, 
+      businessCase, 
+      budgetRange, 
+      duration 
+    });
+    
+    // Create or link to blueprint
+    const blueprintQuery = `
+      MATCH (po:ProjectOpportunity {title: $title})
+      MERGE (pb:ProjectBlueprint {title: $blueprintTitle})
+      CREATE (po)-[:IS_INSTANCE_OF]->(pb)
+    `;
+    await session.run(blueprintQuery, { title, blueprintTitle });
+    
+    // Link to pain point
+    const painPointQuery = `
+      MATCH (po:ProjectOpportunity {title: $title})
+      MATCH (pp:PainPoint {name: $painPoint})
+      CREATE (po)-[:ADDRESSES]->(pp)
+    `;
+    await session.run(painPointQuery, { title, painPoint });
+    
+    // Link to department if provided
+    if (department) {
+      const deptQuery = `
+        MATCH (po:ProjectOpportunity {title: $title})
+        MATCH (d:Department {name: $department})
+        CREATE (d)-[:HAS_OPPORTUNITY]->(po)
+      `;
+      await session.run(deptQuery, { title, department });
+    }
+    
+    // Link to sector if provided
+    if (sector) {
+      const sectorQuery = `
+        MATCH (po:ProjectOpportunity {title: $title})
+        MATCH (s:Sector {name: $sector})
+        CREATE (s)-[:HAS_OPPORTUNITY]->(po)
+      `;
+      await session.run(sectorQuery, { title, sector });
+    }
+    
+    // Add required roles
+    if (requiredRoles && requiredRoles.length > 0) {
+      for (const role of requiredRoles) {
+        const roleQuery = `
+          MATCH (po:ProjectOpportunity {title: $title})
+          MERGE (r:Role {name: $roleName})
+          CREATE (po)-[:REQUIRES_ROLE {specialty: $specialty}]->(r)
+        `;
+        await session.run(roleQuery, { 
+          title, 
+          roleName: role.name, 
+          specialty: role.specialty || null 
+        });
+      }
+    }
+    
+    // Add sub-modules
+    if (subModules && subModules.length > 0) {
+      for (const subModule of subModules) {
+        const moduleQuery = `
+          MATCH (po:ProjectOpportunity {title: $title})
+          MERGE (sm:SubModule {name: $subModule})
+          CREATE (po)-[:NEEDS_SUBMODULE]->(sm)
+        `;
+        await session.run(moduleQuery, { title, subModule });
+      }
+    }
+    
+    res.json({ success: true, message: 'Project created successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Generate pain point name suggestions using LLM
+app.post('/api/suggest-painpoint-names', async (req, res) => {
+  const { sectors, departments } = req.body;
+  
+  try {
+    if ((!sectors || sectors.length === 0) && (!departments || departments.length === 0)) {
+      return res.status(400).json({ error: 'At least one sector or department is required' });
+    }
+    
+    // Generate AI-addressable pain point suggestions
+    const suggestions = generateAIPainPointSuggestions(sectors, departments);
+    
+    res.json({ suggestions });
+  } catch (error) {
+    console.error('Error generating pain point name suggestions:', error);
+    res.status(500).json({ error: 'Failed to generate suggestions' });
+  }
+});
+
+// Function to generate AI-addressable pain point suggestions
+function generateAIPainPointSuggestions(sectors, departments) {
+  // AI-addressable pain points by sector
+  const sectorPainPoints = {
+    'Retail Banking': [
+      'Slow Loan Approval Process',
+      'Manual Account Opening Procedures',
+      'Inconsistent Credit Risk Assessment',
+      'Customer Onboarding Delays',
+      'Transaction Monitoring False Positives',
+      'Branch Wait Time Optimization',
+      'Cross-Selling Opportunity Identification',
+      'Automated Financial Advisory Gaps'
+    ],
+    'Commercial Banking': [
+      'Complex Trade Finance Documentation',
+      'Manual Cash Management Reporting',
+      'Corporate Credit Analysis Inefficiencies',
+      'Treasury Operations Automation Gaps',
+      'Relationship Manager Workload Imbalance',
+      'Commercial Loan Processing Delays',
+      'Regulatory Reporting Bottlenecks'
+    ],
+    'Investment Banking': [
+      'Market Research Data Consolidation',
+      'Deal Structuring Analysis Delays',
+      'Regulatory Filing Complexity',
+      'Client Portfolio Risk Assessment',
+      'Trading Algorithm Optimization',
+      'Compliance Monitoring Gaps',
+      'Due Diligence Process Inefficiencies'
+    ],
+    'Insurance': [
+      'Claims Processing Bottlenecks',
+      'Underwriting Decision Delays',
+      'Policy Renewal Automation Gaps',
+      'Fraud Detection Inefficiencies',
+      'Customer Service Response Times',
+      'Risk Assessment Inconsistencies',
+      'Premium Calculation Complexities'
+    ],
+    'Life Insurance': [
+      'Medical Underwriting Delays',
+      'Policy Administration Inefficiencies',
+      'Claims Investigation Bottlenecks',
+      'Customer Health Risk Assessment',
+      'Actuarial Analysis Automation Gaps',
+      'Policy Recommendation Engine Needs'
+    ],
+    'Property & Casualty': [
+      'Property Valuation Inconsistencies',
+      'Catastrophe Modeling Limitations',
+      'Claims Adjuster Resource Allocation',
+      'Premium Pricing Optimization',
+      'Risk Exposure Assessment Gaps',
+      'Policy Bundling Opportunities'
+    ]
+  };
+
+  // AI-addressable pain points by department
+  const departmentPainPoints = {
+    'Operations': [
+      'Manual Process Automation Opportunities',
+      'Workflow Optimization Needs',
+      'Resource Allocation Inefficiencies',
+      'Quality Control Inconsistencies',
+      'Performance Monitoring Gaps',
+      'Process Standardization Challenges'
+    ],
+    'Customer Service': [
+      'Call Center Wait Time Issues',
+      'Customer Query Resolution Delays',
+      'Omnichannel Experience Gaps',
+      'Self-Service Option Limitations',
+      'Agent Productivity Optimization',
+      'Customer Satisfaction Prediction'
+    ],
+    'Risk Management': [
+      'Real-time Risk Monitoring Gaps',
+      'Regulatory Compliance Automation',
+      'Market Risk Assessment Delays',
+      'Credit Risk Scoring Inefficiencies',
+      'Operational Risk Identification',
+      'Stress Testing Automation Needs'
+    ],
+    'IT': [
+      'Legacy System Integration Challenges',
+      'Data Quality Management Issues',
+      'Cybersecurity Threat Detection',
+      'System Performance Optimization',
+      'Automated Testing Gaps',
+      'Cloud Migration Complexities'
+    ],
+    'Finance': [
+      'Financial Reporting Automation Gaps',
+      'Budget Forecasting Inaccuracies',
+      'Expense Management Inefficiencies',
+      'Reconciliation Process Delays',
+      'Cash Flow Prediction Challenges',
+      'Cost Allocation Optimization'
+    ],
+    'Marketing': [
+      'Customer Segmentation Inefficiencies',
+      'Campaign Effectiveness Measurement',
+      'Lead Scoring Optimization',
+      'Personalization Engine Gaps',
+      'Market Sentiment Analysis Needs',
+      'Attribution Modeling Challenges'
+    ],
+    'Sales': [
+      'Lead Qualification Inefficiencies',
+      'Sales Pipeline Optimization',
+      'Customer Churn Prediction Gaps',
+      'Cross-Selling Opportunity Identification',
+      'Sales Performance Analytics',
+      'Pricing Strategy Optimization'
+    ],
+    'Human Resources': [
+      'Resume Screening Automation Gaps',
+      'Employee Performance Prediction',
+      'Talent Retention Analysis Needs',
+      'Skills Gap Identification',
+      'Workforce Planning Optimization',
+      'Employee Satisfaction Monitoring'
+    ],
+    'Compliance': [
+      'Regulatory Change Monitoring',
+      'Automated Compliance Reporting',
+      'Risk Assessment Documentation',
+      'Audit Trail Automation',
+      'Policy Adherence Monitoring',
+      'Regulatory Filing Optimization'
+    ],
+    'Legal': [
+      'Contract Analysis Automation',
+      'Legal Research Inefficiencies',
+      'Document Review Bottlenecks',
+      'Litigation Risk Assessment',
+      'Regulatory Interpretation Gaps',
+      'Legal Precedent Analysis Needs'
+    ]
+  };
+
+  // Collect relevant suggestions
+  let allSuggestions = new Set();
+  
+  // Add sector-specific suggestions
+  if (sectors && sectors.length > 0) {
+    sectors.forEach(sector => {
+      if (sectorPainPoints[sector]) {
+        sectorPainPoints[sector].forEach(painPoint => allSuggestions.add(painPoint));
+      }
+    });
+  }
+  
+  // Add department-specific suggestions
+  if (departments && departments.length > 0) {
+    departments.forEach(department => {
+      if (departmentPainPoints[department]) {
+        departmentPainPoints[department].forEach(painPoint => allSuggestions.add(painPoint));
+      }
+    });
+  }
+  
+  // Convert to array and limit to top 8 suggestions
+  let suggestions = Array.from(allSuggestions);
+  
+  // If we have too many, prioritize based on AI-addressability and business impact
+  if (suggestions.length > 8) {
+    // Prioritize high-impact, AI-addressable pain points
+    const highPriority = suggestions.filter(s => 
+      s.includes('Automation') || s.includes('Prediction') || s.includes('Optimization') ||
+      s.includes('Analysis') || s.includes('Detection') || s.includes('Processing') ||
+      s.includes('Monitoring') || s.includes('Assessment')
+    );
+    
+    suggestions = highPriority.slice(0, 8);
+  }
+  
+  // If no specific matches, provide generic AI-addressable suggestions
+  if (suggestions.length === 0) {
+    suggestions = [
+      'Manual Data Processing Inefficiencies',
+      'Customer Service Response Time Issues',
+      'Risk Assessment Automation Gaps',
+      'Predictive Analytics Implementation Needs',
+      'Process Optimization Opportunities',
+      'Decision Support System Limitations',
+      'Pattern Recognition Challenges',
+      'Automated Compliance Monitoring Gaps'
+    ];
+  }
+  
+  return suggestions.slice(0, 8); // Return max 8 suggestions
+}
+
+// Generate impact description suggestion using LLM
+app.post('/api/suggest-impact', async (req, res) => {
+  const { painPointName, sectors, departments } = req.body;
+  
+  try {
+    if (!painPointName) {
+      return res.status(400).json({ error: 'Pain point name is required' });
+    }
+    
+    // Build context for the LLM prompt
+    let contextInfo = '';
+    if (sectors && sectors.length > 0) {
+      contextInfo += `Sectors: ${sectors.join(', ')}. `;
+    }
+    if (departments && departments.length > 0) {
+      contextInfo += `Departments: ${departments.join(', ')}. `;
+    }
+    
+    // Create a detailed prompt for impact description
+    const prompt = `You are a business analyst expert. Generate a concise, professional impact description for the following pain point in banking/insurance:
+
+Pain Point: "${painPointName}"
+${contextInfo}
+
+Requirements:
+- Write a 1-2 sentence impact description
+- Focus on quantifiable business impact (cost, time, efficiency, risk)
+- Use professional business language
+- Be specific to banking/insurance industry
+- Include potential metrics where relevant (e.g., "increases processing time by 40%", "$2M annual cost")
+
+Impact Description:`;
+
+    // For now, we'll create a mock response. In a real implementation, 
+    // you would integrate with OpenAI API, Anthropic Claude, or another LLM service
+    const suggestion = generateMockImpactSuggestion(painPointName, sectors, departments);
+    
+    res.json({ suggestion });
+  } catch (error) {
+    console.error('Error generating impact suggestion:', error);
+    res.status(500).json({ error: 'Failed to generate suggestion' });
+  }
+});
+
+// Mock function for impact suggestion - replace with actual LLM API call
+function generateMockImpactSuggestion(painPointName, sectors, departments) {
+  const suggestions = {
+    // Manual process related
+    'Manual Process Bottlenecks': 'Increases operational costs by 35% and extends processing time from 2 hours to 8 hours per transaction.',
+    'Manual Invoice Processing': 'Requires 15 FTEs to process 50,000 invoices monthly, costing $1.8M annually in labor.',
+    'Manual Data Entry': 'Introduces 12% error rate and requires 40+ hours weekly for data validation and correction.',
+    
+    // Risk and compliance
+    'Regulatory Compliance Gaps': 'Exposes organization to $500K+ in potential fines and increases audit preparation time by 200%.',
+    'Fraud Detection Delays': 'Results in $2.3M annual losses due to delayed fraud identification and response times.',
+    'Risk Assessment Inefficiencies': 'Extends loan approval process by 5-7 days, impacting customer satisfaction and competitive advantage.',
+    
+    // Customer service
+    'Long Customer Wait Times': 'Average handle time of 12 minutes reduces customer satisfaction by 25% and increases churn risk.',
+    'Limited Customer Insights': 'Prevents effective cross-selling, resulting in 70% missed revenue expansion opportunities.',
+    'Inconsistent Service Quality': 'Creates 15% variance in service delivery, impacting customer retention and brand reputation.',
+    
+    // Technology and systems
+    'Legacy System Limitations': 'Requires 3x more maintenance effort and prevents integration with modern digital channels.',
+    'Data Silos': 'Prevents unified customer view, reducing marketing campaign effectiveness by 45%.',
+    'System Downtime': 'Each hour of downtime costs $150K in lost transactions and damages customer trust.'
+  };
+  
+  // Try to find exact match first
+  if (suggestions[painPointName]) {
+    return suggestions[painPointName];
+  }
+  
+  // Generate contextual suggestion based on keywords
+  const lowerPainPoint = painPointName.toLowerCase();
+  
+  if (lowerPainPoint.includes('manual') || lowerPainPoint.includes('process')) {
+    return `Increases operational overhead by 30-40% and extends processing time significantly, impacting ${departments?.join(' and ') || 'operational'} efficiency.`;
+  }
+  
+  if (lowerPainPoint.includes('fraud') || lowerPainPoint.includes('risk')) {
+    return `Exposes organization to financial losses estimated at $1-3M annually and increases regulatory compliance risk.`;
+  }
+  
+  if (lowerPainPoint.includes('customer') || lowerPainPoint.includes('service')) {
+    return `Reduces customer satisfaction scores by 20-30% and increases customer acquisition costs due to retention challenges.`;
+  }
+  
+  if (lowerPainPoint.includes('data') || lowerPainPoint.includes('system')) {
+    return `Creates operational inefficiencies costing $500K+ annually and prevents data-driven decision making capabilities.`;
+  }
+  
+  if (lowerPainPoint.includes('compliance') || lowerPainPoint.includes('regulatory')) {
+    return `Increases regulatory risk exposure and requires 2x more resources for audit preparation and compliance reporting.`;
+  }
+  
+  // Default generic suggestion
+  return `Significantly impacts operational efficiency and increases costs, requiring immediate attention to maintain competitive advantage in ${sectors?.join(' and ') || 'the financial services'} sector.`;
+}
+
 // Get project opportunities based on selections
 app.post('/api/projects', async (req, res) => {
   const session = driver.session();

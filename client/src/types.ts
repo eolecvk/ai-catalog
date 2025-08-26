@@ -41,3 +41,24 @@ export interface SelectionState {
   departments: string[];
   painPoints: string[];
 }
+
+export interface NewPainPointForm {
+  name: string;
+  impact: string;
+  departments: string[];
+  sectors: string[];
+}
+
+export interface NewProjectForm {
+  title: string;
+  priority: 'High' | 'Medium' | 'Low';
+  businessCase: string;
+  blueprintTitle: string;
+  sector?: string;
+  department?: string;
+  painPoint: string;
+  budgetRange?: string;
+  duration?: string;
+  requiredRoles: RequiredRole[];
+  subModules: string[];
+}
