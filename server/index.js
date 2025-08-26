@@ -17,6 +17,43 @@ const driver = neo4j.driver(
   )
 );
 
+// Graph versioning system
+const GRAPH_VERSIONS = {
+  BASE: 'base',
+  ADMIN_DRAFT: 'admin_draft'
+};
+
+// Helper function to get versioned label
+function getVersionedLabel(baseLabel, version = GRAPH_VERSIONS.BASE) {
+  if (version === GRAPH_VERSIONS.BASE) return baseLabel;
+  return `${baseLabel}_${version}`;
+}
+
+// Helper function to get version-specific queries
+function getVersionedQuery(query, version = GRAPH_VERSIONS.BASE) {
+  if (version === GRAPH_VERSIONS.BASE) return query;
+  
+  // Replace node labels with versioned ones
+  const labelMap = {
+    'Industry': getVersionedLabel('Industry', version),
+    'Sector': getVersionedLabel('Sector', version),
+    'Department': getVersionedLabel('Department', version),
+    'PainPoint': getVersionedLabel('PainPoint', version),
+    'ProjectOpportunity': getVersionedLabel('ProjectOpportunity', version),
+    'ProjectBlueprint': getVersionedLabel('ProjectBlueprint', version),
+    'Role': getVersionedLabel('Role', version),
+    'SubModule': getVersionedLabel('SubModule', version)
+  };
+  
+  let versionedQuery = query;
+  Object.entries(labelMap).forEach(([original, versioned]) => {
+    const regex = new RegExp(`\\b${original}\\b`, 'g');
+    versionedQuery = versionedQuery.replace(regex, versioned);
+  });
+  
+  return versionedQuery;
+}
+
 // Test database connection
 app.get('/api/health', async (req, res) => {
   const session = driver.session();
@@ -811,6 +848,452 @@ app.post('/api/init-database', async (req, res) => {
     res.json({ message: 'Database initialized successfully' });
   } catch (error) {
     console.error('Database initialization error:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// =====================
+// GRAPH VERSION MANAGEMENT
+// =====================
+
+// Get available graph versions
+app.get('/api/admin/versions', async (req, res) => {
+  const session = driver.session();
+  
+  try {
+    // Check which versions exist by looking for versioned nodes
+    const versions = [GRAPH_VERSIONS.BASE];
+    
+    // Check if admin_draft version exists
+    const draftQuery = 'MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_admin_draft") RETURN count(n) as count';
+    const draftResult = await session.run(draftQuery);
+    const draftCount = draftResult.records[0].get('count').toNumber();
+    
+    if (draftCount > 0) {
+      versions.push(GRAPH_VERSIONS.ADMIN_DRAFT);
+    }
+    
+    res.json(versions);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Create a new admin draft version by copying base graph
+app.post('/api/admin/versions/create-draft', async (req, res) => {
+  const session = driver.session();
+  
+  try {
+    // First, delete any existing draft
+    await session.run('MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_admin_draft") DETACH DELETE n');
+    
+    // Copy all base nodes to draft
+    const nodeTypes = ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'SubModule'];
+    
+    for (const nodeType of nodeTypes) {
+      const copyNodesQuery = `
+        MATCH (n:${nodeType})
+        CREATE (copy:${getVersionedLabel(nodeType, GRAPH_VERSIONS.ADMIN_DRAFT)})
+        SET copy = properties(n)
+        WITH n, copy
+        SET copy.original_id = id(n)
+      `;
+      await session.run(copyNodesQuery);
+    }
+    
+    // Copy relationships
+    const copyRelationshipsQuery = `
+      MATCH (n)-[r]->(m)
+      WHERE NOT any(label in labels(n) WHERE label ENDS WITH "_admin_draft")
+      AND NOT any(label in labels(m) WHERE label ENDS WITH "_admin_draft")
+      WITH n, r, m, type(r) as relType, properties(r) as relProps
+      MATCH (n_copy), (m_copy)
+      WHERE n_copy.original_id = id(n) AND m_copy.original_id = id(m)
+      AND any(label in labels(n_copy) WHERE label ENDS WITH "_admin_draft")
+      AND any(label in labels(m_copy) WHERE label ENDS WITH "_admin_draft")
+      CALL apoc.create.relationship(n_copy, relType, relProps, m_copy) YIELD rel
+      RETURN count(rel)
+    `;
+    
+    try {
+      await session.run(copyRelationshipsQuery);
+    } catch (error) {
+      // Fallback method without APOC
+      console.warn('APOC not available, using basic relationship copying');
+      
+      // Copy common relationships manually
+      const relationshipQueries = [
+        'MATCH (i:Industry)-[r:HAS_SECTOR]->(s:Sector) MATCH (i_copy), (s_copy) WHERE i_copy.original_id = id(i) AND s_copy.original_id = id(s) AND any(label in labels(i_copy) WHERE label ENDS WITH "_admin_draft") AND any(label in labels(s_copy) WHERE label ENDS WITH "_admin_draft") CREATE (i_copy)-[:HAS_SECTOR]->(s_copy)',
+        'MATCH (s:Sector)-[r:EXPERIENCES]->(pp:PainPoint) MATCH (s_copy), (pp_copy) WHERE s_copy.original_id = id(s) AND pp_copy.original_id = id(pp) AND any(label in labels(s_copy) WHERE label ENDS WITH "_admin_draft") AND any(label in labels(pp_copy) WHERE label ENDS WITH "_admin_draft") CREATE (s_copy)-[:EXPERIENCES]->(pp_copy)',
+        'MATCH (d:Department)-[r:EXPERIENCES]->(pp:PainPoint) MATCH (d_copy), (pp_copy) WHERE d_copy.original_id = id(d) AND pp_copy.original_id = id(pp) AND any(label in labels(d_copy) WHERE label ENDS WITH "_admin_draft") AND any(label in labels(pp_copy) WHERE label ENDS WITH "_admin_draft") CREATE (d_copy)-[:EXPERIENCES]->(pp_copy)'
+      ];
+      
+      for (const relQuery of relationshipQueries) {
+        try {
+          await session.run(relQuery);
+        } catch (relError) {
+          console.warn('Error copying relationship:', relError.message);
+        }
+      }
+    }
+    
+    res.json({ message: 'Admin draft version created successfully' });
+  } catch (error) {
+    console.error('Error creating draft version:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Delete admin draft version (reset to base)
+app.delete('/api/admin/versions/draft', async (req, res) => {
+  const session = driver.session();
+  
+  try {
+    const query = 'MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_admin_draft") DETACH DELETE n';
+    await session.run(query);
+    
+    res.json({ message: 'Admin draft version deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Promote admin draft to base (make changes permanent)
+app.post('/api/admin/versions/promote-draft', async (req, res) => {
+  const session = driver.session();
+  
+  try {
+    // This is a complex operation - for now, we'll just return an error
+    // In a production system, this would involve careful migration of changes
+    res.status(501).json({ error: 'Draft promotion not implemented yet - this would replace base graph with draft changes' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// =====================
+// ADMIN API ENDPOINTS
+// =====================
+
+// Get all nodes of a specific type
+app.get('/api/admin/nodes/:type', async (req, res) => {
+  const session = driver.session();
+  const { type } = req.params;
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  try {
+    let baseQuery = '';
+    
+    switch (type.toLowerCase()) {
+      case 'industry':
+      case 'industries':
+        baseQuery = 'MATCH (n:Industry) RETURN n ORDER BY n.name';
+        break;
+      case 'sector':
+      case 'sectors':
+        baseQuery = 'MATCH (n:Sector) RETURN n, [(n)<-[:HAS_SECTOR]-(i:Industry) | i.name] as industries ORDER BY n.name';
+        break;
+      case 'department':
+      case 'departments':
+        baseQuery = 'MATCH (n:Department) RETURN n ORDER BY n.name';
+        break;
+      case 'painpoint':
+      case 'painpoints':
+        baseQuery = 'MATCH (n:PainPoint) RETURN n ORDER BY n.name';
+        break;
+      case 'project':
+      case 'projects':
+        baseQuery = 'MATCH (n:ProjectOpportunity) RETURN n ORDER BY n.title';
+        break;
+      case 'blueprint':
+      case 'blueprints':
+        baseQuery = 'MATCH (n:ProjectBlueprint) RETURN n ORDER BY n.title';
+        break;
+      case 'role':
+      case 'roles':
+        baseQuery = 'MATCH (n:Role) RETURN n ORDER BY n.name';
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid node type' });
+    }
+    
+    const query = getVersionedQuery(baseQuery, version);
+    const result = await session.run(query);
+    const nodes = result.records.map(record => {
+      const node = record.get('n');
+      const nodeData = {
+        id: node.identity.toString(),
+        labels: node.labels,
+        properties: node.properties,
+        version: version
+      };
+      
+      // Add additional info for sectors
+      if (type.toLowerCase() === 'sector' || type.toLowerCase() === 'sectors') {
+        nodeData.industries = record.get('industries') || [];
+      }
+      
+      return nodeData;
+    });
+    
+    res.json(nodes);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Get graph statistics
+app.get('/api/admin/stats', async (req, res) => {
+  const session = driver.session();
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  try {
+    const stats = { version };
+    
+    // Count nodes by type
+    const nodeCountQueries = [
+      { type: 'Industry', query: 'MATCH (n:Industry) RETURN count(n) as count' },
+      { type: 'Sector', query: 'MATCH (n:Sector) RETURN count(n) as count' },
+      { type: 'Department', query: 'MATCH (n:Department) RETURN count(n) as count' },
+      { type: 'PainPoint', query: 'MATCH (n:PainPoint) RETURN count(n) as count' },
+      { type: 'ProjectOpportunity', query: 'MATCH (n:ProjectOpportunity) RETURN count(n) as count' },
+      { type: 'ProjectBlueprint', query: 'MATCH (n:ProjectBlueprint) RETURN count(n) as count' },
+      { type: 'Role', query: 'MATCH (n:Role) RETURN count(n) as count' },
+      { type: 'SubModule', query: 'MATCH (n:SubModule) RETURN count(n) as count' }
+    ];
+    
+    for (const { type, query } of nodeCountQueries) {
+      const versionedQuery = getVersionedQuery(query, version);
+      const result = await session.run(versionedQuery);
+      stats[type] = result.records[0].get('count').toNumber();
+    }
+    
+    // Count relationships for this version
+    let relationshipQuery = 'MATCH ()-[r]->() RETURN count(r) as count';
+    if (version !== GRAPH_VERSIONS.BASE) {
+      relationshipQuery = `MATCH (n)-[r]->(m) WHERE any(label in labels(n) WHERE label ENDS WITH "_${version}") AND any(label in labels(m) WHERE label ENDS WITH "_${version}") RETURN count(r) as count`;
+    }
+    const relResult = await session.run(relationshipQuery);
+    stats.TotalRelationships = relResult.records[0].get('count').toNumber();
+    
+    // Find orphaned nodes for this version
+    let orphanQuery = 'MATCH (n) WHERE NOT (n)--() RETURN count(n) as count';
+    if (version !== GRAPH_VERSIONS.BASE) {
+      orphanQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${version}") AND NOT (n)--() RETURN count(n) as count`;
+    }
+    const orphanResult = await session.run(orphanQuery);
+    stats.OrphanedNodes = orphanResult.records[0].get('count').toNumber();
+    
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Create a new node
+app.post('/api/admin/nodes/:type', async (req, res) => {
+  const session = driver.session();
+  const { type } = req.params;
+  const nodeData = req.body;
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  // Only allow creation in admin_draft version for safety
+  if (version === GRAPH_VERSIONS.BASE) {
+    return res.status(403).json({ error: 'Cannot modify base graph directly. Create a draft version first.' });
+  }
+  
+  try {
+    let baseQuery = '';
+    let params = {};
+    
+    switch (type.toLowerCase()) {
+      case 'industry':
+        baseQuery = 'CREATE (n:Industry {name: $name}) RETURN n';
+        params = { name: nodeData.name };
+        break;
+      case 'sector':
+        baseQuery = 'CREATE (n:Sector {name: $name}) RETURN n';
+        params = { name: nodeData.name };
+        break;
+      case 'department':
+        baseQuery = 'CREATE (n:Department {name: $name}) RETURN n';
+        params = { name: nodeData.name };
+        break;
+      case 'painpoint':
+        baseQuery = 'CREATE (n:PainPoint {name: $name, impact: $impact}) RETURN n';
+        params = { name: nodeData.name, impact: nodeData.impact || '' };
+        break;
+      default:
+        return res.status(400).json({ error: 'Node type not supported for creation' });
+    }
+    
+    const query = getVersionedQuery(baseQuery, version);
+    const result = await session.run(query, params);
+    const createdNode = result.records[0].get('n');
+    
+    res.json({
+      id: createdNode.identity.toString(),
+      labels: createdNode.labels,
+      properties: createdNode.properties,
+      version: version
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Update a node
+app.put('/api/admin/nodes/:type/:id', async (req, res) => {
+  const session = driver.session();
+  const { type, id } = req.params;
+  const nodeData = req.body;
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  // Only allow updates in admin_draft version for safety
+  if (version === GRAPH_VERSIONS.BASE) {
+    return res.status(403).json({ error: 'Cannot modify base graph directly. Create a draft version first.' });
+  }
+  
+  try {
+    let baseQuery = '';
+    let params = { id: parseInt(id) };
+    
+    switch (type.toLowerCase()) {
+      case 'industry':
+        baseQuery = 'MATCH (n:Industry) WHERE ID(n) = $id SET n.name = $name RETURN n';
+        params.name = nodeData.name;
+        break;
+      case 'sector':
+        baseQuery = 'MATCH (n:Sector) WHERE ID(n) = $id SET n.name = $name RETURN n';
+        params.name = nodeData.name;
+        break;
+      case 'department':
+        baseQuery = 'MATCH (n:Department) WHERE ID(n) = $id SET n.name = $name RETURN n';
+        params.name = nodeData.name;
+        break;
+      case 'painpoint':
+        baseQuery = 'MATCH (n:PainPoint) WHERE ID(n) = $id SET n.name = $name, n.impact = $impact RETURN n';
+        params.name = nodeData.name;
+        params.impact = nodeData.impact || '';
+        break;
+      default:
+        return res.status(400).json({ error: 'Node type not supported for updates' });
+    }
+    
+    const query = getVersionedQuery(baseQuery, version);
+    const result = await session.run(query, params);
+    if (result.records.length === 0) {
+      return res.status(404).json({ error: 'Node not found' });
+    }
+    
+    const updatedNode = result.records[0].get('n');
+    res.json({
+      id: updatedNode.identity.toString(),
+      labels: updatedNode.labels,
+      properties: updatedNode.properties,
+      version: version
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Delete a node
+app.delete('/api/admin/nodes/:type/:id', async (req, res) => {
+  const session = driver.session();
+  const { type, id } = req.params;
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  // Only allow deletion in admin_draft version for safety
+  if (version === GRAPH_VERSIONS.BASE) {
+    return res.status(403).json({ error: 'Cannot modify base graph directly. Create a draft version first.' });
+  }
+  
+  try {
+    const query = 'MATCH (n) WHERE ID(n) = $id DETACH DELETE n';
+    const result = await session.run(query, { id: parseInt(id) });
+    
+    res.json({ message: 'Node deleted successfully', deletedId: id, version: version });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Get all relationships
+app.get('/api/admin/relationships', async (req, res) => {
+  const session = driver.session();
+  
+  try {
+    const query = `
+      MATCH (n)-[r]->(m) 
+      RETURN ID(n) as sourceId, labels(n) as sourceLabels, n.name as sourceName,
+             type(r) as relationshipType, properties(r) as relationshipProps,
+             ID(m) as targetId, labels(m) as targetLabels, m.name as targetName
+      ORDER BY type(r), n.name
+    `;
+    
+    const result = await session.run(query);
+    const relationships = result.records.map(record => ({
+      source: {
+        id: record.get('sourceId').toString(),
+        labels: record.get('sourceLabels'),
+        name: record.get('sourceName')
+      },
+      relationship: {
+        type: record.get('relationshipType'),
+        properties: record.get('relationshipProps')
+      },
+      target: {
+        id: record.get('targetId').toString(),
+        labels: record.get('targetLabels'),
+        name: record.get('targetName')
+      }
+    }));
+    
+    res.json(relationships);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Find orphaned nodes
+app.get('/api/admin/orphans', async (req, res) => {
+  const session = driver.session();
+  
+  try {
+    const query = 'MATCH (n) WHERE NOT (n)--() RETURN ID(n) as id, labels(n) as labels, properties(n) as properties';
+    const result = await session.run(query);
+    
+    const orphans = result.records.map(record => ({
+      id: record.get('id').toString(),
+      labels: record.get('labels'),
+      properties: record.get('properties')
+    }));
+    
+    res.json(orphans);
+  } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {
     await session.close();

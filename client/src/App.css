@@ -11,6 +11,42 @@
   margin-bottom: 1.5rem;
 }
 
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.admin-toggle {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.admin-toggle:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.admin-toggle.active {
+  background: rgba(255, 255, 255, 0.9);
+  color: #e74c3c;
+  border-color: #e74c3c;
+}
+
+.app-header.admin-mode {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+}
+
 .app-header h1 {
   font-size: 2rem;
   margin-bottom: 0.3rem;
@@ -22,6 +58,7 @@
   font-size: 1rem;
   opacity: 0.9;
 }
+
 
 .progress-bar {
   display: flex;
@@ -477,7 +514,7 @@
   padding: 2rem;
   max-width: 600px;
   width: 100%;
-  max-height: 90vh;
+  max-height: 95vh;
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   position: relative;
@@ -518,6 +555,17 @@
 /* Form Styles */
 .form-group {
   margin-bottom: 1.5rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.form-group-half {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 .form-label {
@@ -798,6 +846,7 @@
   align-items: center;
   gap: 0.5rem;
   border-bottom: 1px solid #f0f0f0;
+  color: #333;
 }
 
 .multiselect-option:hover {
@@ -845,8 +894,8 @@
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  background: linear-gradient(135deg, #12abdb 0%, #0070ad 100%);
-  color: white;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  color: white !important;
   border: none;
   border-radius: 6px;
   padding: 0.5rem 0.8rem;
@@ -857,8 +906,9 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  box-shadow: 0 2px 8px rgba(18, 171, 219, 0.3);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
   z-index: 10;
+  opacity: 1 !important;
 }
 
 .suggestion-btn:hover {
@@ -909,20 +959,30 @@
 }
 
 /* Pain Point Name Suggestions */
-.suggestion-dropdown {
-  position: absolute;
-  top: 100%;
+.suggestion-backdrop {
+  position: fixed;
+  top: 0;
   left: 0;
   right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1999;
+}
+
+.suggestion-dropdown {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   background: white;
   border: 2px solid #0070ad;
-  border-top: 1px solid #e0e0e0;
-  border-radius: 0 0 8px 8px;
-  max-height: 300px;
+  border-radius: 12px;
+  max-height: 400px;
+  width: 500px;
+  max-width: 90vw;
   overflow-y: auto;
-  z-index: 1002;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  margin-top: 2px;
+  z-index: 2000;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
 }
 
 .suggestion-dropdown-header {
@@ -985,40 +1045,305 @@
   position: relative;
 }
 
-.name-suggestion-btn {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  background: linear-gradient(135deg, #12abdb 0%, #0070ad 100%);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  padding: 0.5rem 0.8rem;
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
+/* Admin Dashboard Styles */
+.admin-dashboard {
   display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  box-shadow: 0 2px 8px rgba(18, 171, 219, 0.3);
-  z-index: 10;
+  min-height: 80vh;
+  background: #f8f9fa;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  margin: 0 1rem;
 }
 
-.name-suggestion-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(18, 171, 219, 0.4);
+.admin-nav {
+  width: 250px;
+  background: #2c3e50;
+  padding: 2rem 1rem;
+  border-radius: 12px 0 0 12px;
 }
 
-.name-suggestion-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-  transform: none;
+.admin-nav h2 {
+  color: white;
+  margin-bottom: 2rem;
+  font-size: 1.2rem;
+  font-weight: 600;
 }
 
-.name-suggestion-btn .icon {
+.admin-nav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-nav-item {
+  background: none;
+  border: none;
+  color: #bdc3c7;
+  padding: 0.8rem 1rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s ease;
   font-size: 0.9rem;
 }
+
+.admin-nav-item:hover {
+  background: rgba(52, 152, 219, 0.1);
+  color: #3498db;
+}
+
+.admin-nav-item.active {
+  background: #3498db;
+  color: white;
+}
+
+.admin-content {
+  flex: 1;
+  padding: 2rem;
+  background: white;
+  border-radius: 0 12px 12px 0;
+}
+
+.admin-overview h3 {
+  color: #2c3e50;
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  padding: 1.5rem;
+  border-radius: 12px;
+  text-align: center;
+  color: white;
+  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.2);
+}
+
+.stat-card h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.stat-number {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-action-btn {
+  padding: 0.8rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-action-btn.primary {
+  background: #27ae60;
+  color: white;
+}
+
+.admin-action-btn.primary:hover {
+  background: #229954;
+}
+
+.admin-action-btn.secondary {
+  background: #95a5a6;
+  color: white;
+}
+
+.admin-action-btn.secondary:hover {
+  background: #7f8c8d;
+}
+
+.admin-action-btn.warning {
+  background: #f39c12;
+  color: white;
+}
+
+.admin-action-btn.warning:hover {
+  background: #e67e22;
+}
+
+.admin-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  color: #7f8c8d;
+}
+
+.admin-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.admin-section-header h3 {
+  color: #2c3e50;
+  margin: 0;
+}
+
+.admin-table {
+  background: #f8f9fa;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.admin-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-table th {
+  background: #34495e;
+  color: white;
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+.admin-table td {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid #dee2e6;
+  color: #2c3e50;
+}
+
+.admin-table tr:hover {
+  background: #e9ecef;
+}
+
+.admin-btn-small {
+  padding: 0.3rem 0.6rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-right: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.admin-btn-small.edit {
+  background: #3498db;
+  color: white;
+}
+
+.admin-btn-small.edit:hover {
+  background: #2980b9;
+}
+
+.admin-btn-small.delete {
+  background: #e74c3c;
+  color: white;
+}
+
+.admin-btn-small.delete:hover {
+  background: #c0392b;
+}
+
+/* Version Management Styles */
+.version-management {
+  background: #ecf0f1;
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 2px solid #bdc3c7;
+}
+
+.version-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.version-info label {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.version-select {
+  padding: 0.5rem 1rem;
+  border: 2px solid #bdc3c7;
+  border-radius: 6px;
+  background: white;
+  color: #2c3e50;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.version-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.version-btn {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.version-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.version-btn.create-draft {
+  background: #3498db;
+  color: white;
+}
+
+.version-btn.create-draft:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.version-btn.reset {
+  background: #e74c3c;
+  color: white;
+}
+
+.version-btn.reset:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+.version-btn.promote {
+  background: #27ae60;
+  color: white;
+}
+
+.version-btn.promote:hover:not(:disabled) {
+  background: #229954;
+}
+
+/* Use .suggestion-btn for all smart suggestion buttons */
 
 @media (max-width: 768px) {
   .app {

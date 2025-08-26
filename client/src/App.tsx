@@ -50,6 +50,51 @@ const App: React.FC = () => {
     subModules: []
   });
 
+  // Admin mode state
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+  const [adminActiveSection, setAdminActiveSection] = useState('overview');
+  const [adminStats, setAdminStats] = useState<any>(null);
+  const [adminNodes, setAdminNodes] = useState<any[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [currentGraphVersion, setCurrentGraphVersion] = useState('base');
+  const [availableVersions, setAvailableVersions] = useState<string[]>(['base']);
+
+  // Load persisted state on app initialization
+  useEffect(() => {
+    const savedState = localStorage.getItem('ai-catalog-state');
+    if (savedState) {
+      try {
+        const parsedState = JSON.parse(savedState);
+        if (parsedState.currentStep !== undefined) setCurrentStep(parsedState.currentStep);
+        if (parsedState.businessContextSubstep) setBusinessContextSubstep(parsedState.businessContextSubstep);
+        if (parsedState.currentSectorPage !== undefined) setCurrentSectorPage(parsedState.currentSectorPage);
+        if (parsedState.scopeSubstep) setScopeSubstep(parsedState.scopeSubstep);
+        if (parsedState.scopeChoice) setScopeChoice(parsedState.scopeChoice);
+        if (parsedState.selections) setSelections(parsedState.selections);
+      } catch (error) {
+        console.error('Failed to restore state:', error);
+      }
+    }
+  }, []);
+
+  // Save state to localStorage whenever key state changes (with small delay to avoid excessive saving)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      const stateToSave = {
+        currentStep,
+        businessContextSubstep,
+        currentSectorPage,
+        scopeSubstep,
+        scopeChoice,
+        selections
+      };
+      localStorage.setItem('ai-catalog-state', JSON.stringify(stateToSave));
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [currentStep, businessContextSubstep, currentSectorPage, scopeSubstep, scopeChoice, selections]);
+
   useEffect(() => {
     fetchIndustries();
     fetchDepartments();
@@ -66,8 +111,34 @@ const App: React.FC = () => {
         departments: [...selections.departments],
         sectors: [...selections.sectors]
       });
+      
+      // Ensure sectors and departments are loaded
+      if (Object.keys(sectors).length === 0) {
+        fetchSectors(['Banking', 'Insurance']);
+      }
+      if (departments.length === 0) {
+        fetchDepartments();
+      }
     }
   }, [showPainPointModal, selections.departments, selections.sectors]);
+
+  // Keyboard support for modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showPainPointSuggestions) {
+          setShowPainPointSuggestions(false);
+        } else if (showPainPointModal) {
+          setShowPainPointModal(false);
+        } else if (showProjectModal) {
+          setShowProjectModal(false);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showPainPointSuggestions, showPainPointModal, showProjectModal]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -285,6 +356,24 @@ const App: React.FC = () => {
     setSelections({ ...selections, departments: [] });
   };
 
+  const handleClearProgress = () => {
+    // Clear localStorage
+    localStorage.removeItem('ai-catalog-state');
+    // Reset all state to initial values
+    setCurrentStep(1);
+    setBusinessContextSubstep('industries');
+    setCurrentSectorPage(0);
+    setScopeSubstep('choice');
+    setScopeChoice('');
+    setSelections({
+      viewMode: '',
+      industries: [],
+      sectors: [],
+      departments: [],
+      painPoints: []
+    });
+  };
+
   const handlePainPointSelection = (painPointName: string) => {
     const newPainPoints = selections.painPoints.includes(painPointName)
       ? selections.painPoints.filter(p => p !== painPointName)
@@ -322,6 +411,124 @@ const App: React.FC = () => {
       setCurrentStep(2);
     }
   };
+
+  // Admin mode functions
+  const handleAdminToggle = () => {
+    if (isAdminMode) {
+      setIsAdminMode(false);
+      setAdminAuthenticated(false);
+    } else {
+      const password = prompt("Enter admin password:");
+      if (password === "admin123") { // Simple password for demo
+        setIsAdminMode(true);
+        setAdminAuthenticated(true);
+      } else if (password !== null) {
+        alert("Incorrect password");
+      }
+    }
+  };
+
+  // Admin API functions
+  const fetchAdminStats = async (version = currentGraphVersion) => {
+    setAdminLoading(true);
+    try {
+      const response = await fetch(`/api/admin/stats?version=${version}`);
+      const stats = await response.json();
+      setAdminStats(stats);
+    } catch (error) {
+      console.error('Error fetching admin stats:', error);
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const fetchAdminNodes = async (nodeType: string, version = currentGraphVersion) => {
+    setAdminLoading(true);
+    try {
+      const response = await fetch(`/api/admin/nodes/${nodeType}?version=${version}`);
+      const nodes = await response.json();
+      setAdminNodes(nodes);
+    } catch (error) {
+      console.error('Error fetching admin nodes:', error);
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const fetchAvailableVersions = async () => {
+    try {
+      const response = await fetch('/api/admin/versions');
+      const versions = await response.json();
+      setAvailableVersions(versions);
+    } catch (error) {
+      console.error('Error fetching versions:', error);
+    }
+  };
+
+  const createDraftVersion = async () => {
+    setAdminLoading(true);
+    try {
+      const response = await fetch('/api/admin/versions/create-draft', {
+        method: 'POST'
+      });
+      const result = await response.json();
+      if (response.ok) {
+        alert('Draft version created successfully!');
+        setCurrentGraphVersion('admin_draft');
+        await fetchAvailableVersions();
+        await fetchAdminStats('admin_draft');
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error creating draft version:', error);
+      alert('Error creating draft version');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const resetToBase = async () => {
+    if (!confirm('Are you sure you want to delete the draft and reset to base? All changes will be lost.')) {
+      return;
+    }
+    
+    setAdminLoading(true);
+    try {
+      const response = await fetch('/api/admin/versions/draft', {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+      if (response.ok) {
+        alert('Reset to base successfully!');
+        setCurrentGraphVersion('base');
+        await fetchAvailableVersions();
+        await fetchAdminStats('base');
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error resetting to base:', error);
+      alert('Error resetting to base');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  // Load admin data when entering admin mode
+  useEffect(() => {
+    if (isAdminMode && adminAuthenticated) {
+      fetchAvailableVersions();
+      fetchAdminStats();
+    }
+  }, [isAdminMode, adminAuthenticated]);
+
+  // Refresh data when version changes
+  useEffect(() => {
+    if (isAdminMode && adminAuthenticated && adminActiveSection === 'overview') {
+      fetchAdminStats(currentGraphVersion);
+    }
+  }, [currentGraphVersion]);
 
   const resetSelections = () => {
     setSelections({ viewMode: '', industries: [], sectors: [], departments: [], painPoints: [] });
@@ -621,7 +828,58 @@ const App: React.FC = () => {
         }
       });
     });
+    
+    // Fallback: if no sectors loaded from dynamic fetch, provide common sectors
+    if (allSectors.length === 0) {
+      return [
+        'Retail Banking',
+        'Commercial Banking', 
+        'Investment Banking',
+        'Insurance',
+        'Life Insurance',
+        'Property & Casualty'
+      ];
+    }
+    
     return allSectors;
+  };
+
+  const getAllDepartments = () => {
+    // If departments are not loaded yet or empty, return fallback departments immediately
+    if (!departments || departments.length === 0) {
+      return [
+        'Operations',
+        'Customer Service',
+        'Risk Management', 
+        'IT',
+        'Finance',
+        'Marketing',
+        'Sales',
+        'Human Resources',
+        'Compliance',
+        'Legal'
+      ];
+    }
+    
+    const allDepartments: string[] = [];
+    departments.forEach(department => {
+      if (department && department.name && !allDepartments.includes(department.name)) {
+        allDepartments.push(department.name);
+      }
+    });
+    
+    return allDepartments.length > 0 ? allDepartments : [
+      'Operations',
+      'Customer Service',
+      'Risk Management', 
+      'IT',
+      'Finance',
+      'Marketing',
+      'Sales',
+      'Human Resources',
+      'Compliance',
+      'Legal'
+    ];
   };
 
   const getPriorityColor = (priority: string) => {
@@ -634,11 +892,254 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>AI Project Catalog</h1>
+      <header className={`app-header ${isAdminMode ? 'admin-mode' : ''}`}>
+        <div className="header-content">
+          <h1>{isAdminMode ? 'AI Catalog - ADMIN' : 'AI Project Catalog'}</h1>
+          <button 
+            className={`admin-toggle ${isAdminMode ? 'active' : ''}`}
+            onClick={handleAdminToggle}
+            title={isAdminMode ? 'Exit Admin Mode' : 'Enter Admin Mode'}
+          >
+            {isAdminMode ? '👤 Exit Admin' : '⚙️ Admin'}
+          </button>
+        </div>
       </header>
 
-      <div className="progress-bar">
+      {isAdminMode && adminAuthenticated ? (
+        /* Admin Dashboard */
+        <div className="admin-dashboard">
+          <div className="admin-nav">
+            <h2>Graph Administration</h2>
+            <div className="admin-nav-items">
+              <button 
+                className={`admin-nav-item ${adminActiveSection === 'overview' ? 'active' : ''}`}
+                onClick={() => setAdminActiveSection('overview')}
+              >
+                📊 Overview
+              </button>
+              <button 
+                className={`admin-nav-item ${adminActiveSection === 'industries' ? 'active' : ''}`}
+                onClick={() => {
+                  setAdminActiveSection('industries');
+                  fetchAdminNodes('industry', currentGraphVersion);
+                }}
+              >
+                🏢 Industries
+              </button>
+              <button 
+                className={`admin-nav-item ${adminActiveSection === 'sectors' ? 'active' : ''}`}
+                onClick={() => {
+                  setAdminActiveSection('sectors');
+                  fetchAdminNodes('sector', currentGraphVersion);
+                }}
+              >
+                🏛️ Sectors
+              </button>
+              <button 
+                className={`admin-nav-item ${adminActiveSection === 'departments' ? 'active' : ''}`}
+                onClick={() => {
+                  setAdminActiveSection('departments');
+                  fetchAdminNodes('department', currentGraphVersion);
+                }}
+              >
+                🏢 Departments
+              </button>
+              <button 
+                className={`admin-nav-item ${adminActiveSection === 'painpoints' ? 'active' : ''}`}
+                onClick={() => {
+                  setAdminActiveSection('painpoints');
+                  fetchAdminNodes('painpoint', currentGraphVersion);
+                }}
+              >
+                ⚠️ Pain Points
+              </button>
+              <button 
+                className={`admin-nav-item ${adminActiveSection === 'projects' ? 'active' : ''}`}
+                onClick={() => {
+                  setAdminActiveSection('projects');
+                  fetchAdminNodes('project', currentGraphVersion);
+                }}
+              >
+                🚀 Projects
+              </button>
+              <button 
+                className={`admin-nav-item ${adminActiveSection === 'relationships' ? 'active' : ''}`}
+                onClick={() => setAdminActiveSection('relationships')}
+              >
+                🔗 Relationships
+              </button>
+            </div>
+          </div>
+          
+          <div className="admin-content">
+            {/* Version Management Header */}
+            <div className="version-management">
+              <div className="version-info">
+                <label>Current Version: </label>
+                <select 
+                  value={currentGraphVersion} 
+                  onChange={(e) => setCurrentGraphVersion(e.target.value)}
+                  className="version-select"
+                >
+                  {availableVersions.map(version => (
+                    <option key={version} value={version}>
+                      {version === 'base' ? '🔒 Base (Read-Only)' : `✏️ ${version} (Editable)`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="version-actions">
+                {currentGraphVersion === 'base' && (
+                  <button 
+                    className="version-btn create-draft" 
+                    onClick={createDraftVersion}
+                    disabled={adminLoading}
+                  >
+                    📝 Create Draft
+                  </button>
+                )}
+                
+                {currentGraphVersion === 'admin_draft' && (
+                  <>
+                    <button 
+                      className="version-btn reset" 
+                      onClick={resetToBase}
+                      disabled={adminLoading}
+                    >
+                      🔄 Reset to Base
+                    </button>
+                    <button 
+                      className="version-btn promote" 
+                      onClick={() => alert('Promote to base feature coming soon!')}
+                      disabled={adminLoading}
+                    >
+                      ⬆️ Promote to Base
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {adminLoading && (
+              <div className="admin-loading">
+                <div className="spinner"></div>
+                <p>Loading...</p>
+              </div>
+            )}
+
+            {/* Overview Section */}
+            {adminActiveSection === 'overview' && !adminLoading && (
+              <div className="admin-overview">
+                <h3>Graph Statistics</h3>
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <h4>Industries</h4>
+                    <div className="stat-number">{adminStats?.Industry || 0}</div>
+                  </div>
+                  <div className="stat-card">
+                    <h4>Sectors</h4>
+                    <div className="stat-number">{adminStats?.Sector || 0}</div>
+                  </div>
+                  <div className="stat-card">
+                    <h4>Departments</h4>
+                    <div className="stat-number">{adminStats?.Department || 0}</div>
+                  </div>
+                  <div className="stat-card">
+                    <h4>Pain Points</h4>
+                    <div className="stat-number">{adminStats?.PainPoint || 0}</div>
+                  </div>
+                  <div className="stat-card">
+                    <h4>Projects</h4>
+                    <div className="stat-number">{adminStats?.ProjectOpportunity || 0}</div>
+                  </div>
+                </div>
+                
+                <div className="admin-actions">
+                  <button className="admin-action-btn primary">
+                    📥 Import Data
+                  </button>
+                  <button className="admin-action-btn secondary">
+                    📤 Export Graph
+                  </button>
+                  <button className="admin-action-btn secondary">
+                    🔍 Query Builder
+                  </button>
+                  <button 
+                    className="admin-action-btn warning"
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/admin/orphans');
+                        const orphans = await response.json();
+                        alert(`Found ${orphans.length} orphaned nodes`);
+                      } catch (error) {
+                        alert('Error finding orphans');
+                      }
+                    }}
+                  >
+                    🧹 Find Orphans
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Node Management Sections */}
+            {['industries', 'sectors', 'departments', 'painpoints', 'projects'].includes(adminActiveSection) && !adminLoading && (
+              <div className="admin-node-management">
+                <div className="admin-section-header">
+                  <h3>{adminActiveSection.charAt(0).toUpperCase() + adminActiveSection.slice(1)}</h3>
+                  <button className="admin-action-btn primary">
+                    ➕ Add New
+                  </button>
+                </div>
+                
+                <div className="admin-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Name/Title</th>
+                        {adminActiveSection === 'painpoints' && <th>Impact</th>}
+                        {adminActiveSection === 'sectors' && <th>Industries</th>}
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminNodes.map((node) => (
+                        <tr key={node.id}>
+                          <td>{node.id}</td>
+                          <td>{node.properties.name || node.properties.title}</td>
+                          {adminActiveSection === 'painpoints' && (
+                            <td>{node.properties.impact || 'N/A'}</td>
+                          )}
+                          {adminActiveSection === 'sectors' && (
+                            <td>{node.industries?.join(', ') || 'N/A'}</td>
+                          )}
+                          <td>
+                            <button className="admin-btn-small edit">✏️ Edit</button>
+                            <button className="admin-btn-small delete">🗑️ Delete</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Relationships Section */}
+            {adminActiveSection === 'relationships' && !adminLoading && (
+              <div className="admin-relationships">
+                <h3>Graph Relationships</h3>
+                <p>Relationship management interface coming soon...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* User Workflow */
+        <>
+          <div className="progress-bar">
         <div 
           className={`step ${currentStep >= 1 ? 'active' : ''} ${currentStep > 1 ? 'clickable' : ''}`}
           onClick={() => navigateToStep(1)}
@@ -667,6 +1168,7 @@ const App: React.FC = () => {
           <span className="step-label">Projects</span>
         </div>
       </div>
+
 
       {/* Step Subtitle */}
       <div className="step-subtitle">
@@ -716,17 +1218,26 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Next button - only show if industries are selected */}
-            {selections.industries.length > 0 && (
-              <div className="action-buttons">
+            {/* Action buttons */}
+            <div className="action-buttons">
+              {(selections.industries.length > 0 || selections.sectors.length > 0 || currentStep > 1) && (
+                <button 
+                  className="skip-btn"
+                  onClick={handleClearProgress}
+                >
+                  Reset
+                </button>
+              )}
+              
+              {selections.industries.length > 0 && (
                 <button 
                   className="find-projects-btn"
                   onClick={handleProceedToSectors}
                 >
                   Next
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
@@ -1023,7 +1534,118 @@ const App: React.FC = () => {
                 <button className="modal-close" onClick={() => setShowPainPointModal(false)}>×</button>
               </div>
               
-              <form onSubmit={handleCreatePainPoint}>
+              <form 
+                onSubmit={handleCreatePainPoint}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+                    if (submitButton && !submitButton.disabled) {
+                      submitButton.click();
+                    }
+                  }
+                }}
+              >
+                {/* Connection Fields - Side by Side */}
+                <div className="form-row">
+                  <div className="form-group form-group-half">
+                    <label className="form-label">Connect to Sectors</label>
+                    <div className="multiselect-container">
+                      <div 
+                        className={`multiselect-dropdown ${showSectorDropdown ? 'active' : ''}`}
+                        onClick={() => setShowSectorDropdown(!showSectorDropdown)}
+                      >
+                        <div className="multiselect-display">
+                          {newPainPointForm.sectors.length === 0 ? (
+                            <span className="multiselect-placeholder">Select sectors...</span>
+                          ) : (
+                            newPainPointForm.sectors.map(sector => (
+                              <div key={sector} className="multiselect-tag">
+                                <span>{sector}</span>
+                                <button 
+                                  type="button"
+                                  className="multiselect-tag-remove"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeSectorTag(sector);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className={`multiselect-arrow ${showSectorDropdown ? 'open' : ''}`}>▼</div>
+                      </div>
+                      
+                      {showSectorDropdown && (
+                        <div className="multiselect-options">
+                          {getAllSectors().map(sector => (
+                            <div 
+                              key={sector}
+                              className={`multiselect-option ${newPainPointForm.sectors.includes(sector) ? 'selected' : ''}`}
+                              onClick={() => handleSectorToggle(sector)}
+                            >
+                              <div className="multiselect-checkbox"></div>
+                              <span>{sector}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="form-group form-group-half">
+                    <label className="form-label">Connect to Departments</label>
+                    <div className="multiselect-container">
+                      <div 
+                        className={`multiselect-dropdown ${showDepartmentDropdown ? 'active' : ''}`}
+                        onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}
+                      >
+                        <div className="multiselect-display">
+                          {newPainPointForm.departments.length === 0 ? (
+                            <span className="multiselect-placeholder">Select departments...</span>
+                          ) : (
+                            newPainPointForm.departments.map(department => (
+                              <div key={department} className="multiselect-tag">
+                                <span>{department}</span>
+                                <button 
+                                  type="button"
+                                  className="multiselect-tag-remove"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeDepartmentTag(department);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className={`multiselect-arrow ${showDepartmentDropdown ? 'open' : ''}`}>▼</div>
+                      </div>
+                      
+                      {showDepartmentDropdown && (
+                        <div className="multiselect-options">
+                          {getAllDepartments().map(departmentName => (
+                            <div 
+                              key={departmentName}
+                              className={`multiselect-option ${newPainPointForm.departments.includes(departmentName) ? 'selected' : ''}`}
+                              onClick={() => handleDepartmentToggle(departmentName)}
+                            >
+                              <div className="multiselect-checkbox"></div>
+                              <span>{departmentName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="form-group">
                   <label className="form-label">Pain Point Name *</label>
                   <div className="name-suggestion-container">
@@ -1033,12 +1655,12 @@ const App: React.FC = () => {
                       value={newPainPointForm.name}
                       onChange={(e) => setNewPainPointForm({...newPainPointForm, name: e.target.value})}
                       required
-                      placeholder="e.g., Manual Process Bottlenecks, or click smart suggest"
-                      style={{ paddingRight: '6rem' }}
+                      placeholder="e.g., Manual Process Bottlenecks"
+                      style={{ paddingRight: '10rem' }}
                     />
                     <button
                       type="button"
-                      className="name-suggestion-btn"
+                      className="suggestion-btn"
                       onClick={handleSuggestPainPointNames}
                       disabled={suggestingPainPoints || (newPainPointForm.sectors.length === 0 && newPainPointForm.departments.length === 0)}
                       title="Get AI-powered pain point suggestions based on selected sectors and departments"
@@ -1054,16 +1676,27 @@ const App: React.FC = () => {
                         </>
                       ) : (
                         <>
-                          <span className="icon">🎯</span>
+                          <span className="icon">✨</span>
                           Smart Suggest
                         </>
                       )}
                     </button>
                     
                     {showPainPointSuggestions && (
-                      <div className="suggestion-dropdown">
+                      <>
+                        <div 
+                          className="suggestion-backdrop" 
+                          onClick={() => setShowPainPointSuggestions(false)}
+                        ></div>
+                        <div className="suggestion-dropdown">
                         <div className="suggestion-dropdown-header">
-                          <span>AI-Addressable Pain Points</span>
+                          <span>
+                            Pain Points for {
+                              [...newPainPointForm.sectors, ...newPainPointForm.departments]
+                                .filter(item => item)
+                                .join(', ')
+                            }
+                          </span>
                           <button 
                             type="button"
                             className="suggestion-dropdown-close"
@@ -1081,116 +1714,22 @@ const App: React.FC = () => {
                             {suggestion}
                           </div>
                         ))}
-                      </div>
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
                 
-                <div className="form-group">
-                  <label className="form-label">Connect to Sectors</label>
-                  <div className="multiselect-container">
-                    <div 
-                      className={`multiselect-dropdown ${showSectorDropdown ? 'active' : ''}`}
-                      onClick={() => setShowSectorDropdown(!showSectorDropdown)}
-                    >
-                      <div className="multiselect-display">
-                        {newPainPointForm.sectors.length === 0 ? (
-                          <span className="multiselect-placeholder">Select sectors...</span>
-                        ) : (
-                          newPainPointForm.sectors.map(sector => (
-                            <div key={sector} className="multiselect-tag">
-                              <span>{sector}</span>
-                              <button 
-                                type="button"
-                                className="multiselect-tag-remove"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeSectorTag(sector);
-                                }}
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                      <div className={`multiselect-arrow ${showSectorDropdown ? 'open' : ''}`}>▼</div>
-                    </div>
-                    
-                    {showSectorDropdown && (
-                      <div className="multiselect-options">
-                        {getAllSectors().map(sector => (
-                          <div 
-                            key={sector}
-                            className={`multiselect-option ${newPainPointForm.sectors.includes(sector) ? 'selected' : ''}`}
-                            onClick={() => handleSectorToggle(sector)}
-                          >
-                            <div className="multiselect-checkbox"></div>
-                            <span>{sector}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Connect to Departments</label>
-                  <div className="multiselect-container">
-                    <div 
-                      className={`multiselect-dropdown ${showDepartmentDropdown ? 'active' : ''}`}
-                      onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}
-                    >
-                      <div className="multiselect-display">
-                        {newPainPointForm.departments.length === 0 ? (
-                          <span className="multiselect-placeholder">Select departments...</span>
-                        ) : (
-                          newPainPointForm.departments.map(department => (
-                            <div key={department} className="multiselect-tag">
-                              <span>{department}</span>
-                              <button 
-                                type="button"
-                                className="multiselect-tag-remove"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeDepartmentTag(department);
-                                }}
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                      <div className={`multiselect-arrow ${showDepartmentDropdown ? 'open' : ''}`}>▼</div>
-                    </div>
-                    
-                    {showDepartmentDropdown && (
-                      <div className="multiselect-options">
-                        {departments.map(department => (
-                          <div 
-                            key={department.name}
-                            className={`multiselect-option ${newPainPointForm.departments.includes(department.name) ? 'selected' : ''}`}
-                            onClick={() => handleDepartmentToggle(department.name)}
-                          >
-                            <div className="multiselect-checkbox"></div>
-                            <span>{department.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label">Impact Description</label>
+                {newPainPointForm.name.trim() && (
+                  <div className="form-group">
+                    <label className="form-label">Impact Description</label>
                   <div className="suggestion-container">
                     <textarea
                       className="form-textarea"
                       value={newPainPointForm.impact}
                       onChange={(e) => setNewPainPointForm({...newPainPointForm, impact: e.target.value})}
-                      placeholder="Describe the business impact of this pain point, or click the smart suggestion button"
-                      style={{ paddingRight: '6rem' }}
+                      placeholder="Describe the business impact of this pain point"
+                      style={{ paddingRight: '10rem' }}
                     />
                     <button
                       type="button"
@@ -1216,7 +1755,8 @@ const App: React.FC = () => {
                       )}
                     </button>
                   </div>
-                </div>
+                  </div>
+                )}
                 
                 <div className="modal-actions">
                   <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowPainPointModal(false)}>
@@ -1248,7 +1788,19 @@ const App: React.FC = () => {
                 <button className="modal-close" onClick={() => setShowProjectModal(false)}>×</button>
               </div>
               
-              <form onSubmit={handleCreateProject}>
+              <form 
+                onSubmit={handleCreateProject}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+                    if (submitButton && !submitButton.disabled) {
+                      submitButton.click();
+                    }
+                  }
+                }}
+              >
                 <div className="form-group">
                   <label className="form-label">Project Title *</label>
                   <input
@@ -1388,7 +1940,9 @@ const App: React.FC = () => {
             <p>Loading...</p>
           </div>
         )}
-      </main>
+        </main>
+        </>
+      )}
     </div>
   );
 };
