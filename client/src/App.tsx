@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm } from './types';
+import GraphViz from './GraphViz';
 import './App.css';
 
 const App: React.FC = () => {
@@ -59,6 +60,28 @@ const App: React.FC = () => {
   const [adminLoading, setAdminLoading] = useState(false);
   const [currentGraphVersion, setCurrentGraphVersion] = useState('base');
   const [availableVersions, setAvailableVersions] = useState<string[]>(['base']);
+  
+  // Admin modals and forms
+  const [showAdminNodeModal, setShowAdminNodeModal] = useState(false);
+  const [showAdminEditModal, setShowAdminEditModal] = useState(false);
+  const [showQueryBuilder, setShowQueryBuilder] = useState(false);
+  const [adminNodeForm, setAdminNodeForm] = useState<any>({});
+  const [editingNode, setEditingNode] = useState<any>(null);
+  const [queryBuilderQuery, setQueryBuilderQuery] = useState('MATCH (n) RETURN n LIMIT 10');
+  const [queryResults, setQueryResults] = useState<any[]>([]);
+  
+  // Graph visualization state
+  const [viewMode, setViewMode] = useState<'table' | 'graph'>('table');
+  const [graphData, setGraphData] = useState<{ nodes: any[], edges: any[] }>({ nodes: [], edges: [] });
+  const [graphLoading, setGraphLoading] = useState(false);
+  
+  // Graph filter state
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
+  const [selectedSector, setSelectedSector] = useState<string>('');
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
+  const [availableIndustries, setAvailableIndustries] = useState<string[]>([]);
+  const [availableSectors, setAvailableSectors] = useState<string[]>([]);
+  const [availableDepartments, setAvailableDepartments] = useState<string[]>([]);
 
   // Load persisted state on app initialization
   useEffect(() => {
@@ -489,7 +512,7 @@ const App: React.FC = () => {
   };
 
   const resetToBase = async () => {
-    if (!confirm('Are you sure you want to delete the draft and reset to base? All changes will be lost.')) {
+    if (!window.confirm('Are you sure you want to delete the draft and reset to base? All changes will be lost.')) {
       return;
     }
     
@@ -515,13 +538,378 @@ const App: React.FC = () => {
     }
   };
 
+  // Admin node management functions
+  const handleAddNewNode = (nodeType: string) => {
+    if (currentGraphVersion === 'base') {
+      alert('Please create a draft version first to add new nodes');
+      return;
+    }
+    
+    setAdminNodeForm({
+      type: nodeType,
+      name: '',
+      impact: ''
+    });
+    setShowAdminNodeModal(true);
+  };
+
+  const handleEditNode = (node: any) => {
+    if (currentGraphVersion === 'base') {
+      alert('Please create a draft version first to edit nodes');
+      return;
+    }
+    
+    setEditingNode(node);
+    setAdminNodeForm({
+      type: adminActiveSection,
+      name: node.properties.name || node.properties.title,
+      impact: node.properties.impact || ''
+    });
+    setShowAdminEditModal(true);
+  };
+
+  const handleDeleteNode = async (nodeId: string) => {
+    if (currentGraphVersion === 'base') {
+      alert('Please create a draft version first to delete nodes');
+      return;
+    }
+    
+    if (!window.confirm('Are you sure you want to delete this node?')) {
+      return;
+    }
+    
+    setAdminLoading(true);
+    try {
+      const response = await fetch(`/api/admin/nodes/${adminActiveSection}/${nodeId}?version=${currentGraphVersion}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        await fetchAdminNodes(adminActiveSection, currentGraphVersion);
+        await fetchAdminStats(currentGraphVersion);
+      } else {
+        const error = await response.json();
+        alert(`Error deleting node: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error deleting node:', error);
+      alert('Failed to delete node');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const handleCreateNode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminLoading(true);
+    
+    try {
+      const response = await fetch(`/api/admin/nodes/${adminNodeForm.type}?version=${currentGraphVersion}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: adminNodeForm.name,
+          impact: adminNodeForm.impact
+        })
+      });
+      
+      if (response.ok) {
+        setShowAdminNodeModal(false);
+        setAdminNodeForm({});
+        await fetchAdminNodes(adminActiveSection, currentGraphVersion);
+        await fetchAdminStats(currentGraphVersion);
+      } else {
+        const error = await response.json();
+        alert(`Error creating node: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error creating node:', error);
+      alert('Failed to create node');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const handleUpdateNode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminLoading(true);
+    
+    try {
+      const response = await fetch(`/api/admin/nodes/${adminActiveSection}/${editingNode.id}?version=${currentGraphVersion}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: adminNodeForm.name,
+          impact: adminNodeForm.impact
+        })
+      });
+      
+      if (response.ok) {
+        setShowAdminEditModal(false);
+        setEditingNode(null);
+        setAdminNodeForm({});
+        await fetchAdminNodes(adminActiveSection, currentGraphVersion);
+      } else {
+        const error = await response.json();
+        alert(`Error updating node: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error updating node:', error);
+      alert('Failed to update node');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const handleQueryBuilderExecute = async () => {
+    setAdminLoading(true);
+    
+    try {
+      const response = await fetch('/api/admin/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          query: queryBuilderQuery,
+          version: currentGraphVersion 
+        })
+      });
+      
+      if (response.ok) {
+        const results = await response.json();
+        setQueryResults(results);
+      } else {
+        const error = await response.json();
+        alert(`Query error: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Query execution error:', error);
+      alert('Failed to execute query');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const handleExportGraph = async () => {
+    try {
+      const response = await fetch(`/api/admin/export?version=${currentGraphVersion}`);
+      
+      if (response.ok) {
+        // Get the filename from the Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `graph-export-${currentGraphVersion}-${new Date().toISOString().split('T')[0]}.cypher`;
+        
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+          if (filenameMatch) {
+            filename = filenameMatch[1];
+          }
+        }
+        
+        // Get the text content
+        const cypherScript = await response.text();
+        
+        // Create a blob and download it
+        const blob = new Blob([cypherScript], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        alert(`Graph exported successfully as ${filename}`);
+      } else {
+        const error = await response.json();
+        alert(`Export error: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Failed to export graph');
+    }
+  };
+
+  // Fetch graph data for visualization
+  const fetchGraphData = useCallback(async (nodeType: string) => {
+    setGraphLoading(true);
+    
+    try {
+      const params = new URLSearchParams();
+      params.append('version', currentGraphVersion);
+      
+      // Add filter parameters based on node type
+      if (nodeType === 'sectors' && selectedIndustries.length > 0) {
+        selectedIndustries.forEach(industry => {
+          params.append('industry', industry);
+        });
+      }
+      if (nodeType === 'painpoints') {
+        selectedIndustries.forEach(industry => {
+          params.append('industry', industry);
+        });
+        if (selectedSector) params.append('sector', selectedSector);
+        if (selectedDepartment) params.append('department', selectedDepartment);
+      }
+      
+      const response = await fetch(`/api/admin/graph/${nodeType}?${params.toString()}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setGraphData({
+          nodes: data.nodes,
+          edges: data.edges
+        });
+      } else {
+        const error = await response.json();
+        console.error('Graph data error:', error);
+        setGraphData({ nodes: [], edges: [] });
+      }
+    } catch (error) {
+      console.error('Failed to fetch graph data:', error);
+      setGraphData({ nodes: [], edges: [] });
+    } finally {
+      setGraphLoading(false);
+    }
+  }, [currentGraphVersion, selectedIndustries, selectedSector, selectedDepartment]);
+
+  // Handle node selection in graph
+  const handleGraphNodeSelect = (nodeId: string, nodeData: any) => {
+    console.log('Selected node:', nodeId, nodeData);
+  };
+
+  // Handle node double-click in graph (edit)
+  const handleGraphNodeEdit = (nodeId: string, nodeData: any) => {
+    handleEditNode(nodeData);
+  };
+
+  // Load filter options
+  const loadFilterOptions = async () => {
+    try {
+      // Load industries
+      const industriesResponse = await fetch('/api/industries');
+      if (industriesResponse.ok) {
+        const industriesData = await industriesResponse.json();
+        setAvailableIndustries(industriesData.map((i: any) => i.name));
+      }
+
+      // Load departments
+      const departmentsResponse = await fetch('/api/departments');
+      if (departmentsResponse.ok) {
+        const departmentsData = await departmentsResponse.json();
+        setAvailableDepartments(departmentsData.map((d: any) => d.name));
+      }
+
+      // Load sectors (all sectors initially)
+      if (industries.length > 0) {
+        const sectorsResponse = await fetch('/api/sectors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ industries: industries.map(i => i.name) })
+        });
+        if (sectorsResponse.ok) {
+          const sectorsData = await sectorsResponse.json();
+          const allSectors = Object.values(sectorsData).flat() as any[];
+          setAvailableSectors(allSectors.map((s: any) => s.name));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load filter options:', error);
+    }
+  };
+
+  // Reset filters when changing tabs
+  const resetFilters = () => {
+    setSelectedIndustries([]);
+    setSelectedSector('');
+    setSelectedDepartment('');
+  };
+
+  // Handle filter changes
+  const handleIndustryToggle = (industry: string) => {
+    setSelectedIndustries(prev => {
+      const newSelection = prev.includes(industry)
+        ? prev.filter(i => i !== industry)
+        : [...prev, industry];
+      
+      // Reset sector when industry selection changes
+      setSelectedSector('');
+      
+      // Reload sectors for the selected industries
+      if (newSelection.length > 0) {
+        loadSectorsForIndustries(newSelection);
+      } else {
+        setAvailableSectors([]);
+      }
+      
+      return newSelection;
+    });
+  };
+
+  const loadSectorsForIndustries = async (industries: string[]) => {
+    try {
+      const sectorsResponse = await fetch('/api/sectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ industries })
+      });
+      if (sectorsResponse.ok) {
+        const sectorsData = await sectorsResponse.json();
+        const allSectors = Object.values(sectorsData).flat() as any[];
+        setAvailableSectors(allSectors.map((s: any) => s.name));
+      }
+    } catch (error) {
+      console.error('Failed to load sectors for industries:', error);
+    }
+  };
+
+  const loadSectorsForIndustry = async (industry: string) => {
+    try {
+      const sectorsResponse = await fetch('/api/sectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ industries: [industry] })
+      });
+      if (sectorsResponse.ok) {
+        const sectorsData = await sectorsResponse.json();
+        const sectors = sectorsData[industry] || [];
+        setAvailableSectors(sectors.map((s: any) => s.name));
+      }
+    } catch (error) {
+      console.error('Failed to load sectors for industry:', error);
+    }
+  };
+
   // Load admin data when entering admin mode
   useEffect(() => {
     if (isAdminMode && adminAuthenticated) {
       fetchAvailableVersions();
       fetchAdminStats();
+      loadFilterOptions();
     }
   }, [isAdminMode, adminAuthenticated]);
+
+  // Reload graph data when filters change
+  useEffect(() => {
+    if (isAdminMode && adminAuthenticated && viewMode === 'graph' && adminActiveSection) {
+      const nodeTypeMap: { [key: string]: string } = {
+        'industries': 'industries',
+        'sectors': 'sectors', 
+        'departments': 'departments',
+        'painpoints': 'painpoints',
+        'projects': 'projects',
+        'blueprints': 'blueprints',
+        'roles': 'roles',
+        'modules': 'modules',
+        'submodules': 'submodules'
+      };
+      
+      const nodeType = nodeTypeMap[adminActiveSection];
+      if (nodeType) {
+        fetchGraphData(nodeType);
+      }
+    }
+  }, [selectedIndustries, selectedSector, selectedDepartment, isAdminMode, adminAuthenticated, viewMode, adminActiveSection, fetchGraphData]);
 
   // Refresh data when version changes
   useEffect(() => {
@@ -921,6 +1309,7 @@ const App: React.FC = () => {
                 className={`admin-nav-item ${adminActiveSection === 'industries' ? 'active' : ''}`}
                 onClick={() => {
                   setAdminActiveSection('industries');
+                  resetFilters();
                   fetchAdminNodes('industry', currentGraphVersion);
                 }}
               >
@@ -930,6 +1319,7 @@ const App: React.FC = () => {
                 className={`admin-nav-item ${adminActiveSection === 'sectors' ? 'active' : ''}`}
                 onClick={() => {
                   setAdminActiveSection('sectors');
+                  resetFilters();
                   fetchAdminNodes('sector', currentGraphVersion);
                 }}
               >
@@ -939,6 +1329,7 @@ const App: React.FC = () => {
                 className={`admin-nav-item ${adminActiveSection === 'departments' ? 'active' : ''}`}
                 onClick={() => {
                   setAdminActiveSection('departments');
+                  resetFilters();
                   fetchAdminNodes('department', currentGraphVersion);
                 }}
               >
@@ -948,6 +1339,7 @@ const App: React.FC = () => {
                 className={`admin-nav-item ${adminActiveSection === 'painpoints' ? 'active' : ''}`}
                 onClick={() => {
                   setAdminActiveSection('painpoints');
+                  resetFilters();
                   fetchAdminNodes('painpoint', currentGraphVersion);
                 }}
               >
@@ -957,6 +1349,7 @@ const App: React.FC = () => {
                 className={`admin-nav-item ${adminActiveSection === 'projects' ? 'active' : ''}`}
                 onClick={() => {
                   setAdminActiveSection('projects');
+                  resetFilters();
                   fetchAdminNodes('project', currentGraphVersion);
                 }}
               >
@@ -1059,10 +1452,16 @@ const App: React.FC = () => {
                   <button className="admin-action-btn primary">
                     📥 Import Data
                   </button>
-                  <button className="admin-action-btn secondary">
+                  <button 
+                    className="admin-action-btn secondary"
+                    onClick={() => handleExportGraph()}
+                  >
                     📤 Export Graph
                   </button>
-                  <button className="admin-action-btn secondary">
+                  <button 
+                    className="admin-action-btn secondary"
+                    onClick={() => setShowQueryBuilder(true)}
+                  >
                     🔍 Query Builder
                   </button>
                   <button 
@@ -1088,42 +1487,170 @@ const App: React.FC = () => {
               <div className="admin-node-management">
                 <div className="admin-section-header">
                   <h3>{adminActiveSection.charAt(0).toUpperCase() + adminActiveSection.slice(1)}</h3>
-                  <button className="admin-action-btn primary">
-                    ➕ Add New
-                  </button>
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    {/* Graph Filters */}
+                    {viewMode === 'graph' && (
+                      <div className="graph-filters">
+                        {adminActiveSection === 'sectors' && (
+                          <div className="industry-checkboxes">
+                            <label>Industries:</label>
+                            {availableIndustries.map(industry => (
+                              <label key={industry} className="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIndustries.includes(industry)}
+                                  onChange={() => handleIndustryToggle(industry)}
+                                />
+                                {industry}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {adminActiveSection === 'painpoints' && (
+                          <div className="painpoint-filters">
+                            <div className="industry-checkboxes">
+                              <label>Industries:</label>
+                              {availableIndustries.map(industry => (
+                                <label key={industry} className="checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIndustries.includes(industry)}
+                                    onChange={() => handleIndustryToggle(industry)}
+                                  />
+                                  {industry}
+                                </label>
+                              ))}
+                            </div>
+                            
+                            <select 
+                              value={selectedSector} 
+                              onChange={(e) => setSelectedSector(e.target.value)}
+                              className="filter-select"
+                              disabled={selectedIndustries.length === 0}
+                            >
+                              <option value="">All Sectors</option>
+                              {availableSectors.map(sector => (
+                                <option key={sector} value={sector}>{sector}</option>
+                              ))}
+                            </select>
+                            
+                            <select 
+                              value={selectedDepartment} 
+                              onChange={(e) => setSelectedDepartment(e.target.value)}
+                              className="filter-select"
+                            >
+                              <option value="">All Departments</option>
+                              {availableDepartments.map(dept => (
+                                <option key={dept} value={dept}>{dept}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    <div className="view-toggle">
+                      <button 
+                        className={viewMode === 'table' ? 'active' : ''}
+                        onClick={() => setViewMode('table')}
+                      >
+                        📊 Table
+                      </button>
+                      <button 
+                        className={viewMode === 'graph' ? 'active' : ''}
+                        onClick={() => {
+                          setViewMode('graph');
+                          const nodeTypeMap: { [key: string]: string } = {
+                            'industries': 'industries',
+                            'sectors': 'sectors', 
+                            'departments': 'departments',
+                            'painpoints': 'painpoints',
+                            'projects': 'projects'
+                          };
+                          const nodeType = nodeTypeMap[adminActiveSection];
+                          if (nodeType) {
+                            fetchGraphData(nodeType);
+                          }
+                        }}
+                      >
+                        🕸️ Graph
+                      </button>
+                    </div>
+                    <button 
+                      className="admin-action-btn primary"
+                      onClick={() => handleAddNewNode(adminActiveSection.slice(0, -1))}
+                    >
+                      ➕ Add New
+                    </button>
+                  </div>
                 </div>
                 
-                <div className="admin-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Name/Title</th>
-                        {adminActiveSection === 'painpoints' && <th>Impact</th>}
-                        {adminActiveSection === 'sectors' && <th>Industries</th>}
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {adminNodes.map((node) => (
-                        <tr key={node.id}>
-                          <td>{node.id}</td>
-                          <td>{node.properties.name || node.properties.title}</td>
-                          {adminActiveSection === 'painpoints' && (
-                            <td>{node.properties.impact || 'N/A'}</td>
-                          )}
-                          {adminActiveSection === 'sectors' && (
-                            <td>{node.industries?.join(', ') || 'N/A'}</td>
-                          )}
-                          <td>
-                            <button className="admin-btn-small edit">✏️ Edit</button>
-                            <button className="admin-btn-small delete">🗑️ Delete</button>
-                          </td>
+                {/* Table View */}
+                {viewMode === 'table' && (
+                  <div className="admin-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Name/Title</th>
+                          {adminActiveSection === 'painpoints' && <th>Impact</th>}
+                          {adminActiveSection === 'sectors' && <th>Industries</th>}
+                          <th>Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {adminNodes.map((node) => (
+                          <tr key={node.id}>
+                            <td>{node.id}</td>
+                            <td>{node.properties.name || node.properties.title}</td>
+                            {adminActiveSection === 'painpoints' && (
+                              <td>{node.properties.impact || 'N/A'}</td>
+                            )}
+                            {adminActiveSection === 'sectors' && (
+                              <td>{node.industries?.join(', ') || 'N/A'}</td>
+                            )}
+                            <td>
+                              <button 
+                                className="admin-btn-small edit"
+                                onClick={() => handleEditNode(node)}
+                              >
+                                ✏️ Edit
+                              </button>
+                              <button 
+                                className="admin-btn-small delete"
+                                onClick={() => handleDeleteNode(node.id)}
+                              >
+                                🗑️ Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                
+                {/* Graph View */}
+                {viewMode === 'graph' && (
+                  <div className="graph-view-container">
+                    {graphLoading ? (
+                      <div className="admin-loading">
+                        <div className="spinner"></div>
+                        <p>Loading graph visualization...</p>
+                      </div>
+                    ) : (
+                      <GraphViz
+                        nodes={graphData.nodes}
+                        edges={graphData.edges}
+                        nodeType={adminActiveSection}
+                        onNodeSelect={handleGraphNodeSelect}
+                        onNodeDoubleClick={handleGraphNodeEdit}
+                        height="500px"
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1136,6 +1663,7 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
+
       ) : (
         /* User Workflow */
         <>
@@ -1941,6 +2469,146 @@ const App: React.FC = () => {
           </div>
         )}
         </main>
+        </>
+      )}
+
+      {/* Admin Modals - Always available when in admin mode */}
+      {isAdminMode && adminAuthenticated && (
+        <>
+          {showAdminNodeModal && (
+            <div className="modal-backdrop" onClick={() => setShowAdminNodeModal(false)}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Add New {adminNodeForm.type}</h2>
+                  <button className="modal-close" onClick={() => setShowAdminNodeModal(false)}>×</button>
+                </div>
+                
+                <form onSubmit={handleCreateNode}>
+                  <div className="form-group">
+                    <label className="form-label">Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={adminNodeForm.name}
+                      onChange={(e) => setAdminNodeForm({...adminNodeForm, name: e.target.value})}
+                      required
+                      placeholder={`Enter ${adminNodeForm.type} name`}
+                    />
+                  </div>
+                  
+                  {(adminNodeForm.type === 'painpoint') && (
+                    <div className="form-group">
+                      <label className="form-label">Impact Description</label>
+                      <textarea
+                        className="form-textarea"
+                        value={adminNodeForm.impact}
+                        onChange={(e) => setAdminNodeForm({...adminNodeForm, impact: e.target.value})}
+                        placeholder="Describe the business impact"
+                      />
+                    </div>
+                  )}
+                  
+                  <div className="modal-actions">
+                    <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowAdminNodeModal(false)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="modal-btn modal-btn-primary" disabled={adminLoading || !adminNodeForm.name}>
+                      {adminLoading ? 'Creating...' : 'Create'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {showAdminEditModal && (
+            <div className="modal-backdrop" onClick={() => setShowAdminEditModal(false)}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Edit {adminActiveSection.slice(0, -1)}</h2>
+                  <button className="modal-close" onClick={() => setShowAdminEditModal(false)}>×</button>
+                </div>
+                
+                <form onSubmit={handleUpdateNode}>
+                  <div className="form-group">
+                    <label className="form-label">Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={adminNodeForm.name}
+                      onChange={(e) => setAdminNodeForm({...adminNodeForm, name: e.target.value})}
+                      required
+                      placeholder={`Enter ${adminActiveSection.slice(0, -1)} name`}
+                    />
+                  </div>
+                  
+                  {(adminActiveSection === 'painpoints') && (
+                    <div className="form-group">
+                      <label className="form-label">Impact Description</label>
+                      <textarea
+                        className="form-textarea"
+                        value={adminNodeForm.impact}
+                        onChange={(e) => setAdminNodeForm({...adminNodeForm, impact: e.target.value})}
+                        placeholder="Describe the business impact"
+                      />
+                    </div>
+                  )}
+                  
+                  <div className="modal-actions">
+                    <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowAdminEditModal(false)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="modal-btn modal-btn-primary" disabled={adminLoading || !adminNodeForm.name}>
+                      {adminLoading ? 'Updating...' : 'Update'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {showQueryBuilder && (
+            <div className="modal-backdrop" onClick={() => setShowQueryBuilder(false)}>
+              <div className="modal-content query-builder-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Query Builder</h2>
+                  <button className="modal-close" onClick={() => setShowQueryBuilder(false)}>×</button>
+                </div>
+                
+                <div className="query-builder-content">
+                  <div className="form-group">
+                    <label className="form-label">Cypher Query</label>
+                    <textarea
+                      className="form-textarea query-input"
+                      value={queryBuilderQuery}
+                      onChange={(e) => setQueryBuilderQuery(e.target.value)}
+                      placeholder="Enter your Cypher query here..."
+                      rows={6}
+                    />
+                  </div>
+                  
+                  <div className="query-actions">
+                    <button 
+                      className="modal-btn modal-btn-primary"
+                      onClick={handleQueryBuilderExecute}
+                      disabled={adminLoading || !queryBuilderQuery.trim()}
+                    >
+                      {adminLoading ? 'Executing...' : 'Execute Query'}
+                    </button>
+                  </div>
+                  
+                  {queryResults.length > 0 && (
+                    <div className="query-results">
+                      <h4>Query Results ({queryResults.length} records)</h4>
+                      <div className="results-table">
+                        <pre>{JSON.stringify(queryResults, null, 2)}</pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

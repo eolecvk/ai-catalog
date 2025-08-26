@@ -1300,6 +1300,547 @@ app.get('/api/admin/orphans', async (req, res) => {
   }
 });
 
+// Get graph data for visualization
+app.get('/api/admin/graph/:nodeType', async (req, res) => {
+  const session = driver.session();
+  const { nodeType } = req.params;
+  const { sector, department } = req.query;
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  // Handle multiple industries (sent as multiple query params)
+  const industries = Array.isArray(req.query.industry) ? req.query.industry : 
+                    req.query.industry ? [req.query.industry] : [];
+  
+  try {
+    let nodes = [];
+    let edges = [];
+    
+    // Map URL node types to actual Neo4j labels
+    const nodeTypeMap = {
+      'industries': 'Industry',
+      'sectors': 'Sector', 
+      'departments': 'Department',
+      'painpoints': 'PainPoint',
+      'projects': 'ProjectOpportunity',
+      'blueprints': 'ProjectBlueprint',
+      'roles': 'Role',
+      'modules': 'Module',
+      'submodules': 'SubModule'
+    };
+    
+    const primaryLabel = nodeTypeMap[nodeType.toLowerCase()];
+    if (!primaryLabel) {
+      return res.status(400).json({ error: 'Invalid node type' });
+    }
+    
+    const nodeMap = new Map();
+    const edgeMap = new Map();
+    
+    switch (primaryLabel) {
+      case 'Industry':
+        // Industries: Show only Industry nodes
+        const industryQuery = getVersionedQuery(`MATCH (i:Industry) RETURN i`, version);
+        const industryResult = await session.run(industryQuery);
+        
+        industryResult.records.forEach(record => {
+          const node = record.get('i');
+          const nodeData = {
+            id: node.identity.toString(),
+            label: node.properties.name || 'Unnamed',
+            group: 'Industry',
+            properties: node.properties
+          };
+          nodeMap.set(nodeData.id, nodeData);
+        });
+        break;
+        
+      case 'Sector':
+        // Sectors: Show sectors connected to selected industries (require industry selection)
+        if (industries.length === 0) {
+          // Return empty result if no industries are selected
+          break;
+        }
+        
+        const sectorQuery = getVersionedQuery(`
+          MATCH (i:Industry)-[r:HAS_SECTOR]->(s:Sector) 
+          WHERE i.name IN $industries
+          RETURN i, r, s
+        `, version);
+        
+        const sectorParams = { industries };
+        const sectorResult = await session.run(sectorQuery, sectorParams);
+        
+        sectorResult.records.forEach(record => {
+          const industryNode = record.get('i');
+          const sectorNode = record.get('s');
+          const relationship = record.get('r');
+          
+          // Add industry node
+          const industryId = industryNode.identity.toString();
+          if (!nodeMap.has(industryId)) {
+            nodeMap.set(industryId, {
+              id: industryId,
+              label: industryNode.properties.name || 'Unnamed',
+              group: 'Industry',
+              properties: industryNode.properties
+            });
+          }
+          
+          // Add sector node
+          const sectorId = sectorNode.identity.toString();
+          if (!nodeMap.has(sectorId)) {
+            nodeMap.set(sectorId, {
+              id: sectorId,
+              label: sectorNode.properties.name || 'Unnamed',
+              group: 'Sector',
+              properties: sectorNode.properties
+            });
+          }
+          
+          // Add edge
+          const edgeId = `${industryId}-${sectorId}-HAS_SECTOR`;
+          if (!edgeMap.has(edgeId)) {
+            edgeMap.set(edgeId, {
+              id: edgeId,
+              from: industryId,
+              to: sectorId,
+              label: 'HAS_SECTOR',
+              type: 'HAS_SECTOR',
+              properties: relationship.properties
+            });
+          }
+        });
+        break;
+        
+      case 'Department':
+        // Departments: Show only Department nodes
+        const deptQuery = getVersionedQuery(`MATCH (d:Department) RETURN d`, version);
+        const deptResult = await session.run(deptQuery);
+        
+        deptResult.records.forEach(record => {
+          const node = record.get('d');
+          const nodeData = {
+            id: node.identity.toString(),
+            label: node.properties.name || 'Unnamed',
+            group: 'Department',
+            properties: node.properties
+          };
+          nodeMap.set(nodeData.id, nodeData);
+        });
+        break;
+        
+      case 'PainPoint':
+        // PainPoints: Filter by industry, sector, department or show all
+        let painPointQuery = `MATCH (p:PainPoint)`;
+        let whereConditions = [];
+        let painPointParams = {};
+        
+        if (industry || sector || department) {
+          if (industry) {
+            painPointQuery += ` MATCH (i:Industry {name: $industry})`;
+            painPointParams.industry = industry;
+            if (sector) {
+              painPointQuery += `-[:HAS_SECTOR]->(s:Sector {name: $sector})`;
+              painPointParams.sector = sector;
+              whereConditions.push(`(s)-[:EXPERIENCES]->(p)`);
+            } else {
+              whereConditions.push(`EXISTS((i)-[:HAS_SECTOR]->()-[:EXPERIENCES]->(p))`);
+            }
+          }
+          
+          if (department) {
+            painPointQuery += ` MATCH (d:Department {name: $department})`;
+            painPointParams.department = department;
+            whereConditions.push(`(d)-[:EXPERIENCES]->(p)`);
+          }
+          
+          if (whereConditions.length > 0) {
+            painPointQuery += ` WHERE ` + whereConditions.join(' OR ');
+          }
+        }
+        
+        painPointQuery += ` RETURN DISTINCT p`;
+        
+        // Also get connected entities for context
+        const connectedQuery = `
+          MATCH (p:PainPoint)
+          OPTIONAL MATCH (s:Sector)-[r1:EXPERIENCES]->(p)
+          OPTIONAL MATCH (d:Department)-[r2:EXPERIENCES]->(p)
+          OPTIONAL MATCH (i:Industry)-[r3:HAS_SECTOR]->(s)
+          RETURN p, s, d, i, r1, r2, r3
+        `;
+        
+        const painPointResult = await session.run(getVersionedQuery(painPointQuery, version), painPointParams);
+        const connectedResult = await session.run(getVersionedQuery(connectedQuery, version));
+        
+        // Add pain point nodes
+        painPointResult.records.forEach(record => {
+          const node = record.get('p');
+          const nodeData = {
+            id: node.identity.toString(),
+            label: node.properties.name || 'Unnamed',
+            group: 'PainPoint',
+            properties: node.properties
+          };
+          nodeMap.set(nodeData.id, nodeData);
+        });
+        
+        // Add connected entities and relationships
+        connectedResult.records.forEach(record => {
+          const painPoint = record.get('p');
+          const sector = record.get('s');
+          const dept = record.get('d');
+          const industryNode = record.get('i');
+          
+          const painPointId = painPoint.identity.toString();
+          
+          // Only process if this pain point is in our filtered set
+          if (!nodeMap.has(painPointId)) return;
+          
+          // Add sector and its connections
+          if (sector) {
+            const sectorId = sector.identity.toString();
+            if (!nodeMap.has(sectorId)) {
+              nodeMap.set(sectorId, {
+                id: sectorId,
+                label: sector.properties.name || 'Unnamed',
+                group: 'Sector',
+                properties: sector.properties
+              });
+            }
+            
+            // Add sector -> painpoint edge
+            const sectorEdgeId = `${sectorId}-${painPointId}-EXPERIENCES`;
+            if (!edgeMap.has(sectorEdgeId)) {
+              edgeMap.set(sectorEdgeId, {
+                id: sectorEdgeId,
+                from: sectorId,
+                to: painPointId,
+                label: 'EXPERIENCES',
+                type: 'EXPERIENCES',
+                properties: {}
+              });
+            }
+            
+            // Add industry -> sector edge if industry exists
+            if (industryNode) {
+              const industryId = industryNode.identity.toString();
+              if (!nodeMap.has(industryId)) {
+                nodeMap.set(industryId, {
+                  id: industryId,
+                  label: industryNode.properties.name || 'Unnamed',
+                  group: 'Industry',
+                  properties: industryNode.properties
+                });
+              }
+              
+              const industryEdgeId = `${industryId}-${sectorId}-HAS_SECTOR`;
+              if (!edgeMap.has(industryEdgeId)) {
+                edgeMap.set(industryEdgeId, {
+                  id: industryEdgeId,
+                  from: industryId,
+                  to: sectorId,
+                  label: 'HAS_SECTOR',
+                  type: 'HAS_SECTOR',
+                  properties: {}
+                });
+              }
+            }
+          }
+          
+          // Add department and its connections
+          if (dept) {
+            const deptId = dept.identity.toString();
+            if (!nodeMap.has(deptId)) {
+              nodeMap.set(deptId, {
+                id: deptId,
+                label: dept.properties.name || 'Unnamed',
+                group: 'Department',
+                properties: dept.properties
+              });
+            }
+            
+            // Add department -> painpoint edge
+            const deptEdgeId = `${deptId}-${painPointId}-EXPERIENCES`;
+            if (!edgeMap.has(deptEdgeId)) {
+              edgeMap.set(deptEdgeId, {
+                id: deptEdgeId,
+                from: deptId,
+                to: painPointId,
+                label: 'EXPERIENCES',
+                type: 'EXPERIENCES',
+                properties: {}
+              });
+            }
+          }
+        });
+        break;
+        
+      default:
+        // For other node types, keep existing behavior
+        const defaultQuery = getVersionedQuery(`MATCH (n:${primaryLabel}) RETURN n`, version);
+        const defaultResult = await session.run(defaultQuery);
+        
+        defaultResult.records.forEach(record => {
+          const node = record.get('n');
+          const nodeData = {
+            id: node.identity.toString(),
+            label: node.properties.name || node.properties.title || 'Unnamed',
+            group: primaryLabel,
+            properties: node.properties
+          };
+          nodeMap.set(nodeData.id, nodeData);
+        });
+    }
+    
+    const finalNodes = Array.from(nodeMap.values());
+    const finalEdges = Array.from(edgeMap.values());
+    
+    res.json({
+      nodes: finalNodes,
+      edges: finalEdges,
+      stats: {
+        nodeCount: finalNodes.length,
+        edgeCount: finalEdges.length,
+        nodeTypes: Array.from(new Set(finalNodes.map(n => n.group)))
+      }
+    });
+    
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Execute custom query
+app.post('/api/admin/query', async (req, res) => {
+  const session = driver.session();
+  const { query, version } = req.body;
+  
+  try {
+    // Apply versioning to the query if needed
+    const versionedQuery = getVersionedQuery(query, version);
+    
+    const result = await session.run(versionedQuery);
+    
+    const results = result.records.map((record, index) => {
+      const recordData = {};
+      record.keys.forEach(key => {
+        const value = record.get(key);
+        
+        // Handle different Neo4j data types
+        if (value && typeof value === 'object') {
+          if (value.identity !== undefined) {
+            // This is a Node
+            recordData[key] = {
+              id: value.identity.toString(),
+              labels: value.labels,
+              properties: value.properties
+            };
+          } else if (value.start !== undefined && value.end !== undefined) {
+            // This is a Relationship
+            recordData[key] = {
+              id: value.identity.toString(),
+              type: value.type,
+              start: value.start.toString(),
+              end: value.end.toString(),
+              properties: value.properties
+            };
+          } else {
+            recordData[key] = value;
+          }
+        } else {
+          recordData[key] = value;
+        }
+      });
+      return recordData;
+    });
+    
+    res.json(results);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Export graph as Cypher script
+app.get('/api/admin/export', async (req, res) => {
+  const session = driver.session();
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  try {
+    const cypherScript = await generateCypherExport(session, version);
+    
+    // Set headers for file download
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Disposition', `attachment; filename="graph-export-${version}-${new Date().toISOString().split('T')[0]}.cypher"`);
+    
+    res.send(cypherScript);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Generate human-readable Cypher export
+async function generateCypherExport(session, version = GRAPH_VERSIONS.BASE) {
+  const lines = [];
+  
+  // Header
+  lines.push('// AI Catalog Graph Export');
+  lines.push(`// Generated: ${new Date().toISOString()}`);
+  lines.push(`// Version: ${version}`);
+  lines.push('// This script recreates the complete graph structure');
+  lines.push('');
+  
+  // Clear existing data warning
+  lines.push('// WARNING: This script will clear all existing data!');
+  lines.push('// Uncomment the next line to clear the database before import');
+  lines.push('// MATCH (n) DETACH DELETE n;');
+  lines.push('');
+  
+  // Node creation sections
+  const nodeTypes = [
+    { type: 'Industry', label: 'Industries', icon: '🏢' },
+    { type: 'Sector', label: 'Sectors', icon: '🏛️' },
+    { type: 'Department', label: 'Departments', icon: '🏢' },
+    { type: 'PainPoint', label: 'Pain Points', icon: '⚠️' },
+    { type: 'ProjectBlueprint', label: 'Project Blueprints', icon: '📋' },
+    { type: 'ProjectOpportunity', label: 'Project Opportunities', icon: '🚀' },
+    { type: 'Role', label: 'Roles', icon: '👤' },
+    { type: 'SubModule', label: 'Sub-modules', icon: '🔧' },
+    { type: 'Module', label: 'Modules', icon: '📦' }
+  ];
+  
+  for (const nodeType of nodeTypes) {
+    lines.push(`// ==========================================`);
+    lines.push(`// ${nodeType.icon} ${nodeType.label}`);
+    lines.push(`// ==========================================`);
+    lines.push('');
+    
+    // Get all nodes of this type
+    const query = getVersionedQuery(`MATCH (n:${nodeType.type}) RETURN n ORDER BY n.name, n.title`, version);
+    const result = await session.run(query);
+    
+    if (result.records.length === 0) {
+      lines.push(`// No ${nodeType.label.toLowerCase()} found`);
+      lines.push('');
+      continue;
+    }
+    
+    result.records.forEach((record, index) => {
+      const node = record.get('n');
+      const props = node.properties;
+      
+      // Format properties for Cypher
+      const propStrings = Object.entries(props).map(([key, value]) => {
+        if (typeof value === 'string') {
+          // Escape single quotes and wrap in single quotes
+          const escapedValue = value.replace(/'/g, "\\'");
+          return `${key}: '${escapedValue}'`;
+        } else {
+          return `${key}: ${JSON.stringify(value)}`;
+        }
+      });
+      
+      const propString = propStrings.length > 0 ? `{${propStrings.join(', ')}}` : '';
+      lines.push(`MERGE (${nodeType.type.toLowerCase()}_${index + 1}:${nodeType.type} ${propString})`);
+    });
+    
+    lines.push('');
+  }
+  
+  // Relationship creation section
+  lines.push('// ==========================================');
+  lines.push('// 🔗 Relationships');
+  lines.push('// ==========================================');
+  lines.push('');
+  
+  // Get all relationships
+  const relationshipTypes = [
+    'HAS_SECTOR',
+    'EXPERIENCES', 
+    'HAS_OPPORTUNITY',
+    'ADDRESSES',
+    'IS_INSTANCE_OF',
+    'REQUIRES_ROLE',
+    'NEEDS_SUBMODULE',
+    'CONTAINS'
+  ];
+  
+  for (const relType of relationshipTypes) {
+    lines.push(`// ${relType} relationships`);
+    
+    let relQuery = `MATCH (a)-[r:${relType}]->(b) RETURN a, r, b, type(r) as relType ORDER BY a.name, b.name`;
+    if (version !== GRAPH_VERSIONS.BASE) {
+      relQuery = `MATCH (a)-[r:${relType}]->(b) WHERE any(label in labels(a) WHERE label ENDS WITH "_${version}") AND any(label in labels(b) WHERE label ENDS WITH "_${version}") RETURN a, r, b, type(r) as relType ORDER BY a.name, b.name`;
+    }
+    
+    const relResult = await session.run(relQuery);
+    
+    if (relResult.records.length === 0) {
+      lines.push(`// No ${relType} relationships found`);
+      lines.push('');
+      continue;
+    }
+    
+    relResult.records.forEach(relRecord => {
+      const sourceNode = relRecord.get('a');
+      const targetNode = relRecord.get('b');
+      const relationship = relRecord.get('r');
+      const relTypeActual = relRecord.get('relType');
+      
+      // Create match patterns for source and target nodes
+      const sourceLabel = sourceNode.labels[0].replace(/_admin_draft$/, '');
+      const targetLabel = targetNode.labels[0].replace(/_admin_draft$/, '');
+      
+      const sourceIdentifier = sourceNode.properties.name || sourceNode.properties.title;
+      const targetIdentifier = targetNode.properties.name || targetNode.properties.title;
+      
+      if (!sourceIdentifier || !targetIdentifier) {
+        return; // Skip if we can't identify the nodes
+      }
+      
+      // Format the relationship creation
+      let relProps = '';
+      if (relationship.properties && Object.keys(relationship.properties).length > 0) {
+        const relPropStrings = Object.entries(relationship.properties).map(([key, value]) => {
+          if (typeof value === 'string') {
+            const escapedValue = value.replace(/'/g, "\\'");
+            return `${key}: '${escapedValue}'`;
+          } else {
+            return `${key}: ${JSON.stringify(value)}`;
+          }
+        });
+        relProps = ` {${relPropStrings.join(', ')}}`;
+      }
+      
+      const sourceMatch = `MATCH (src:${sourceLabel} {${sourceIdentifier.includes(' ') ? 'name' : (sourceLabel === 'ProjectBlueprint' || sourceLabel === 'ProjectOpportunity' ? 'title' : 'name')}: '${sourceIdentifier.replace(/'/g, "\\'")}'})`; 
+      const targetMatch = `MATCH (tgt:${targetLabel} {${targetIdentifier.includes(' ') ? 'name' : (targetLabel === 'ProjectBlueprint' || targetLabel === 'ProjectOpportunity' ? 'title' : 'name')}: '${targetIdentifier.replace(/'/g, "\\'")}'})`; 
+      
+      lines.push(`${sourceMatch}`);
+      lines.push(`${targetMatch}`);
+      lines.push(`CREATE (src)-[:${relTypeActual}${relProps}]->(tgt)`);
+      lines.push('');
+    });
+    
+    lines.push('');
+  }
+  
+  // Footer
+  lines.push('// ==========================================');
+  lines.push('// ✅ Export Complete');
+  lines.push('// ==========================================');
+  lines.push('');
+  lines.push('// To verify the import was successful, run:');
+  lines.push('// MATCH (n) RETURN labels(n), count(n) ORDER BY labels(n)');
+  
+  return lines.join('\n');
+}
+
 process.on('exit', () => {
   driver.close();
 });
