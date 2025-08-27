@@ -1430,21 +1430,21 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
         break;
         
       case 'PainPoint':
-        // PainPoints: Filter by industry, sector, department or show all
+        // PainPoints: Filter by industries, sector, department or show all
         let painPointQuery = `MATCH (p:PainPoint)`;
         let whereConditions = [];
         let painPointParams = {};
         
-        if (industry || sector || department) {
-          if (industry) {
-            painPointQuery += ` MATCH (i:Industry {name: $industry})`;
-            painPointParams.industry = industry;
+        if (industries.length > 0 || sector || department) {
+          if (industries.length > 0) {
+            painPointQuery += ` MATCH (i:Industry)`;
+            painPointParams.industries = industries;
             if (sector) {
               painPointQuery += `-[:HAS_SECTOR]->(s:Sector {name: $sector})`;
               painPointParams.sector = sector;
-              whereConditions.push(`(s)-[:EXPERIENCES]->(p)`);
+              whereConditions.push(`i.name IN $industries AND (s)-[:EXPERIENCES]->(p)`);
             } else {
-              whereConditions.push(`EXISTS((i)-[:HAS_SECTOR]->()-[:EXPERIENCES]->(p))`);
+              whereConditions.push(`i.name IN $industries AND EXISTS((i)-[:HAS_SECTOR]->()-[:EXPERIENCES]->(p))`);
             }
           }
           

@@ -36,7 +36,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   nodeType,
   onNodeSelect, 
   onNodeDoubleClick,
-  height = '600px' 
+  height = '700px' 
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -45,8 +45,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
   const animationRef = useRef<number>();
 
-  const width = 800;
-  const heightNum = parseInt(height) || 600;
+  const width = 1200; // Increased width for better subgraph separation
+  const heightNum = parseInt(height) || 700; // Increased height for hierarchy
 
   // Color scheme for different node types
   const getNodeColor = (group: string): string => {
@@ -96,31 +96,112 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return radii[group] || 16;
   };
 
-  // Simple force simulation
+  // Detect connected components (subgraphs)
+  const findConnectedComponents = useCallback((nodes: GraphNode[], edges: GraphEdge[]) => {
+    const visited = new Set<string>();
+    const components: GraphNode[][] = [];
+    
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const adjacencyList = new Map<string, string[]>();
+    
+    // Build adjacency list
+    nodes.forEach(node => adjacencyList.set(node.id, []));
+    edges.forEach(edge => {
+      adjacencyList.get(edge.from)?.push(edge.to);
+      adjacencyList.get(edge.to)?.push(edge.from);
+    });
+    
+    const dfs = (nodeId: string, component: GraphNode[]) => {
+      if (visited.has(nodeId)) return;
+      visited.add(nodeId);
+      const node = nodeMap.get(nodeId);
+      if (node) component.push(node);
+      
+      adjacencyList.get(nodeId)?.forEach(neighborId => {
+        if (!visited.has(neighborId)) {
+          dfs(neighborId, component);
+        }
+      });
+    };
+    
+    nodes.forEach(node => {
+      if (!visited.has(node.id)) {
+        const component: GraphNode[] = [];
+        dfs(node.id, component);
+        if (component.length > 0) {
+          components.push(component);
+        }
+      }
+    });
+    
+    return components;
+  }, []);
+
+  // Advanced force simulation with subgraph separation and hierarchy
   const runSimulation = useCallback(() => {
     if (simulationNodes.length === 0) return;
 
     const alpha = 0.01;
-    const centerForce = 0.005;
-    const repelForce = 1200;
-    const linkForce = 0.02;
-    const linkDistance = 120;
+    const repelForce = 2000; // Increased repulsion
+    const linkForce = 0.03;
+    const linkDistance = 150; // Increased link distance
+    const subgraphSeparation = 300; // Distance between disconnected subgraphs
+    const hierarchyForce = 0.008; // Force for vertical hierarchy
 
     const newNodes = simulationNodes.map(node => ({ ...node }));
+    const components = findConnectedComponents(newNodes, edges);
 
-    // Center force
-    const centerX = width / 2;
-    const centerY = heightNum / 2;
-    newNodes.forEach(node => {
-      if (!node.fx && !node.fy) {
-        const dx = centerX - (node.x || 0);
-        const dy = centerY - (node.y || 0);
-        node.vx = (node.vx || 0) + dx * centerForce;
-        node.vy = (node.vy || 0) + dy * centerForce;
-      }
+    // Position subgraphs separately
+    components.forEach((component, componentIndex) => {
+      const componentCenterX = (componentIndex % 2) === 0 
+        ? width * 0.3 + (Math.floor(componentIndex / 2) * subgraphSeparation)
+        : width * 0.7 + (Math.floor(componentIndex / 2) * subgraphSeparation);
+      const componentCenterY = heightNum / 2 + (componentIndex - components.length / 2) * 200;
+
+      // Apply center force for each subgraph
+      component.forEach(node => {
+        if (!node.fx && !node.fy) {
+          const dx = componentCenterX - (node.x || 0);
+          const dy = componentCenterY - (node.y || 0);
+          node.vx = (node.vx || 0) + dx * 0.003;
+          node.vy = (node.vy || 0) + dy * 0.003;
+        }
+      });
+
+      // Apply hierarchy force within each subgraph
+      // Industries at top -> Sectors in middle -> Pain Points at bottom -> Other nodes
+      component.forEach(node => {
+        if (!node.fx && !node.fy) {
+          let targetY = componentCenterY;
+          
+          // Top tier: Industry nodes (highest)
+          if (node.group === 'Industry') {
+            targetY = componentCenterY - 120;
+          }
+          // Middle tier: Sector and Department nodes
+          else if (node.group === 'Sector' || node.group === 'Department') {
+            targetY = componentCenterY - 30;
+          }
+          // Lower tier: Pain Points
+          else if (node.group === 'PainPoint') {
+            targetY = componentCenterY + 80;
+          }
+          // Bottom tier: Projects and related nodes
+          else if (node.group === 'ProjectOpportunity' || node.group === 'ProjectBlueprint') {
+            targetY = componentCenterY + 150;
+          }
+          // Mid-level: Roles, Modules, and other support nodes
+          else {
+            targetY = componentCenterY + 20;
+          }
+          
+          const dy = targetY - (node.y || 0);
+          node.vy = (node.vy || 0) + dy * hierarchyForce;
+        }
+      });
     });
 
-    // Repel force between nodes
+    // Enhanced repel force between nodes
     for (let i = 0; i < newNodes.length; i++) {
       for (let j = i + 1; j < newNodes.length; j++) {
         const nodeA = newNodes[i];
@@ -130,7 +211,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
         const dy = (nodeB.y || 0) - (nodeA.y || 0);
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        if (distance > 0 && distance < 200) {
+        // Increased minimum distance threshold
+        if (distance > 0 && distance < 300) {
           const force = repelForce / (distance * distance);
           const forceX = (dx / distance) * force;
           const forceY = (dy / distance) * force;
@@ -147,7 +229,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
       }
     }
 
-    // Link force
+    // Link force (attracts connected nodes)
     edges.forEach(edge => {
       const source = newNodes.find(n => n.id === edge.from);
       const target = newNodes.find(n => n.id === edge.to);
@@ -177,36 +259,82 @@ const GraphViz: React.FC<GraphVizProps> = ({
     // Apply velocity and damping
     newNodes.forEach(node => {
       if (!node.fx && !node.fy) {
-        node.vx = (node.vx || 0) * 0.9; // damping
-        node.vy = (node.vy || 0) * 0.9;
+        node.vx = (node.vx || 0) * 0.85; // Slightly less damping for more movement
+        node.vy = (node.vy || 0) * 0.85;
         
         node.x = (node.x || 0) + (node.vx || 0);
         node.y = (node.y || 0) + (node.vy || 0);
         
         // Keep nodes in bounds
         const radius = getNodeRadius(node.group);
-        node.x = Math.max(radius, Math.min(width - radius, node.x));
-        node.y = Math.max(radius, Math.min(heightNum - radius, node.y));
+        node.x = Math.max(radius + 10, Math.min(width - radius - 10, node.x));
+        node.y = Math.max(radius + 10, Math.min(heightNum - radius - 10, node.y));
       }
     });
 
     setSimulationNodes(newNodes);
-  }, [simulationNodes, edges, width, heightNum]);
+  }, [simulationNodes, edges, width, heightNum, findConnectedComponents]);
 
-  // Initialize node positions
+  // Initialize node positions with better spacing and hierarchy
   useEffect(() => {
     if (nodes.length === 0) return;
 
-    const initialNodes = nodes.map((node, i) => ({
-      ...node,
-      x: Math.random() * (width - 100) + 50,
-      y: Math.random() * (heightNum - 100) + 50,
-      vx: 0,
-      vy: 0
-    }));
+    // Find connected components for initial positioning
+    const components = findConnectedComponents(nodes, edges);
+    const allInitialNodes: GraphNode[] = [];
     
-    setSimulationNodes(initialNodes);
-  }, [nodes, width, heightNum]);
+    components.forEach((component, componentIndex) => {
+      // Position each subgraph in different areas
+      const baseX = (componentIndex % 2) === 0 ? width * 0.3 : width * 0.7;
+      const baseY = heightNum / 2 + (componentIndex - components.length / 2) * 250;
+      
+      component.forEach((node, nodeIndex) => {
+        let x = baseX + (Math.random() - 0.5) * 200;
+        let y = baseY + (Math.random() - 0.5) * 150;
+        
+        // Apply initial hierarchy positioning
+        if (node.group === 'Industry') {
+          y = baseY - 120 + (Math.random() - 0.5) * 30;
+        } else if (node.group === 'Sector' || node.group === 'Department') {
+          y = baseY - 30 + (Math.random() - 0.5) * 30;
+        } else if (node.group === 'PainPoint') {
+          y = baseY + 80 + (Math.random() - 0.5) * 40;
+        } else if (node.group === 'ProjectOpportunity' || node.group === 'ProjectBlueprint') {
+          y = baseY + 150 + (Math.random() - 0.5) * 30;
+        } else {
+          y = baseY + 20 + (Math.random() - 0.5) * 30;
+        }
+        
+        // Ensure nodes stay in bounds
+        const radius = getNodeRadius(node.group);
+        x = Math.max(radius + 20, Math.min(width - radius - 20, x));
+        y = Math.max(radius + 20, Math.min(heightNum - radius - 20, y));
+        
+        allInitialNodes.push({
+          ...node,
+          x,
+          y,
+          vx: 0,
+          vy: 0
+        });
+      });
+    });
+    
+    // Handle isolated nodes (not in any component)
+    nodes.forEach((node, i) => {
+      if (!allInitialNodes.find(n => n.id === node.id)) {
+        allInitialNodes.push({
+          ...node,
+          x: Math.random() * (width - 100) + 50,
+          y: Math.random() * (heightNum - 100) + 50,
+          vx: 0,
+          vy: 0
+        });
+      }
+    });
+    
+    setSimulationNodes(allInitialNodes);
+  }, [nodes, edges, width, heightNum, findConnectedComponents]);
 
   // Animation loop
   useEffect(() => {
@@ -464,7 +592,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
       <div className="graph-instructions">
         <p>
           <strong>Instructions:</strong> 
-          Drag nodes to reposition • Click to select • Double-click to edit • Nodes auto-arrange based on relationships
+          Drag nodes to reposition • Click to select • Double-click to edit • 
+          Disconnected subgraphs are automatically separated • Visual hierarchy: Industries (top) → Sectors/Departments → Pain Points → Projects (bottom)
         </p>
       </div>
     </div>

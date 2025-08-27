@@ -1102,6 +1102,7 @@
   padding: 2rem;
   background: white;
   border-radius: 0 12px 12px 0;
+  color: #374151;
 }
 
 .admin-overview h3 {
@@ -1466,6 +1467,8 @@
   border-radius: 8px;
   padding: 1rem;
   margin: 1rem 0;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .graph-controls {
@@ -1834,6 +1837,38 @@
   ring: 2px;
   ring-color: #3b82f6;
   border-color: #3b82f6;
+}
+
+/* Checkbox styling for admin dashboard */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #374151 !important;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  margin-right: 1rem;
+  user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+.industry-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.industry-checkboxes > label:first-child {
+  color: #374151 !important;
+  font-weight: 600;
+  margin-right: 0.75rem;
 }
 
 .painpoint-filters {

@@ -1311,6 +1311,9 @@ const App: React.FC = () => {
                   setAdminActiveSection('industries');
                   resetFilters();
                   fetchAdminNodes('industry', currentGraphVersion);
+                  if (viewMode === 'graph') {
+                    fetchGraphData('industries');
+                  }
                 }}
               >
                 🏢 Industries
@@ -1321,6 +1324,9 @@ const App: React.FC = () => {
                   setAdminActiveSection('sectors');
                   resetFilters();
                   fetchAdminNodes('sector', currentGraphVersion);
+                  if (viewMode === 'graph') {
+                    fetchGraphData('sectors');
+                  }
                 }}
               >
                 🏛️ Sectors
@@ -1331,6 +1337,9 @@ const App: React.FC = () => {
                   setAdminActiveSection('departments');
                   resetFilters();
                   fetchAdminNodes('department', currentGraphVersion);
+                  if (viewMode === 'graph') {
+                    fetchGraphData('departments');
+                  }
                 }}
               >
                 🏢 Departments
@@ -1341,6 +1350,9 @@ const App: React.FC = () => {
                   setAdminActiveSection('painpoints');
                   resetFilters();
                   fetchAdminNodes('painpoint', currentGraphVersion);
+                  if (viewMode === 'graph') {
+                    fetchGraphData('painpoints');
+                  }
                 }}
               >
                 ⚠️ Pain Points
@@ -1351,6 +1363,9 @@ const App: React.FC = () => {
                   setAdminActiveSection('projects');
                   resetFilters();
                   fetchAdminNodes('project', currentGraphVersion);
+                  if (viewMode === 'graph') {
+                    fetchGraphData('projects');
+                  }
                 }}
               >
                 🚀 Projects
