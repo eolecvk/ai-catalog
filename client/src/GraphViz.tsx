@@ -42,11 +42,29 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [simulationNodes, setSimulationNodes] = useState<GraphNode[]>([]);
+  const [componentCount, setComponentCount] = useState<number>(1);
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
   const animationRef = useRef<number>();
 
-  const width = 1200; // Increased width for better subgraph separation
-  const heightNum = parseInt(height) || 700; // Increased height for hierarchy
+  // Calculate adaptive canvas size based on number of nodes and components
+  const baseWidth = 1200;
+  const baseHeight = parseInt(height) || 700;
+  
+  // Auto-zoom calculation: zoom out when there are many nodes
+  const nodeCount = nodes.length;
+  
+  // Estimate component count based on node count and edge density for initial sizing
+  // This is a rough estimate - the exact count will be calculated later in the simulation
+  const estimatedComponentCount = Math.max(1, Math.min(nodeCount / 5, edges.length === 0 ? nodeCount : Math.ceil(nodeCount / 10)));
+  
+  // Scale factor based on complexity (more nodes = zoom out more)
+  const nodeScaleFactor = Math.max(1, Math.sqrt(nodeCount / 20)); // Starts scaling after 20 nodes
+  const componentScaleFactor = Math.max(1, estimatedComponentCount / 3); // Starts scaling after 3 components
+  const combinedScaleFactor = Math.max(nodeScaleFactor, componentScaleFactor);
+  
+  // Apply scaling to canvas dimensions
+  const width = Math.min(3000, baseWidth * combinedScaleFactor); // Cap at 3000px
+  const heightNum = Math.min(2000, baseHeight * Math.max(1, combinedScaleFactor * 0.8)); // Cap at 2000px
 
   // Color scheme for different node types
   const getNodeColor = (group: string): string => {
@@ -145,24 +163,48 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const repelForce = 2000; // Increased repulsion
     const linkForce = 0.03;
     const linkDistance = 150; // Increased link distance
-    const subgraphSeparation = 300; // Distance between disconnected subgraphs
     const hierarchyForce = 0.008; // Force for vertical hierarchy
 
     const newNodes = simulationNodes.map(node => ({ ...node }));
     const components = findConnectedComponents(newNodes, edges);
 
-    // Position subgraphs separately
+    // Update component count state
+    const numComponents = components.length;
+    if (numComponents !== componentCount) {
+      setComponentCount(numComponents);
+    }
+
+    // Calculate adaptive layout parameters based on number of components and nodes
+    const totalNodes = newNodes.length;
+    
+    // Adaptive subgraph separation based on number of components and canvas size
+    const baseSubgraphSeparation = Math.max(300, Math.min(500, width / (numComponents + 1)));
+    const adaptiveSubgraphSeparation = numComponents > 4 ? baseSubgraphSeparation * 0.8 : baseSubgraphSeparation;
+    
+    // Calculate grid layout for better space utilization
+    const componentsPerRow = Math.ceil(Math.sqrt(numComponents));
+    const maxComponentsPerRow = Math.max(2, Math.min(componentsPerRow, Math.floor(width / adaptiveSubgraphSeparation)));
+    
+    // Position subgraphs in a grid pattern for better space utilization
     components.forEach((component, componentIndex) => {
-      const componentCenterX = (componentIndex % 2) === 0 
-        ? width * 0.3 + (Math.floor(componentIndex / 2) * subgraphSeparation)
-        : width * 0.7 + (Math.floor(componentIndex / 2) * subgraphSeparation);
-      const componentCenterY = heightNum / 2 + (componentIndex - components.length / 2) * 200;
+      const row = Math.floor(componentIndex / maxComponentsPerRow);
+      const col = componentIndex % maxComponentsPerRow;
+      const totalRows = Math.ceil(numComponents / maxComponentsPerRow);
+      
+      // Calculate center position for this component
+      const componentCenterX = (col + 0.5) * (width / maxComponentsPerRow);
+      const componentCenterY = (row + 0.5) * (heightNum / totalRows);
+      
+      // Ensure components don't overlap by adding minimum separation
+      const finalCenterX = Math.max(adaptiveSubgraphSeparation / 2, 
+        Math.min(width - adaptiveSubgraphSeparation / 2, componentCenterX));
+      const finalCenterY = Math.max(200, Math.min(heightNum - 200, componentCenterY));
 
       // Apply center force for each subgraph
       component.forEach(node => {
         if (!node.fx && !node.fy) {
-          const dx = componentCenterX - (node.x || 0);
-          const dy = componentCenterY - (node.y || 0);
+          const dx = finalCenterX - (node.x || 0);
+          const dy = finalCenterY - (node.y || 0);
           node.vx = (node.vx || 0) + dx * 0.003;
           node.vy = (node.vy || 0) + dy * 0.003;
         }
@@ -172,27 +214,27 @@ const GraphViz: React.FC<GraphVizProps> = ({
       // Industries at top -> Sectors in middle -> Pain Points at bottom -> Other nodes
       component.forEach(node => {
         if (!node.fx && !node.fy) {
-          let targetY = componentCenterY;
+          let targetY = finalCenterY;
           
           // Top tier: Industry nodes (highest)
           if (node.group === 'Industry') {
-            targetY = componentCenterY - 120;
+            targetY = finalCenterY - 120;
           }
           // Middle tier: Sector and Department nodes
           else if (node.group === 'Sector' || node.group === 'Department') {
-            targetY = componentCenterY - 30;
+            targetY = finalCenterY - 30;
           }
           // Lower tier: Pain Points
           else if (node.group === 'PainPoint') {
-            targetY = componentCenterY + 80;
+            targetY = finalCenterY + 80;
           }
           // Bottom tier: Projects and related nodes
           else if (node.group === 'ProjectOpportunity' || node.group === 'ProjectBlueprint') {
-            targetY = componentCenterY + 150;
+            targetY = finalCenterY + 150;
           }
           // Mid-level: Roles, Modules, and other support nodes
           else {
-            targetY = componentCenterY + 20;
+            targetY = finalCenterY + 20;
           }
           
           const dy = targetY - (node.y || 0);
@@ -284,9 +326,18 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const allInitialNodes: GraphNode[] = [];
     
     components.forEach((component, componentIndex) => {
-      // Position each subgraph in different areas
-      const baseX = (componentIndex % 2) === 0 ? width * 0.3 : width * 0.7;
-      const baseY = heightNum / 2 + (componentIndex - components.length / 2) * 250;
+      // Calculate grid layout parameters (same as simulation)
+      const numComponents = components.length;
+      const componentsPerRow = Math.ceil(Math.sqrt(numComponents));
+      const maxComponentsPerRow = Math.max(2, Math.min(componentsPerRow, Math.floor(width / 350)));
+      
+      // Position each subgraph in grid pattern
+      const row = Math.floor(componentIndex / maxComponentsPerRow);
+      const col = componentIndex % maxComponentsPerRow;
+      const totalRows = Math.ceil(numComponents / maxComponentsPerRow);
+      
+      const baseX = (col + 0.5) * (width / maxComponentsPerRow);
+      const baseY = (row + 0.5) * (heightNum / totalRows);
       
       component.forEach((node, nodeIndex) => {
         let x = baseX + (Math.random() - 0.5) * 200;
@@ -438,6 +489,14 @@ const GraphViz: React.FC<GraphVizProps> = ({
           <div className="info-stat">
             <strong>Connections:</strong> {edges.length}
           </div>
+          <div className="info-stat">
+            <strong>Subgraphs:</strong> {componentCount}
+          </div>
+          {combinedScaleFactor > 1.2 && (
+            <div className="info-stat" style={{ color: '#3498db' }}>
+              <strong>Auto-zoom:</strong> {Math.round((1/combinedScaleFactor) * 100)}%
+            </div>
+          )}
           {selectedNode && (
             <div className="info-stat selected">
               <strong>Selected:</strong> {simulationNodes.find(n => n.id === selectedNode)?.label}
@@ -449,11 +508,11 @@ const GraphViz: React.FC<GraphVizProps> = ({
       <div 
         className="graph-canvas-2d"
         style={{ 
-          height, 
+          height: `${Math.min(800, heightNum + 50)}px`, // Adaptive height with max limit
           border: '1px solid #bdc3c7',
           borderRadius: '8px',
           backgroundColor: '#f8f9fa',
-          overflow: 'hidden',
+          overflow: 'auto', // Allow scrolling for large graphs
           position: 'relative'
         }}
       >
@@ -593,7 +652,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
         <p>
           <strong>Instructions:</strong> 
           Drag nodes to reposition • Click to select • Double-click to edit • 
-          Disconnected subgraphs are automatically separated • Visual hierarchy: Industries (top) → Sectors/Departments → Pain Points → Projects (bottom)
+          Subgraphs auto-arranged in grid layout • Auto-zoom adjusts for complex graphs • 
+          Visual hierarchy: Industries (top) → Sectors/Departments → Pain Points → Projects (bottom)
         </p>
       </div>
     </div>
