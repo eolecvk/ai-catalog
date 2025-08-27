@@ -478,16 +478,6 @@ const App: React.FC = () => {
     }
   };
 
-  const fetchAvailableVersions = async () => {
-    try {
-      const response = await fetch('/api/admin/versions');
-      const versions = await response.json();
-      setAvailableVersions(versions);
-    } catch (error) {
-      console.error('Error fetching versions:', error);
-    }
-  };
-
   const createDraftVersion = async () => {
     setAdminLoading(true);
     try {
@@ -689,7 +679,18 @@ const App: React.FC = () => {
     }
   };
 
+  const [exportLoading, setExportLoading] = useState(false);
+  
+  // Import state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importVersionName, setImportVersionName] = useState('');
+  const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
+  const [importResult, setImportResult] = useState<{ success: boolean; message: string; versionName?: string } | null>(null);
+
   const handleExportGraph = async () => {
+    setExportLoading(true);
     try {
       const response = await fetch(`/api/admin/export?version=${currentGraphVersion}`);
       
@@ -719,14 +720,119 @@ const App: React.FC = () => {
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
         
-        alert(`Graph exported successfully as ${filename}`);
+        alert(`✅ Graph exported successfully!\n\nFile: ${filename}\nVersion: ${currentGraphVersion}\n\nThe exported Cypher file includes:\n• Complete schema documentation\n• All nodes and relationships\n• Import instructions`);
       } else {
         const error = await response.json();
-        alert(`Export error: ${error.error}`);
+        alert(`❌ Export failed: ${error.error}`);
       }
     } catch (error) {
       console.error('Export error:', error);
-      alert('Failed to export graph');
+      alert('❌ Failed to export graph. Please check the console for details.');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleImportGraph = async () => {
+    if (!importFile || !importVersionName.trim()) {
+      alert('⚠️ Please select a file and enter a version name');
+      return;
+    }
+
+    setImportLoading(true);
+    setImportValidationErrors([]);
+    setImportResult(null);
+
+    try {
+      const fileContent = await importFile.text();
+      
+      const response = await fetch('/api/admin/import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+          'X-Version-Name': importVersionName.trim(),
+        },
+        body: fileContent,
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        setImportResult({
+          success: true,
+          message: `✅ Import successful!\n\nVersion: ${result.versionName}\nNodes: ${result.stats?.nodeCount || 0}\nRelationships: ${result.stats?.relationshipCount || 0}`,
+          versionName: result.versionName
+        });
+        
+        // Refresh available versions
+        await fetchAvailableVersions();
+        
+        // Clear form
+        setImportFile(null);
+        setImportVersionName('');
+        
+        // Auto-close modal after 3 seconds
+        setTimeout(() => {
+          setShowImportModal(false);
+          setImportResult(null);
+        }, 3000);
+      } else {
+        setImportResult({
+          success: false,
+          message: `❌ Import failed: ${result.error}`,
+        });
+        
+        if (result.validationErrors && result.validationErrors.length > 0) {
+          setImportValidationErrors(result.validationErrors);
+        }
+      }
+    } catch (error) {
+      console.error('Import error:', error);
+      setImportResult({
+        success: false,
+        message: '❌ Failed to import graph. Please check the console for details.',
+      });
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handlePromoteVersion = async (versionName: string) => {
+    if (!window.confirm(`Are you sure you want to promote '${versionName}' to base? This will backup the current base graph.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/promote/${encodeURIComponent(versionName)}`, {
+        method: 'POST',
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert(`✅ Version promoted successfully!\n\nNew base: ${versionName}\nBackup created: ${result.backupName}`);
+        
+        // Refresh available versions and switch to base
+        await fetchAvailableVersions();
+        setCurrentGraphVersion('base');
+      } else {
+        alert(`❌ Promotion failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Promotion error:', error);
+      alert('❌ Failed to promote version. Please check the console for details.');
+    }
+  };
+
+  const fetchAvailableVersions = async () => {
+    try {
+      const response = await fetch('/api/admin/versions');
+      if (response.ok) {
+        const versions = await response.json();
+        setAvailableVersions(versions);
+      }
+    } catch (error) {
+      console.error('Error fetching versions:', error);
     }
   };
 
@@ -781,6 +887,29 @@ const App: React.FC = () => {
   // Handle node double-click in graph (edit)
   const handleGraphNodeEdit = (nodeId: string, nodeData: any) => {
     handleEditNode(nodeData);
+  };
+
+  // Handle navigation to specific node in graph
+  const handleNavigateToNode = async (nodeId: string) => {
+    setGraphLoading(true);
+    try {
+      const response = await fetch(`/api/admin/node/${nodeId}/graph`);
+      if (response.ok) {
+        const data = await response.json();
+        setGraphData({
+          nodes: data.nodes,
+          edges: data.edges
+        });
+        // Optionally set the navigated node as selected
+        console.log('Navigated to node:', nodeId, 'with', data.nodes.length, 'nodes and', data.edges.length, 'edges');
+      } else {
+        console.error('Failed to navigate to node');
+      }
+    } catch (error) {
+      console.error('Error navigating to node:', error);
+    } finally {
+      setGraphLoading(false);
+    }
   };
 
   // Load filter options
@@ -1464,14 +1593,18 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="admin-actions">
-                  <button className="admin-action-btn primary">
+                  <button 
+                    className="admin-action-btn primary"
+                    onClick={() => setShowImportModal(true)}
+                  >
                     📥 Import Data
                   </button>
                   <button 
                     className="admin-action-btn secondary"
                     onClick={() => handleExportGraph()}
+                    disabled={exportLoading}
                   >
-                    📤 Export Graph
+                    {exportLoading ? '⏳ Exporting...' : '📤 Export Graph'}
                   </button>
                   <button 
                     className="admin-action-btn secondary"
@@ -1661,6 +1794,7 @@ const App: React.FC = () => {
                         nodeType={adminActiveSection}
                         onNodeSelect={handleGraphNodeSelect}
                         onNodeDoubleClick={handleGraphNodeEdit}
+                        onNavigateToNode={handleNavigateToNode}
                         height="500px"
                       />
                     )}
@@ -2625,6 +2759,129 @@ const App: React.FC = () => {
             </div>
           )}
         </>
+      )}
+
+      {/* Import Graph Modal */}
+      {showImportModal && (
+        <div className="modal-backdrop" onClick={() => setShowImportModal(false)}>
+          <div className="modal-content import-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Import Graph Data</h2>
+              <button className="modal-close" onClick={() => setShowImportModal(false)}>×</button>
+            </div>
+            
+            <div className="import-content">
+              <div className="import-info">
+                <p>Import a Cypher script to create a new graph version. The import will validate the schema and create a separate version that can be promoted to base later.</p>
+              </div>
+              
+              {!importResult && (
+                <form onSubmit={(e) => { e.preventDefault(); handleImportGraph(); }}>
+                  <div className="form-group">
+                    <label className="form-label">Version Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={importVersionName}
+                      onChange={(e) => setImportVersionName(e.target.value)}
+                      placeholder="e.g. import-2024-01-15"
+                      required
+                      disabled={importLoading}
+                    />
+                    <small className="form-help">Choose a unique name for this import version</small>
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="form-label">Cypher File *</label>
+                    <input
+                      type="file"
+                      className="form-input file-input"
+                      accept=".cypher,.cql,.txt"
+                      onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                      required
+                      disabled={importLoading}
+                    />
+                    <small className="form-help">Select a .cypher file exported from this system</small>
+                  </div>
+                  
+                  {importValidationErrors.length > 0 && (
+                    <div className="import-errors">
+                      <h4>❌ Schema Validation Errors:</h4>
+                      <ul>
+                        {importValidationErrors.map((error, index) => (
+                          <li key={index}>{error}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  <div className="import-actions">
+                    <button 
+                      type="button"
+                      className="modal-btn modal-btn-secondary"
+                      onClick={() => setShowImportModal(false)}
+                      disabled={importLoading}
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit"
+                      className="modal-btn modal-btn-primary"
+                      disabled={importLoading || !importFile || !importVersionName.trim()}
+                    >
+                      {importLoading ? '⏳ Importing...' : '📥 Import Graph'}
+                    </button>
+                  </div>
+                </form>
+              )}
+              
+              {importResult && (
+                <div className={`import-result ${importResult.success ? 'success' : 'error'}`}>
+                  <div className="result-message">
+                    {importResult.message.split('\n').map((line, index) => (
+                      <div key={index}>{line}</div>
+                    ))}
+                  </div>
+                  
+                  {importResult.success && importResult.versionName && (
+                    <div className="import-success-actions">
+                      <button 
+                        className="modal-btn modal-btn-primary"
+                        onClick={() => handlePromoteVersion(importResult.versionName!)}
+                      >
+                        🚀 Promote to Base
+                      </button>
+                      <button 
+                        className="modal-btn modal-btn-secondary"
+                        onClick={() => {
+                          setCurrentGraphVersion(importResult.versionName!);
+                          setShowImportModal(false);
+                          setImportResult(null);
+                        }}
+                      >
+                        👁️ View Version
+                      </button>
+                    </div>
+                  )}
+                  
+                  {!importResult.success && (
+                    <div className="import-error-actions">
+                      <button 
+                        className="modal-btn modal-btn-secondary"
+                        onClick={() => {
+                          setImportResult(null);
+                          setImportValidationErrors([]);
+                        }}
+                      >
+                        ← Try Again
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

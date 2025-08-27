@@ -23,10 +23,95 @@ const GRAPH_VERSIONS = {
   ADMIN_DRAFT: 'admin_draft'
 };
 
+// Schema definition for validation
+const GRAPH_SCHEMA = {
+  nodeTypes: [
+    'Industry', 'Sector', 'Department', 'PainPoint',
+    'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'SubModule', 'Module'
+  ],
+  relationshipTypes: [
+    'HAS_SECTOR', 'EXPERIENCES', 'HAS_OPPORTUNITY', 'ADDRESSES',
+    'IS_INSTANCE_OF', 'REQUIRES_ROLE', 'NEEDS_SUBMODULE', 'CONTAINS'
+  ],
+  nodeProperties: {
+    'Industry': ['name'],
+    'Sector': ['name'],
+    'Department': ['name'],
+    'PainPoint': ['name', 'impact'],
+    'ProjectOpportunity': ['title', 'priority', 'business_case', 'budget_range', 'duration'],
+    'ProjectBlueprint': ['title'],
+    'Role': ['name'],
+    'SubModule': ['name'],
+    'Module': ['name']
+  }
+};
+
 // Helper function to get versioned label
 function getVersionedLabel(baseLabel, version = GRAPH_VERSIONS.BASE) {
   if (version === GRAPH_VERSIONS.BASE) return baseLabel;
   return `${baseLabel}_${version}`;
+}
+
+// Schema validation functions
+function validateCypherScript(cypherScript) {
+  const errors = [];
+  const lines = cypherScript.split('\n');
+  
+  // Extract CREATE statements for nodes and relationships
+  const nodeCreates = [];
+  const relCreates = [];
+  
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('CREATE') || trimmed.startsWith('MERGE')) {
+      if (trimmed.includes('-[') && trimmed.includes(']-')) {
+        // This is a relationship creation
+        relCreates.push({ line: trimmed, lineNumber: index + 1 });
+      } else if (trimmed.includes('(') && trimmed.includes(':')) {
+        // This is a node creation
+        nodeCreates.push({ line: trimmed, lineNumber: index + 1 });
+      }
+    }
+  });
+  
+  // Validate node types
+  nodeCreates.forEach(({ line, lineNumber }) => {
+    const nodeTypeMatch = line.match(/:([A-Za-z]+)/);
+    if (nodeTypeMatch) {
+      const nodeType = nodeTypeMatch[1];
+      if (!GRAPH_SCHEMA.nodeTypes.includes(nodeType)) {
+        errors.push(`Line ${lineNumber}: Unknown node type "${nodeType}". Allowed types: ${GRAPH_SCHEMA.nodeTypes.join(', ')}`);
+      }
+      
+      // Validate required properties
+      const requiredProps = GRAPH_SCHEMA.nodeProperties[nodeType] || [];
+      const primaryProp = nodeType === 'ProjectOpportunity' || nodeType === 'ProjectBlueprint' ? 'title' : 'name';
+      
+      if (requiredProps.includes(primaryProp) && !line.includes(`${primaryProp}:`)) {
+        errors.push(`Line ${lineNumber}: Missing required property "${primaryProp}" for node type "${nodeType}"`);
+      }
+    }
+  });
+  
+  // Validate relationship types
+  relCreates.forEach(({ line, lineNumber }) => {
+    const relTypeMatch = line.match(/\[:([A-Z_]+)\]/);
+    if (relTypeMatch) {
+      const relType = relTypeMatch[1];
+      if (!GRAPH_SCHEMA.relationshipTypes.includes(relType)) {
+        errors.push(`Line ${lineNumber}: Unknown relationship type "${relType}". Allowed types: ${GRAPH_SCHEMA.relationshipTypes.join(', ')}`);
+      }
+    }
+  });
+  
+  return {
+    valid: errors.length === 0,
+    errors: errors,
+    stats: {
+      nodeCreates: nodeCreates.length,
+      relCreates: relCreates.length
+    }
+  };
 }
 
 // Helper function to get version-specific queries
@@ -1300,6 +1385,172 @@ app.get('/api/admin/orphans', async (req, res) => {
   }
 });
 
+// Get specific node with its direct connections for visualization
+app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
+  const session = driver.session();
+  const { nodeId } = req.params;
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  try {
+    // Query to get the specific node and its direct neighbors
+    const graphQuery = getVersionedQuery(`
+      MATCH (center) WHERE id(center) = $nodeId
+      OPTIONAL MATCH (center)-[r1]->(connected)
+      OPTIONAL MATCH (source)-[r2]->(center)
+      RETURN center,
+             collect(DISTINCT {node: connected, relationship: r1, direction: 'outgoing'}) as outgoing,
+             collect(DISTINCT {node: source, relationship: r2, direction: 'incoming'}) as incoming
+    `, version);
+    
+    const result = await session.run(graphQuery, { nodeId: parseInt(nodeId) });
+    
+    if (result.records.length === 0) {
+      return res.status(404).json({ error: 'Node not found' });
+    }
+    
+    const record = result.records[0];
+    const centerNode = record.get('center');
+    const outgoing = record.get('outgoing') || [];
+    const incoming = record.get('incoming') || [];
+    
+    const nodes = [];
+    const edges = [];
+    const nodeMap = new Map();
+    
+    // Add center node
+    const centerNodeData = {
+      id: centerNode.identity.toString(),
+      label: centerNode.properties.name || centerNode.properties.title || 'Unnamed',
+      group: centerNode.labels[0] || 'Unknown',
+      properties: centerNode.properties
+    };
+    nodeMap.set(centerNodeData.id, centerNodeData);
+    nodes.push(centerNodeData);
+    
+    // Add connected nodes and edges
+    [...outgoing, ...incoming].forEach(conn => {
+      if (conn.node && conn.relationship) {
+        const connectedNodeData = {
+          id: conn.node.identity.toString(),
+          label: conn.node.properties.name || conn.node.properties.title || 'Unnamed',
+          group: conn.node.labels[0] || 'Unknown',
+          properties: conn.node.properties
+        };
+        
+        if (!nodeMap.has(connectedNodeData.id)) {
+          nodeMap.set(connectedNodeData.id, connectedNodeData);
+          nodes.push(connectedNodeData);
+        }
+        
+        // Create edge
+        const isOutgoing = conn.direction === 'outgoing';
+        const edgeData = {
+          id: `${isOutgoing ? centerNodeData.id : connectedNodeData.id}-${isOutgoing ? connectedNodeData.id : centerNodeData.id}-${conn.relationship.type}`,
+          from: isOutgoing ? centerNodeData.id : connectedNodeData.id,
+          to: isOutgoing ? connectedNodeData.id : centerNodeData.id,
+          type: conn.relationship.type,
+          label: conn.relationship.type,
+          properties: conn.relationship.properties
+        };
+        edges.push(edgeData);
+      }
+    });
+    
+    res.json({ nodes, edges, centerNodeId: centerNodeData.id });
+    
+  } catch (error) {
+    console.error('Error fetching node graph:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// Get all connections for a specific node
+app.get('/api/admin/node/:nodeId/connections', async (req, res) => {
+  const session = driver.session();
+  const { nodeId } = req.params;
+  const version = req.query.version || GRAPH_VERSIONS.BASE;
+  
+  try {
+    // Query to find all connections (both incoming and outgoing) for a specific node
+    const connectionQuery = getVersionedQuery(`
+      MATCH (n) WHERE id(n) = $nodeId
+      OPTIONAL MATCH (n)-[r]->(target)
+      OPTIONAL MATCH (source)-[r2]->(n)
+      RETURN n, 
+             collect(DISTINCT {relationship: r, target: target, direction: 'outgoing'}) as outgoing,
+             collect(DISTINCT {relationship: r2, source: source, direction: 'incoming'}) as incoming
+    `, version);
+    
+    const result = await session.run(connectionQuery, { nodeId: parseInt(nodeId) });
+    
+    if (result.records.length === 0) {
+      return res.status(404).json({ error: 'Node not found' });
+    }
+    
+    const record = result.records[0];
+    const node = record.get('n');
+    const outgoing = record.get('outgoing') || [];
+    const incoming = record.get('incoming') || [];
+    
+    const connections = [];
+    
+    // Process outgoing connections
+    outgoing.forEach(conn => {
+      if (conn.relationship && conn.target) {
+        connections.push({
+          id: `${nodeId}-out-${conn.target.identity.toString()}`,
+          from: nodeId,
+          to: conn.target.identity.toString(),
+          type: conn.relationship.type,
+          label: conn.relationship.type,
+          direction: 'outgoing',
+          properties: conn.relationship.properties,
+          targetNode: {
+            id: conn.target.identity.toString(),
+            label: conn.target.properties.name || conn.target.properties.title || 'Unnamed',
+            group: conn.target.labels[0] || 'Unknown',
+            properties: conn.target.properties
+          }
+        });
+      }
+    });
+    
+    // Process incoming connections
+    incoming.forEach(conn => {
+      if (conn.relationship && conn.source) {
+        connections.push({
+          id: `${conn.source.identity.toString()}-in-${nodeId}`,
+          from: conn.source.identity.toString(),
+          to: nodeId,
+          type: conn.relationship.type,
+          label: conn.relationship.type,
+          direction: 'incoming',
+          properties: conn.relationship.properties,
+          sourceNode: {
+            id: conn.source.identity.toString(),
+            label: conn.source.properties.name || conn.source.properties.title || 'Unnamed',
+            group: conn.source.labels[0] || 'Unknown',
+            properties: conn.source.properties
+          }
+        });
+      }
+    });
+    
+    res.json({
+      nodeId,
+      connections: connections.filter(c => c.type) // Remove empty connections
+    });
+    
+  } catch (error) {
+    console.error('Error fetching node connections:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    await session.close();
+  }
+});
+
 // Get graph data for visualization
 app.get('/api/admin/graph/:nodeType', async (req, res) => {
   const session = driver.session();
@@ -1690,13 +1941,44 @@ async function generateCypherExport(session, version = GRAPH_VERSIONS.BASE) {
   const lines = [];
   
   // Header
-  lines.push('// AI Catalog Graph Export');
+  lines.push('// ==========================================');
+  lines.push('// 🏢 AI Catalog Graph Export');
+  lines.push('// ==========================================');
   lines.push(`// Generated: ${new Date().toISOString()}`);
   lines.push(`// Version: ${version}`);
   lines.push('// This script recreates the complete graph structure');
   lines.push('');
   
+  // Schema documentation
+  lines.push('// ==========================================');
+  lines.push('// 📋 Schema Definition');
+  lines.push('// ==========================================');
+  lines.push('// Valid Node Types:');
+  lines.push('//   🏢 Industry (properties: name)');
+  lines.push('//   🏛️ Sector (properties: name)'); 
+  lines.push('//   🏢 Department (properties: name)');
+  lines.push('//   ⚠️ PainPoint (properties: name, impact)');
+  lines.push('//   📋 ProjectBlueprint (properties: title)');
+  lines.push('//   🚀 ProjectOpportunity (properties: title, priority, business_case, budget_range, duration)');
+  lines.push('//   👤 Role (properties: name)');
+  lines.push('//   🔧 SubModule (properties: name)');
+  lines.push('//   📦 Module (properties: name)');
+  lines.push('//');
+  lines.push('// Valid Relationship Types:');
+  lines.push('//   HAS_SECTOR: Industry -> Sector');
+  lines.push('//   EXPERIENCES: Sector/Department -> PainPoint');
+  lines.push('//   HAS_OPPORTUNITY: Sector/Department -> ProjectOpportunity');
+  lines.push('//   ADDRESSES: ProjectOpportunity -> PainPoint');
+  lines.push('//   IS_INSTANCE_OF: ProjectOpportunity -> ProjectBlueprint');
+  lines.push('//   REQUIRES_ROLE: ProjectOpportunity -> Role');
+  lines.push('//   NEEDS_SUBMODULE: ProjectOpportunity -> SubModule');
+  lines.push('//   CONTAINS: Module -> SubModule');
+  lines.push('');
+  
   // Clear existing data warning
+  lines.push('// ==========================================');
+  lines.push('// ⚠️  IMPORT INSTRUCTIONS');
+  lines.push('// ==========================================');
   lines.push('// WARNING: This script will clear all existing data!');
   lines.push('// Uncomment the next line to clear the database before import');
   lines.push('// MATCH (n) DETACH DELETE n;');
@@ -1840,6 +2122,194 @@ async function generateCypherExport(session, version = GRAPH_VERSIONS.BASE) {
   
   return lines.join('\n');
 }
+
+// Import graph from Cypher script
+app.post('/api/admin/import', express.text({ limit: '10mb' }), async (req, res) => {
+  const cypherScript = req.body;
+  const { versionName } = req.query;
+  
+  if (!cypherScript || typeof cypherScript !== 'string') {
+    return res.status(400).json({ error: 'Cypher script is required in request body' });
+  }
+  
+  if (!versionName || versionName === GRAPH_VERSIONS.BASE || versionName === GRAPH_VERSIONS.ADMIN_DRAFT) {
+    return res.status(400).json({ error: 'A unique version name is required for import' });
+  }
+  
+  // Validate the Cypher script
+  const validation = validateCypherScript(cypherScript);
+  if (!validation.valid) {
+    return res.status(400).json({ 
+      error: 'Schema validation failed',
+      validationErrors: validation.errors,
+      stats: validation.stats
+    });
+  }
+  
+  const session = driver.session();
+  
+  try {
+    // Check if version already exists
+    const versionCheckQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") RETURN count(n) as count`;
+    const versionResult = await session.run(versionCheckQuery);
+    const existingCount = versionResult.records[0].get('count').toNumber();
+    
+    if (existingCount > 0) {
+      return res.status(400).json({ error: `Version "${versionName}" already exists. Please choose a different name.` });
+    }
+    
+    // Add version suffix to all CREATE/MERGE statements
+    const versionedScript = cypherScript
+      .split('\n')
+      .map(line => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('CREATE') || trimmed.startsWith('MERGE')) {
+          // Add version suffix to node labels
+          return line.replace(/:([A-Za-z]+)/g, `:$1_${versionName}`);
+        }
+        return line;
+      })
+      .join('\n');
+    
+    // Execute the versioned script
+    await session.run(versionedScript);
+    
+    // Get import statistics
+    const statsQuery = `
+      MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}")
+      OPTIONAL MATCH (n)-[r]->(m) WHERE any(label in labels(m) WHERE label ENDS WITH "_${versionName}")
+      RETURN 
+        count(DISTINCT n) as nodeCount,
+        count(DISTINCT r) as relCount
+    `;
+    const statsResult = await session.run(statsQuery);
+    const stats = statsResult.records[0];
+    
+    res.json({
+      success: true,
+      message: `Graph imported successfully as version "${versionName}"`,
+      versionName,
+      validationResult: validation,
+      stats: {
+        nodesCreated: stats.get('nodeCount').toNumber(),
+        relationshipsCreated: stats.get('relCount').toNumber()
+      }
+    });
+    
+  } catch (error) {
+    // Clean up any partial import
+    try {
+      await session.run(`MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") DETACH DELETE n`);
+    } catch (cleanupError) {
+      console.error('Failed to clean up partial import:', cleanupError);
+    }
+    
+    console.error('Import error:', error);
+    res.status(500).json({ 
+      error: 'Failed to import graph', 
+      details: error.message,
+      versionName 
+    });
+  } finally {
+    await session.close();
+  }
+});
+
+// Promote imported version to base
+app.post('/api/admin/promote/:versionName', async (req, res) => {
+  const { versionName } = req.params;
+  const session = driver.session();
+  
+  try {
+    // Check if version exists
+    const versionCheckQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") RETURN count(n) as count`;
+    const versionResult = await session.run(versionCheckQuery);
+    const versionCount = versionResult.records[0].get('count').toNumber();
+    
+    if (versionCount === 0) {
+      return res.status(404).json({ error: `Version "${versionName}" not found` });
+    }
+    
+    // Create timestamp for backup
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0] + '_' + 
+                     new Date().toTimeString().split(' ')[0].replace(/:/g, '-');
+    const backupVersionName = `base_backup_${timestamp}`;
+    
+    // Step 1: Backup current base to timestamped version
+    const nodeTypes = GRAPH_SCHEMA.nodeTypes;
+    
+    for (const nodeType of nodeTypes) {
+      const backupQuery = `
+        MATCH (n:${nodeType})
+        CREATE (copy:${nodeType}_${backupVersionName})
+        SET copy = properties(n)
+      `;
+      await session.run(backupQuery);
+    }
+    
+    // Backup relationships
+    const relTypes = GRAPH_SCHEMA.relationshipTypes;
+    for (const relType of relTypes) {
+      const backupRelQuery = `
+        MATCH (a)-[r:${relType}]->(b)
+        MATCH (a_backup) WHERE any(label in labels(a_backup) WHERE label ENDS WITH "_${backupVersionName}")
+          AND a_backup.name = a.name OR a_backup.title = a.title
+        MATCH (b_backup) WHERE any(label in labels(b_backup) WHERE label ENDS WITH "_${backupVersionName}")
+          AND b_backup.name = b.name OR b_backup.title = b.title
+        CREATE (a_backup)-[r_backup:${relType}]->(b_backup)
+        SET r_backup = properties(r)
+      `;
+      await session.run(backupRelQuery);
+    }
+    
+    // Step 2: Delete current base
+    await session.run('MATCH (n) WHERE none(label in labels(n) WHERE label CONTAINS "_") DETACH DELETE n');
+    
+    // Step 3: Promote imported version to base
+    for (const nodeType of nodeTypes) {
+      const promoteQuery = `
+        MATCH (n:${nodeType}_${versionName})
+        CREATE (base:${nodeType})
+        SET base = properties(n)
+        DELETE n
+      `;
+      await session.run(promoteQuery);
+    }
+    
+    // Promote relationships
+    for (const relType of relTypes) {
+      const promoteRelQuery = `
+        MATCH (a)-[r:${relType}]->(b) 
+        WHERE any(label in labels(a) WHERE label ENDS WITH "_${versionName}")
+          AND any(label in labels(b) WHERE label ENDS WITH "_${versionName}")
+        MATCH (a_base) WHERE any(label in labels(a_base) WHERE not label CONTAINS "_")
+          AND (a_base.name = a.name OR a_base.title = a.title)
+        MATCH (b_base) WHERE any(label in labels(b_base) WHERE not label CONTAINS "_")
+          AND (b_base.name = b.name OR b_base.title = b.title)
+        CREATE (a_base)-[r_base:${relType}]->(b_base)
+        SET r_base = properties(r)
+        DELETE r
+      `;
+      await session.run(promoteRelQuery);
+    }
+    
+    res.json({
+      success: true,
+      message: `Version "${versionName}" promoted to base successfully`,
+      backupVersionName,
+      promotedVersion: versionName
+    });
+    
+  } catch (error) {
+    console.error('Promotion error:', error);
+    res.status(500).json({ 
+      error: 'Failed to promote version', 
+      details: error.message 
+    });
+  } finally {
+    await session.close();
+  }
+});
 
 process.on('exit', () => {
   driver.close();
