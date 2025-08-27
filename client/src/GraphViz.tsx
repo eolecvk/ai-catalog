@@ -775,22 +775,40 @@ const GraphViz: React.FC<GraphVizProps> = ({
                   </button>
                 </h3>
                 <div className="connections-list">
-                  {/* Group connections by relationship type */}
+                  {/* Group connections by connected node type */}
                   {(() => {
-                    // Group connections by relationship type
+                    // Helper function to get plural form of node type
+                    const getPluralNodeType = (nodeType: string): string => {
+                      const pluralMapping: { [key: string]: string } = {
+                        'Industry': 'Industries',
+                        'Sector': 'Sectors', 
+                        'Department': 'Departments',
+                        'PainPoint': 'Pain Points',
+                        'ProjectBlueprint': 'Project Blueprints',
+                        'ProjectOpportunity': 'Project Opportunities',
+                        'Role': 'Roles',
+                        'SubModule': 'Sub Modules',
+                        'Module': 'Modules'
+                      };
+                      return pluralMapping[nodeType] || nodeType + 's';
+                    };
+
+                    // Group connections by connected node type
                     const groupedConnections = nodeConnections.reduce((groups, connection) => {
-                      const type = connection.type || 'Other';
-                      if (!groups[type]) groups[type] = [];
-                      groups[type].push(connection);
+                      const isIncoming = connection.direction === 'incoming';
+                      const connectedNode = isIncoming ? connection.sourceNode : connection.targetNode;
+                      const nodeType = connectedNode?.group || 'Other';
+                      if (!groups[nodeType]) groups[nodeType] = [];
+                      groups[nodeType].push(connection);
                       return groups;
                     }, {} as { [key: string]: any[] });
 
-                    return Object.entries(groupedConnections).map(([connectionType, connections]) => {
+                    return Object.entries(groupedConnections).map(([nodeType, connections]) => {
                       const connectionsArray = connections as any[];
                       return (
-                        <div key={connectionType} className="connection-group">
+                        <div key={nodeType} className="connection-group">
                           <h4 className="connection-group-title">
-                            {connectionType.replace('_', ' ')} ({connectionsArray.length})
+                            {getPluralNodeType(nodeType)} ({connectionsArray.length})
                           </h4>
                           <div className="connection-group-items">
                             {connectionsArray.map((connection: any) => {
@@ -814,7 +832,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
                                     style={{ cursor: 'pointer' }}
                                   >
                                     <div className="connection-node">
-                                      <span>{getNodeIcon(connectedNode?.group || 'unknown')} </span>
                                       <span style={{ 
                                         color: isNodeVisible ? '#1f2937' : '#9ca3af',
                                         textDecoration: 'underline',
@@ -822,9 +839,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
                                       }}>
                                         {connectedNode?.label || 'Unknown Node'}
                                       </span>
-                                      {!isNodeVisible && (
-                                        <span style={{ fontSize: '0.7rem', color: '#6b7280', fontStyle: 'italic' }}> (not in current view)</span>
-                                      )}
                                     </div>
                                   </div>
                                   <button 
