@@ -860,6 +860,12 @@ const App: React.FC = () => {
 
   // Handle node double-click in graph (center and show connections)
   const handleGraphNodeEdit = async (nodeId: string, nodeData: any) => {
+    // Prevent multiple calls if already loading
+    if (graphLoading) {
+      return;
+    }
+    
+    console.log(`Double-clicked node: ${nodeId} (${nodeData.label})`);
     setGraphLoading(true);
     
     try {
@@ -868,6 +874,11 @@ const App: React.FC = () => {
       
       if (response.ok) {
         const data = await response.json();
+        
+        console.log(`API returned ${data.nodes.length} nodes and ${data.edges.length} edges for node ${nodeId}`);
+        
+        // Add a small delay to ensure the loading screen is visible
+        await new Promise(resolve => setTimeout(resolve, 300));
         
         // Center the clicked node and show only its direct connections
         setGraphData({
@@ -878,7 +889,7 @@ const App: React.FC = () => {
         // Set the focused node to highlight it
         setFocusedGraphNode(nodeId);
         
-        console.log(`Centered node ${nodeId} with ${data.nodes.length - 1} connected nodes`);
+        console.log(`Successfully updated graph for node ${nodeId}`);
       } else {
         const error = await response.json();
         console.error('Error fetching node connections:', error);
@@ -1704,16 +1715,23 @@ const App: React.FC = () => {
             {/* Graph Section */}
             {adminActiveSection === 'graph' && !adminLoading && (
               <div className="admin-graph-section">
-                <GraphViz
-                  nodes={graphData.nodes}
-                  edges={graphData.edges}
-                  nodeType="all"
-                  onNodeSelect={handleGraphNodeSelect}
-                  onNodeDoubleClick={handleGraphNodeEdit}
-                  onNavigateToNode={handleNavigateToNode}
-                  focusedNode={focusedGraphNode}
-                  height="600px"
-                />
+                {graphLoading ? (
+                  <div className="admin-loading">
+                    <div className="spinner"></div>
+                    <p>Loading graph visualization...</p>
+                  </div>
+                ) : (
+                  <GraphViz
+                    nodes={graphData.nodes}
+                    edges={graphData.edges}
+                    nodeType="all"
+                    onNodeSelect={handleGraphNodeSelect}
+                    onNodeDoubleClick={handleGraphNodeEdit}
+                    onNavigateToNode={handleNavigateToNode}
+                    focusedNode={focusedGraphNode}
+                    height="600px"
+                  />
+                )}
               </div>
             )}
 

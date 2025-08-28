@@ -103,17 +103,33 @@ const GraphViz: React.FC<GraphVizProps> = ({
   // Color scheme for different node types
   const getNodeColor = (group: string): string => {
     const colors: { [key: string]: string } = {
-      'Industry': '#3498db',
-      'Sector': '#e74c3c',
-      'Department': '#f39c12',
-      'PainPoint': '#e67e22',
-      'ProjectBlueprint': '#9b59b6',
-      'ProjectOpportunity': '#2ecc71',
-      'Role': '#34495e',
-      'SubModule': '#16a085',
-      'Module': '#27ae60'
+      'Industry': '#2980b9',       // Professional blue
+      'Sector': '#c0392b',         // Rich red
+      'Department': '#d35400',     // Vibrant orange
+      'PainPoint': '#e67e22',      // Warning orange
+      'ProjectBlueprint': '#8e44ad', // Rich purple
+      'ProjectOpportunity': '#16a085', // Teal green
+      'Role': '#2c3e50',           // Dark blue-gray
+      'SubModule': '#7f8c8d',      // Medium gray
+      'Module': '#27ae60'          // Fresh green
     };
     return colors[group] || '#95a5a6';
+  };
+
+  // Get gradient URL for node type
+  const getNodeGradient = (group: string): string => {
+    const gradients: { [key: string]: string } = {
+      'Industry': 'url(#industryGradient)',
+      'Sector': 'url(#sectorGradient)',
+      'Department': 'url(#departmentGradient)',
+      'PainPoint': 'url(#painpointGradient)',
+      'ProjectBlueprint': 'url(#projectblueprintGradient)',
+      'ProjectOpportunity': 'url(#projectopportunityGradient)',
+      'Role': 'url(#roleGradient)',
+      'SubModule': 'url(#submoduleGradient)',
+      'Module': 'url(#moduleGradient)'
+    };
+    return gradients[group] || getNodeColor(group);
   };
 
   // Get icon for node type
@@ -135,17 +151,17 @@ const GraphViz: React.FC<GraphVizProps> = ({
   // Get node radius based on type
   const getNodeRadius = (group: string): number => {
     const radii: { [key: string]: number } = {
-      'Industry': 25,
-      'Sector': 20,
-      'Department': 18,
-      'PainPoint': 16,
-      'ProjectBlueprint': 18,
-      'ProjectOpportunity': 20,
-      'Role': 14,
-      'SubModule': 12,
-      'Module': 22
+      'Industry': 32,      // Largest - top hierarchy
+      'Sector': 26,        // Second largest 
+      'Department': 22,    // Medium
+      'PainPoint': 20,     // Medium-small
+      'ProjectBlueprint': 22,
+      'ProjectOpportunity': 24,
+      'Role': 18,          // Small
+      'SubModule': 16,     // Smallest
+      'Module': 28
     };
-    return radii[group] || 16;
+    return radii[group] || 20;
   };
 
   // Detect connected components (subgraphs)
@@ -507,6 +523,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   const handleNodeDoubleClick = (node: GraphNode, event: React.MouseEvent) => {
     event.stopPropagation();
+    
     if (onNodeDoubleClick) {
       onNodeDoubleClick(node.id, node);
     }
@@ -687,11 +704,62 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 maxHeight: '100%'
               }}
             >
-          {/* Grid background */}
+          {/* Grid background and gradients */}
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e9ecef" strokeWidth="0.5"/>
             </pattern>
+            
+            {/* Node shadow filter */}
+            <filter id="nodeShadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="2" dy="2" stdDeviation="3" floodOpacity="0.3"/>
+            </filter>
+            
+            {/* Gradients for each node type */}
+            <radialGradient id="industryGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#3498db"/>
+              <stop offset="100%" stopColor="#2980b9"/>
+            </radialGradient>
+            
+            <radialGradient id="sectorGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#e74c3c"/>
+              <stop offset="100%" stopColor="#c0392b"/>
+            </radialGradient>
+            
+            <radialGradient id="departmentGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#f39c12"/>
+              <stop offset="100%" stopColor="#d35400"/>
+            </radialGradient>
+            
+            <radialGradient id="painpointGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#f39c12"/>
+              <stop offset="100%" stopColor="#e67e22"/>
+            </radialGradient>
+            
+            <radialGradient id="projectblueprintGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#9b59b6"/>
+              <stop offset="100%" stopColor="#8e44ad"/>
+            </radialGradient>
+            
+            <radialGradient id="projectopportunityGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#1abc9c"/>
+              <stop offset="100%" stopColor="#16a085"/>
+            </radialGradient>
+            
+            <radialGradient id="roleGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#34495e"/>
+              <stop offset="100%" stopColor="#2c3e50"/>
+            </radialGradient>
+            
+            <radialGradient id="submoduleGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#95a5a6"/>
+              <stop offset="100%" stopColor="#7f8c8d"/>
+            </radialGradient>
+            
+            <radialGradient id="moduleGradient" cx="30%" cy="30%">
+              <stop offset="0%" stopColor="#2ecc71"/>
+              <stop offset="100%" stopColor="#27ae60"/>
+            </radialGradient>
           </defs>
           <rect 
             width="100%" 
@@ -760,7 +828,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
               if (!node.x || !node.y) return null;
               
               const radius = getNodeRadius(node.group);
-              const color = getNodeColor(node.group);
+              const gradient = getNodeGradient(node.group);
               const isSelected = selectedNode === node.id;
               const isDragged = draggedNode === node.id;
               const isFocused = focusedNodeId === node.id;
@@ -773,10 +841,11 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     cx={node.x}
                     cy={node.y}
                     r={radius}
-                    fill={color}
+                    fill={gradient}
                     stroke={isFocused ? '#e74c3c' : (isSelected ? '#2c3e50' : '#ffffff')}
-                    strokeWidth={isFocused ? 4 : (isSelected ? 3 : 2)}
+                    strokeWidth={isFocused ? 5 : (isSelected ? 4 : 3)}
                     opacity={shouldFade ? 0.25 : (isDragged ? 0.8 : 1)}
+                    filter="url(#nodeShadow)"
                     style={{ 
                       cursor: 'pointer',
                       transition: 'opacity 0.3s ease-in-out, stroke 0.3s ease-in-out, stroke-width 0.3s ease-in-out'
