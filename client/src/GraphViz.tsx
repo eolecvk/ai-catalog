@@ -29,6 +29,7 @@ interface GraphVizProps {
   onNodeDoubleClick?: (nodeId: string, nodeData: any) => void;
   onNavigateToNode?: (nodeId: string) => void;
   height?: string;
+  focusedNode?: string | null;
 }
 
 const GraphViz: React.FC<GraphVizProps> = ({ 
@@ -38,7 +39,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
   onNodeSelect, 
   onNodeDoubleClick,
   onNavigateToNode,
-  height = '700px' 
+  height = '700px',
+  focusedNode = null
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -56,6 +58,21 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const animationRef = useRef<number>();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Sync focused node from prop
+  useEffect(() => {
+    if (focusedNode !== null) {
+      setFocusedNodeId(focusedNode);
+      // If the focused node is provided, also auto-select it for the side panel
+      const focusedNodeData = nodes.find(n => n.id === focusedNode);
+      if (focusedNodeData) {
+        setSelectedNode(focusedNode);
+        setSelectedNodeData(focusedNodeData);
+        setEditedNodeName(focusedNodeData.label);
+        fetchNodeConnections(focusedNode);
+      }
+    }
+  }, [focusedNode, nodes]);
 
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {

@@ -73,6 +73,7 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'table' | 'graph'>('table');
   const [graphData, setGraphData] = useState<{ nodes: any[], edges: any[] }>({ nodes: [], edges: [] });
   const [graphLoading, setGraphLoading] = useState(false);
+  const [focusedGraphNode, setFocusedGraphNode] = useState<string | null>(null);
   
   // Graph filter state
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
@@ -811,6 +812,7 @@ const App: React.FC = () => {
   // Fetch graph data for visualization
   const fetchGraphData = useCallback(async (nodeType: string) => {
     setGraphLoading(true);
+    setFocusedGraphNode(null); // Reset focused node when loading new data
     
     try {
       const params = new URLSearchParams();
@@ -856,23 +858,53 @@ const App: React.FC = () => {
     console.log('Selected node:', nodeId, nodeData);
   };
 
-  // Handle node double-click in graph (edit)
-  const handleGraphNodeEdit = (nodeId: string, nodeData: any) => {
-    handleEditNode(nodeData);
+  // Handle node double-click in graph (center and show connections)
+  const handleGraphNodeEdit = async (nodeId: string, nodeData: any) => {
+    setGraphLoading(true);
+    
+    try {
+      // Fetch the node's direct connections from the API
+      const response = await fetch(`/api/admin/node/${nodeId}/graph?version=${currentGraphVersion}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Center the clicked node and show only its direct connections
+        setGraphData({
+          nodes: data.nodes,
+          edges: data.edges
+        });
+        
+        // Set the focused node to highlight it
+        setFocusedGraphNode(nodeId);
+        
+        console.log(`Centered node ${nodeId} with ${data.nodes.length - 1} connected nodes`);
+      } else {
+        const error = await response.json();
+        console.error('Error fetching node connections:', error);
+        alert(`Error loading connections: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to fetch node connections:', error);
+      alert('Failed to load node connections');
+    } finally {
+      setGraphLoading(false);
+    }
   };
 
   // Handle navigation to specific node in graph
   const handleNavigateToNode = async (nodeId: string) => {
     setGraphLoading(true);
     try {
-      const response = await fetch(`/api/admin/node/${nodeId}/graph`);
+      const response = await fetch(`/api/admin/node/${nodeId}/graph?version=${currentGraphVersion}`);
       if (response.ok) {
         const data = await response.json();
         setGraphData({
           nodes: data.nodes,
           edges: data.edges
         });
-        // Optionally set the navigated node as selected
+        // Set the navigated node as focused
+        setFocusedGraphNode(nodeId);
         console.log('Navigated to node:', nodeId, 'with', data.nodes.length, 'nodes and', data.edges.length, 'edges');
       } else {
         console.error('Failed to navigate to node');
@@ -1679,6 +1711,7 @@ const App: React.FC = () => {
                   onNodeSelect={handleGraphNodeSelect}
                   onNodeDoubleClick={handleGraphNodeEdit}
                   onNavigateToNode={handleNavigateToNode}
+                  focusedNode={focusedGraphNode}
                   height="600px"
                 />
               </div>
@@ -1833,6 +1866,7 @@ const App: React.FC = () => {
                         onNodeSelect={handleGraphNodeSelect}
                         onNodeDoubleClick={handleGraphNodeEdit}
                         onNavigateToNode={handleNavigateToNode}
+                        focusedNode={focusedGraphNode}
                         height="500px"
                       />
                     )}
