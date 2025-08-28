@@ -55,6 +55,8 @@ const App: React.FC = () => {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
   const [adminActiveSection, setAdminActiveSection] = useState('overview');
+  const [showTablesSubsections, setShowTablesSubsections] = useState(false);
+  const [activeTableSection, setActiveTableSection] = useState('industries');
   const [adminStats, setAdminStats] = useState<any>(null);
   const [adminNodes, setAdminNodes] = useState<any[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -64,11 +66,8 @@ const App: React.FC = () => {
   // Admin modals and forms
   const [showAdminNodeModal, setShowAdminNodeModal] = useState(false);
   const [showAdminEditModal, setShowAdminEditModal] = useState(false);
-  const [showQueryBuilder, setShowQueryBuilder] = useState(false);
   const [adminNodeForm, setAdminNodeForm] = useState<any>({});
   const [editingNode, setEditingNode] = useState<any>(null);
-  const [queryBuilderQuery, setQueryBuilderQuery] = useState('MATCH (n) RETURN n LIMIT 10');
-  const [queryResults, setQueryResults] = useState<any[]>([]);
   
   // Graph visualization state
   const [viewMode, setViewMode] = useState<'table' | 'graph'>('table');
@@ -651,33 +650,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleQueryBuilderExecute = async () => {
-    setAdminLoading(true);
-    
-    try {
-      const response = await fetch('/api/admin/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          query: queryBuilderQuery,
-          version: currentGraphVersion 
-        })
-      });
-      
-      if (response.ok) {
-        const results = await response.json();
-        setQueryResults(results);
-      } else {
-        const error = await response.json();
-        alert(`Query error: ${error.error}`);
-      }
-    } catch (error) {
-      console.error('Query execution error:', error);
-      alert('Failed to execute query');
-    } finally {
-      setAdminLoading(false);
-    }
-  };
 
   const [exportLoading, setExportLoading] = useState(false);
   
@@ -1059,6 +1031,35 @@ const App: React.FC = () => {
     setScopeSubstep('choice');
   };
 
+  // Handle overview card click to navigate to graph view
+  const handleOverviewCardClick = async (nodeType: string) => {
+    // Switch to graph section
+    setAdminActiveSection('graph');
+    setShowTablesSubsections(false);
+    
+    // Set view mode to graph
+    if (viewMode !== 'graph') {
+      setViewMode('graph');
+    }
+    
+    // Reset filters
+    resetFilters();
+    
+    // Fetch graph data for the specific node type
+    const nodeTypeMap: { [key: string]: string } = {
+      'industries': 'industries',
+      'sectors': 'sectors',
+      'departments': 'departments',
+      'painpoints': 'painpoints',
+      'projects': 'projects'
+    };
+    
+    const graphNodeType = nodeTypeMap[nodeType];
+    if (graphNodeType) {
+      await fetchGraphData(graphNodeType);
+    }
+  };
+
   const navigateToStep = (stepNumber: number) => {
     // Only allow navigation to completed steps or current step
     if (stepNumber > currentStep) return;
@@ -1426,137 +1427,177 @@ const App: React.FC = () => {
         /* Admin Dashboard */
         <div className="admin-dashboard">
           <div className="admin-nav">
-            <h2>Graph Administration</h2>
             <div className="admin-nav-items">
+              {/* Main Sections */}
               <button 
                 className={`admin-nav-item ${adminActiveSection === 'overview' ? 'active' : ''}`}
-                onClick={() => setAdminActiveSection('overview')}
+                onClick={() => {
+                  setAdminActiveSection('overview');
+                  setShowTablesSubsections(false);
+                }}
               >
                 📊 Overview
               </button>
+              
               <button 
-                className={`admin-nav-item ${adminActiveSection === 'industries' ? 'active' : ''}`}
+                className={`admin-nav-item ${adminActiveSection === 'graph' ? 'active' : ''}`}
                 onClick={() => {
-                  setAdminActiveSection('industries');
-                  resetFilters();
-                  fetchAdminNodes('industry', currentGraphVersion);
-                  if (viewMode === 'graph') {
-                    fetchGraphData('industries');
-                  }
+                  setAdminActiveSection('graph');
+                  setShowTablesSubsections(false);
+                  if (viewMode === 'table') setViewMode('graph');
                 }}
               >
-                🏢 Industries
+                🕸️ Graph
               </button>
+              
               <button 
-                className={`admin-nav-item ${adminActiveSection === 'sectors' ? 'active' : ''}`}
+                className={`admin-nav-item ${adminActiveSection === 'tables' ? 'active' : ''}`}
                 onClick={() => {
-                  setAdminActiveSection('sectors');
+                  setAdminActiveSection('tables');
+                  setShowTablesSubsections(true);
+                  if (viewMode === 'graph') setViewMode('table');
+                  // Load default table section
                   resetFilters();
-                  fetchAdminNodes('sector', currentGraphVersion);
-                  if (viewMode === 'graph') {
-                    fetchGraphData('sectors');
-                  }
+                  fetchAdminNodes(activeTableSection === 'industries' ? 'industry' : 
+                                 activeTableSection === 'sectors' ? 'sector' :
+                                 activeTableSection === 'departments' ? 'department' :
+                                 activeTableSection === 'painpoints' ? 'painpoint' :
+                                 activeTableSection === 'projects' ? 'project' : 'industry', currentGraphVersion);
                 }}
               >
-                🏛️ Sectors
+                📋 Tables
               </button>
-              <button 
-                className={`admin-nav-item ${adminActiveSection === 'departments' ? 'active' : ''}`}
-                onClick={() => {
-                  setAdminActiveSection('departments');
-                  resetFilters();
-                  fetchAdminNodes('department', currentGraphVersion);
-                  if (viewMode === 'graph') {
-                    fetchGraphData('departments');
-                  }
-                }}
-              >
-                🏢 Departments
-              </button>
-              <button 
-                className={`admin-nav-item ${adminActiveSection === 'painpoints' ? 'active' : ''}`}
-                onClick={() => {
-                  setAdminActiveSection('painpoints');
-                  resetFilters();
-                  fetchAdminNodes('painpoint', currentGraphVersion);
-                  if (viewMode === 'graph') {
-                    fetchGraphData('painpoints');
-                  }
-                }}
-              >
-                ⚠️ Pain Points
-              </button>
-              <button 
-                className={`admin-nav-item ${adminActiveSection === 'projects' ? 'active' : ''}`}
-                onClick={() => {
-                  setAdminActiveSection('projects');
-                  resetFilters();
-                  fetchAdminNodes('project', currentGraphVersion);
-                  if (viewMode === 'graph') {
-                    fetchGraphData('projects');
-                  }
-                }}
-              >
-                🚀 Projects
-              </button>
-              <button 
-                className={`admin-nav-item ${adminActiveSection === 'relationships' ? 'active' : ''}`}
-                onClick={() => setAdminActiveSection('relationships')}
-              >
-                🔗 Relationships
-              </button>
+              
+              {/* Table Subsections - Only show when Tables is active */}
+              {showTablesSubsections && adminActiveSection === 'tables' && (
+                <div className="admin-table-subsections">
+                  <button 
+                    className={`admin-nav-subitem ${activeTableSection === 'industries' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTableSection('industries');
+                      resetFilters();
+                      fetchAdminNodes('industry', currentGraphVersion);
+                    }}
+                  >
+                    🏢 Industries
+                  </button>
+                  <button 
+                    className={`admin-nav-subitem ${activeTableSection === 'sectors' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTableSection('sectors');
+                      resetFilters();
+                      fetchAdminNodes('sector', currentGraphVersion);
+                    }}
+                  >
+                    🏛️ Sectors
+                  </button>
+                  <button 
+                    className={`admin-nav-subitem ${activeTableSection === 'departments' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTableSection('departments');
+                      resetFilters();
+                      fetchAdminNodes('department', currentGraphVersion);
+                    }}
+                  >
+                    🏢 Departments
+                  </button>
+                  <button 
+                    className={`admin-nav-subitem ${activeTableSection === 'painpoints' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTableSection('painpoints');
+                      resetFilters();
+                      fetchAdminNodes('painpoint', currentGraphVersion);
+                    }}
+                  >
+                    ⚠️ Pain Points
+                  </button>
+                  <button 
+                    className={`admin-nav-subitem ${activeTableSection === 'projects' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTableSection('projects');
+                      resetFilters();
+                      fetchAdminNodes('project', currentGraphVersion);
+                    }}
+                  >
+                    🚀 Projects
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-          
-          <div className="admin-content">
-            {/* Version Management Header */}
-            <div className="version-management">
-              <div className="version-info">
-                <label>Current Version: </label>
+            
+            {/* Version Management in Side Panel */}
+            <div className="admin-version-sidebar">
+              <div className="version-info-sidebar">
+                <label>Version: </label>
                 <select 
                   value={currentGraphVersion} 
                   onChange={(e) => setCurrentGraphVersion(e.target.value)}
-                  className="version-select"
+                  className="version-select-sidebar"
                 >
                   {availableVersions.map(version => (
                     <option key={version} value={version}>
-                      {version === 'base' ? '🔒 Base (Read-Only)' : `✏️ ${version} (Editable)`}
+                      {version === 'base' ? '🔒 Base' : `✏️ ${version}`}
                     </option>
                   ))}
                 </select>
               </div>
               
-              <div className="version-actions">
+              <div className="version-actions-sidebar">
                 {currentGraphVersion === 'base' && (
                   <button 
-                    className="version-btn create-draft" 
+                    className="version-btn-sidebar create-draft" 
                     onClick={createDraftVersion}
                     disabled={adminLoading}
+                    title="Create Draft Version"
                   >
-                    📝 Create Draft
+                    📝 Draft
                   </button>
                 )}
                 
                 {currentGraphVersion === 'admin_draft' && (
-                  <>
+                  <div className="draft-actions">
                     <button 
-                      className="version-btn reset" 
+                      className="version-btn-sidebar reset" 
                       onClick={resetToBase}
                       disabled={adminLoading}
+                      title="Reset to Base"
                     >
-                      🔄 Reset to Base
+                      🔄 Reset
                     </button>
                     <button 
-                      className="version-btn promote" 
+                      className="version-btn-sidebar promote" 
                       onClick={() => alert('Promote to base feature coming soon!')}
                       disabled={adminLoading}
+                      title="Promote to Base"
                     >
-                      ⬆️ Promote to Base
+                      ⬆️ Promote
                     </button>
-                  </>
+                  </div>
                 )}
+                
+                {/* Import/Export Actions */}
+                <div className="sidebar-import-export">
+                  <button 
+                    className="version-btn-sidebar import"
+                    onClick={() => setShowImportModal(true)}
+                    title="Import Data"
+                  >
+                    📥 Import
+                  </button>
+                  <button 
+                    className="version-btn-sidebar export"
+                    onClick={() => handleExportGraph()}
+                    disabled={exportLoading}
+                    title="Export Graph"
+                  >
+                    {exportLoading ? '⏳' : '📤'} Export
+                  </button>
+                </div>
               </div>
             </div>
+          </div>
+          
+          <div className="admin-content">
 
             {adminLoading && (
               <div className="admin-loading">
@@ -1568,78 +1609,90 @@ const App: React.FC = () => {
             {/* Overview Section */}
             {adminActiveSection === 'overview' && !adminLoading && (
               <div className="admin-overview">
-                <h3>Graph Statistics</h3>
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <h4>Industries</h4>
-                    <div className="stat-number">{adminStats?.Industry || 0}</div>
-                  </div>
-                  <div className="stat-card">
-                    <h4>Sectors</h4>
-                    <div className="stat-number">{adminStats?.Sector || 0}</div>
-                  </div>
-                  <div className="stat-card">
-                    <h4>Departments</h4>
-                    <div className="stat-number">{adminStats?.Department || 0}</div>
-                  </div>
-                  <div className="stat-card">
-                    <h4>Pain Points</h4>
-                    <div className="stat-number">{adminStats?.PainPoint || 0}</div>
-                  </div>
-                  <div className="stat-card">
-                    <h4>Projects</h4>
-                    <div className="stat-number">{adminStats?.ProjectOpportunity || 0}</div>
-                  </div>
-                </div>
-                
-                <div className="admin-actions">
-                  <button 
-                    className="admin-action-btn primary"
-                    onClick={() => setShowImportModal(true)}
+                <div className="node-cards-grid">
+                  <div 
+                    className="node-card clickable industry-node" 
+                    onClick={() => handleOverviewCardClick('industries')}
+                    title="Click to view Industries in graph"
                   >
-                    📥 Import Data
-                  </button>
-                  <button 
-                    className="admin-action-btn secondary"
-                    onClick={() => handleExportGraph()}
-                    disabled={exportLoading}
+                    <div className="node-circle">
+                      <span className="node-icon">🏢</span>
+                      <span className="node-count">{adminStats?.Industry || 0}</span>
+                    </div>
+                    <span className="node-label">Industries</span>
+                  </div>
+                  <div 
+                    className="node-card clickable sector-node" 
+                    onClick={() => handleOverviewCardClick('sectors')}
+                    title="Click to view Sectors in graph"
                   >
-                    {exportLoading ? '⏳ Exporting...' : '📤 Export Graph'}
-                  </button>
-                  <button 
-                    className="admin-action-btn secondary"
-                    onClick={() => setShowQueryBuilder(true)}
+                    <div className="node-circle">
+                      <span className="node-icon">🏛️</span>
+                      <span className="node-count">{adminStats?.Sector || 0}</span>
+                    </div>
+                    <span className="node-label">Sectors</span>
+                  </div>
+                  <div 
+                    className="node-card clickable department-node" 
+                    onClick={() => handleOverviewCardClick('departments')}
+                    title="Click to view Departments in graph"
                   >
-                    🔍 Query Builder
-                  </button>
-                  <button 
-                    className="admin-action-btn warning"
-                    onClick={async () => {
-                      try {
-                        const response = await fetch('/api/admin/orphans');
-                        const orphans = await response.json();
-                        alert(`Found ${orphans.length} orphaned nodes`);
-                      } catch (error) {
-                        alert('Error finding orphans');
-                      }
-                    }}
+                    <div className="node-circle">
+                      <span className="node-icon">🏢</span>
+                      <span className="node-count">{adminStats?.Department || 0}</span>
+                    </div>
+                    <span className="node-label">Departments</span>
+                  </div>
+                  <div 
+                    className="node-card clickable painpoint-node" 
+                    onClick={() => handleOverviewCardClick('painpoints')}
+                    title="Click to view Pain Points in graph"
                   >
-                    🧹 Find Orphans
-                  </button>
+                    <div className="node-circle">
+                      <span className="node-icon">⚠️</span>
+                      <span className="node-count">{adminStats?.PainPoint || 0}</span>
+                    </div>
+                    <span className="node-label">Pain Points</span>
+                  </div>
+                  <div 
+                    className="node-card clickable project-node" 
+                    onClick={() => handleOverviewCardClick('projects')}
+                    title="Click to view Projects in graph"
+                  >
+                    <div className="node-circle">
+                      <span className="node-icon">🚀</span>
+                      <span className="node-count">{adminStats?.ProjectOpportunity || 0}</span>
+                    </div>
+                    <span className="node-label">Projects</span>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Node Management Sections */}
-            {['industries', 'sectors', 'departments', 'painpoints', 'projects'].includes(adminActiveSection) && !adminLoading && (
+            {/* Graph Section */}
+            {adminActiveSection === 'graph' && !adminLoading && (
+              <div className="admin-graph-section">
+                <GraphViz
+                  nodes={graphData.nodes}
+                  edges={graphData.edges}
+                  nodeType="all"
+                  onNodeSelect={handleGraphNodeSelect}
+                  onNodeDoubleClick={handleGraphNodeEdit}
+                  onNavigateToNode={handleNavigateToNode}
+                  height="600px"
+                />
+              </div>
+            )}
+
+            {/* Tables Section */}
+            {adminActiveSection === 'tables' && !adminLoading && (
               <div className="admin-node-management">
                 <div className="admin-section-header">
-                  <h3>{adminActiveSection.charAt(0).toUpperCase() + adminActiveSection.slice(1)}</h3>
                   <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     {/* Graph Filters */}
                     {viewMode === 'graph' && (
                       <div className="graph-filters">
-                        {adminActiveSection === 'sectors' && (
+                        {activeTableSection === 'sectors' && (
                           <div className="industry-checkboxes">
                             <label>Industries:</label>
                             {availableIndustries.map(industry => (
@@ -1655,7 +1708,7 @@ const App: React.FC = () => {
                           </div>
                         )}
                         
-                        {adminActiveSection === 'painpoints' && (
+                        {activeTableSection === 'painpoints' && (
                           <div className="painpoint-filters">
                             <div className="industry-checkboxes">
                               <label>Industries:</label>
@@ -1697,40 +1750,6 @@ const App: React.FC = () => {
                         )}
                       </div>
                     )}
-                    
-                    <div className="view-toggle">
-                      <button 
-                        className={viewMode === 'table' ? 'active' : ''}
-                        onClick={() => setViewMode('table')}
-                      >
-                        📊 Table
-                      </button>
-                      <button 
-                        className={viewMode === 'graph' ? 'active' : ''}
-                        onClick={() => {
-                          setViewMode('graph');
-                          const nodeTypeMap: { [key: string]: string } = {
-                            'industries': 'industries',
-                            'sectors': 'sectors', 
-                            'departments': 'departments',
-                            'painpoints': 'painpoints',
-                            'projects': 'projects'
-                          };
-                          const nodeType = nodeTypeMap[adminActiveSection];
-                          if (nodeType) {
-                            fetchGraphData(nodeType);
-                          }
-                        }}
-                      >
-                        🕸️ Graph
-                      </button>
-                    </div>
-                    <button 
-                      className="admin-action-btn primary"
-                      onClick={() => handleAddNewNode(adminActiveSection.slice(0, -1))}
-                    >
-                      ➕ Add New
-                    </button>
                   </div>
                 </div>
                 
@@ -1740,22 +1759,26 @@ const App: React.FC = () => {
                     <table>
                       <thead>
                         <tr>
-                          <th>ID</th>
-                          <th>Name/Title</th>
-                          {adminActiveSection === 'painpoints' && <th>Impact</th>}
-                          {adminActiveSection === 'sectors' && <th>Industries</th>}
+                          <th>
+                            {activeTableSection === 'industries' ? 'Industry' :
+                             activeTableSection === 'sectors' ? 'Sector' :
+                             activeTableSection === 'departments' ? 'Department' :
+                             activeTableSection === 'painpoints' ? 'Pain Point' :
+                             activeTableSection === 'projects' ? 'Project' : 'Name'}
+                          </th>
+                          {activeTableSection === 'painpoints' && <th>Impact</th>}
+                          {activeTableSection === 'sectors' && <th>Industries</th>}
                           <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {adminNodes.map((node) => (
                           <tr key={node.id}>
-                            <td>{node.id}</td>
                             <td>{node.properties.name || node.properties.title}</td>
-                            {adminActiveSection === 'painpoints' && (
+                            {activeTableSection === 'painpoints' && (
                               <td>{node.properties.impact || 'N/A'}</td>
                             )}
-                            {adminActiveSection === 'sectors' && (
+                            {activeTableSection === 'sectors' && (
                               <td>{node.industries?.join(', ') || 'N/A'}</td>
                             )}
                             <td>
@@ -1774,6 +1797,21 @@ const App: React.FC = () => {
                             </td>
                           </tr>
                         ))}
+                        {/* Add New Row */}
+                        <tr className="add-new-row">
+                          <td colSpan={activeTableSection === 'painpoints' || activeTableSection === 'sectors' ? 3 : 2}>
+                            <button 
+                              className="admin-add-new-btn"
+                              onClick={() => handleAddNewNode(activeTableSection.slice(0, -1))}
+                            >
+                              ➕ Add New {activeTableSection === 'industries' ? 'Industry' :
+                                        activeTableSection === 'sectors' ? 'Sector' :
+                                        activeTableSection === 'departments' ? 'Department' :
+                                        activeTableSection === 'painpoints' ? 'Pain Point' :
+                                        activeTableSection === 'projects' ? 'Project' : 'Item'}
+                            </button>
+                          </td>
+                        </tr>
                       </tbody>
                     </table>
                   </div>
@@ -2691,7 +2729,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   
-                  {(adminActiveSection === 'painpoints') && (
+                  {(activeTableSection === 'painpoints') && (
                     <div className="form-group">
                       <label className="form-label">Impact Description</label>
                       <textarea
@@ -2716,48 +2754,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {showQueryBuilder && (
-            <div className="modal-backdrop" onClick={() => setShowQueryBuilder(false)}>
-              <div className="modal-content query-builder-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header">
-                  <h2>Query Builder</h2>
-                  <button className="modal-close" onClick={() => setShowQueryBuilder(false)}>×</button>
-                </div>
-                
-                <div className="query-builder-content">
-                  <div className="form-group">
-                    <label className="form-label">Cypher Query</label>
-                    <textarea
-                      className="form-textarea query-input"
-                      value={queryBuilderQuery}
-                      onChange={(e) => setQueryBuilderQuery(e.target.value)}
-                      placeholder="Enter your Cypher query here..."
-                      rows={6}
-                    />
-                  </div>
-                  
-                  <div className="query-actions">
-                    <button 
-                      className="modal-btn modal-btn-primary"
-                      onClick={handleQueryBuilderExecute}
-                      disabled={adminLoading || !queryBuilderQuery.trim()}
-                    >
-                      {adminLoading ? 'Executing...' : 'Execute Query'}
-                    </button>
-                  </div>
-                  
-                  {queryResults.length > 0 && (
-                    <div className="query-results">
-                      <h4>Query Results ({queryResults.length} records)</h4>
-                      <div className="results-table">
-                        <pre>{JSON.stringify(queryResults, null, 2)}</pre>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
 

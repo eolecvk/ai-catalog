@@ -43,7 +43,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedNodeData, setSelectedNodeData] = useState<GraphNode | null>(null);
-  const [showNodePanel, setShowNodePanel] = useState<boolean>(false);
+  const [showNodePanel, setShowNodePanel] = useState<boolean>(true);
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState<boolean>(false);
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [simulationNodes, setSimulationNodes] = useState<GraphNode[]>([]);
   const [componentCount, setComponentCount] = useState<number>(1);
@@ -52,27 +53,35 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [loadingConnections, setLoadingConnections] = useState<boolean>(false);
   const [editingNodeName, setEditingNodeName] = useState<boolean>(false);
   const [editedNodeName, setEditedNodeName] = useState<string>('');
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const animationRef = useRef<number>();
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Calculate adaptive canvas size based on number of nodes and components
-  const baseWidth = 1200;
-  const baseHeight = parseInt(height) || 700;
-  
-  // Auto-zoom calculation: zoom out when there are many nodes
-  const nodeCount = nodes.length;
-  
-  // Estimate component count based on node count and edge density for initial sizing
-  // This is a rough estimate - the exact count will be calculated later in the simulation
-  const estimatedComponentCount = Math.max(1, Math.min(nodeCount / 5, edges.length === 0 ? nodeCount : Math.ceil(nodeCount / 10)));
-  
-  // Scale factor based on complexity (more nodes = zoom out more)
-  const nodeScaleFactor = Math.max(1, Math.sqrt(nodeCount / 20)); // Starts scaling after 20 nodes
-  const componentScaleFactor = Math.max(1, estimatedComponentCount / 3); // Starts scaling after 3 components
-  const combinedScaleFactor = Math.max(nodeScaleFactor, componentScaleFactor);
-  
-  // Apply scaling to canvas dimensions
-  const width = Math.min(3000, baseWidth * combinedScaleFactor); // Cap at 3000px
-  const heightNum = Math.min(2000, baseHeight * Math.max(1, combinedScaleFactor * 0.8)); // Cap at 2000px
+  // Calculate adaptive canvas size based on available space and content
+  const getCanvasSize = useCallback(() => {
+    // Base dimensions that work well for most graphs
+    const baseWidth = sidePanelCollapsed ? 1200 : 800; // Adjust for panel visibility
+    const baseHeight = parseInt(height) || 700;
+    
+    // Auto-zoom calculation: zoom out when there are many nodes
+    const nodeCount = nodes.length;
+    
+    // Estimate component count based on node count and edge density for initial sizing
+    const estimatedComponentCount = Math.max(1, Math.min(nodeCount / 5, edges.length === 0 ? nodeCount : Math.ceil(nodeCount / 10)));
+    
+    // Scale factor based on complexity (more nodes = zoom out more)
+    const nodeScaleFactor = Math.max(1, Math.sqrt(nodeCount / 20)); // Starts scaling after 20 nodes
+    const componentScaleFactor = Math.max(1, estimatedComponentCount / 3); // Starts scaling after 3 components
+    const combinedScaleFactor = Math.max(nodeScaleFactor, componentScaleFactor);
+    
+    // Apply scaling to canvas dimensions, but keep within reasonable bounds for the layout
+    const width = Math.min(2000, baseWidth * combinedScaleFactor);
+    const heightNum = Math.min(1500, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
+    
+    return { width, heightNum, combinedScaleFactor };
+  }, [nodes.length, edges.length, height, sidePanelCollapsed]);
+
+  const { width, heightNum, combinedScaleFactor } = getCanvasSize();
 
   // Color scheme for different node types
   const getNodeColor = (group: string): string => {
@@ -193,17 +202,29 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const componentsPerRow = Math.ceil(Math.sqrt(numComponents));
     const maxComponentsPerRow = Math.max(2, Math.min(componentsPerRow, Math.floor(width / adaptiveSubgraphSeparation)));
     
-    // Position subgraphs in a grid pattern for better space utilization
+    // Calculate the actual grid dimensions needed
+    const actualComponentsPerRow = Math.min(maxComponentsPerRow, numComponents);
+    const actualRows = Math.ceil(numComponents / maxComponentsPerRow);
+    
+    // Calculate the total space needed for the grid
+    const gridWidth = actualComponentsPerRow * adaptiveSubgraphSeparation;
+    const gridHeight = actualRows * (heightNum / Math.max(1, actualRows));
+    
+    // Calculate centering offset to center the grid within the viewport
+    // For single component, center it directly
+    const centerOffsetX = numComponents === 1 ? 0 : Math.max(0, (width - gridWidth) / 2);
+    const centerOffsetY = numComponents === 1 ? 0 : Math.max(0, (heightNum - gridHeight) / 2);
+    
+    // Position subgraphs in a centered grid pattern
     components.forEach((component, componentIndex) => {
       const row = Math.floor(componentIndex / maxComponentsPerRow);
       const col = componentIndex % maxComponentsPerRow;
-      const totalRows = Math.ceil(numComponents / maxComponentsPerRow);
       
-      // Calculate center position for this component
-      const componentCenterX = (col + 0.5) * (width / maxComponentsPerRow);
-      const componentCenterY = (row + 0.5) * (heightNum / totalRows);
+      // Calculate center position for this component with centering offset
+      const componentCenterX = numComponents === 1 ? width / 2 : centerOffsetX + (col + 0.5) * (gridWidth / actualComponentsPerRow);
+      const componentCenterY = numComponents === 1 ? heightNum / 2 : centerOffsetY + (row + 0.5) * (gridHeight / actualRows);
       
-      // Ensure components don't overlap by adding minimum separation
+      // Ensure components stay within bounds
       const finalCenterX = Math.max(adaptiveSubgraphSeparation / 2, 
         Math.min(width - adaptiveSubgraphSeparation / 2, componentCenterX));
       const finalCenterY = Math.max(200, Math.min(heightNum - 200, componentCenterY));
@@ -339,13 +360,20 @@ const GraphViz: React.FC<GraphVizProps> = ({
       const componentsPerRow = Math.ceil(Math.sqrt(numComponents));
       const maxComponentsPerRow = Math.max(2, Math.min(componentsPerRow, Math.floor(width / 350)));
       
-      // Position each subgraph in grid pattern
+      // Calculate centering offsets (same logic as simulation)
+      const actualComponentsPerRow = Math.min(maxComponentsPerRow, numComponents);
+      const actualRows = Math.ceil(numComponents / maxComponentsPerRow);
+      const gridWidth = actualComponentsPerRow * 350; // Using 350 as base separation
+      const gridHeight = actualRows * (heightNum / Math.max(1, actualRows));
+      const centerOffsetX = numComponents === 1 ? 0 : Math.max(0, (width - gridWidth) / 2);
+      const centerOffsetY = numComponents === 1 ? 0 : Math.max(0, (heightNum - gridHeight) / 2);
+      
+      // Position each subgraph in centered grid pattern
       const row = Math.floor(componentIndex / maxComponentsPerRow);
       const col = componentIndex % maxComponentsPerRow;
-      const totalRows = Math.ceil(numComponents / maxComponentsPerRow);
       
-      const baseX = (col + 0.5) * (width / maxComponentsPerRow);
-      const baseY = (row + 0.5) * (heightNum / totalRows);
+      const baseX = numComponents === 1 ? width / 2 : centerOffsetX + (col + 0.5) * (gridWidth / actualComponentsPerRow);
+      const baseY = numComponents === 1 ? heightNum / 2 : centerOffsetY + (row + 0.5) * (gridHeight / actualRows);
       
       component.forEach((node, nodeIndex) => {
         let x = baseX + (Math.random() - 0.5) * 200;
@@ -395,6 +423,11 @@ const GraphViz: React.FC<GraphVizProps> = ({
     setSimulationNodes(allInitialNodes);
   }, [nodes, edges, width, heightNum, findConnectedComponents]);
 
+  // Toggle side panel visibility
+  const toggleSidePanel = () => {
+    setSidePanelCollapsed(!sidePanelCollapsed);
+  };
+
   // Animation loop
   useEffect(() => {
     const animate = () => {
@@ -436,9 +469,12 @@ const GraphViz: React.FC<GraphVizProps> = ({
   // Handle node interactions
   const handleNodeClick = (node: GraphNode, event: React.MouseEvent) => {
     event.stopPropagation();
+    event.preventDefault();
+    
+    // Update node selection and focus
     setSelectedNode(node.id);
     setSelectedNodeData(node);
-    setShowNodePanel(true);
+    setFocusedNodeId(node.id);
     
     // Initialize editing state
     setEditingNodeName(false);
@@ -458,6 +494,79 @@ const GraphViz: React.FC<GraphVizProps> = ({
       onNodeDoubleClick(node.id, node);
     }
   };
+
+  // Handle clicking on graph background to clear focus (but keep panel open)
+  const handleGraphBackgroundClick = (event: React.MouseEvent) => {
+    // Only clear focus if clicking directly on the background rectangle
+    if (event.target === event.currentTarget) {
+      setFocusedNodeId(null);
+      setSelectedNode(null);
+      setSelectedNodeData(null);
+      // Note: We don't close the panel anymore
+    }
+  };
+
+  // Handle connection click from side panel
+  const handleConnectionClick = (nodeId: string, nodeData?: any) => {
+    // First try to find the node in current simulation nodes
+    let targetNode = simulationNodes.find(n => n.id === nodeId);
+    
+    // If not found in simulation, use the node data from connection or create a basic node object
+    if (!targetNode && nodeData) {
+      targetNode = {
+        id: nodeData.id || nodeId,
+        label: nodeData.label || nodeData.name || 'Unknown Node',
+        group: nodeData.group || 'Other',
+        properties: nodeData.properties || {},
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0
+      };
+    }
+    
+    if (targetNode) {
+      setFocusedNodeId(nodeId);
+      setSelectedNode(nodeId);
+      setSelectedNodeData(targetNode);
+      fetchNodeConnections(nodeId);
+      
+      if (onNavigateToNode) {
+        onNavigateToNode(nodeId);
+      }
+    } else {
+      console.warn('Target node not found:', nodeId);
+    }
+  };
+
+  // Get direct connections for a node
+  const getDirectConnections = useCallback((nodeId: string): Set<string> => {
+    const connections = new Set<string>();
+    edges.forEach(edge => {
+      if (edge.from === nodeId) {
+        connections.add(edge.to);
+      }
+      if (edge.to === nodeId) {
+        connections.add(edge.from);
+      }
+    });
+    return connections;
+  }, [edges]);
+
+  // Determine if a node should be faded
+  const shouldFadeNode = useCallback((nodeId: string): boolean => {
+    if (!focusedNodeId) return false;
+    if (nodeId === focusedNodeId) return false;
+    
+    const directConnections = getDirectConnections(focusedNodeId);
+    return !directConnections.has(nodeId);
+  }, [focusedNodeId, getDirectConnections]);
+
+  // Determine if an edge should be faded
+  const shouldFadeEdge = useCallback((edge: GraphEdge): boolean => {
+    if (!focusedNodeId) return false;
+    return edge.from !== focusedNodeId && edge.to !== focusedNodeId;
+  }, [focusedNodeId]);
 
   // Drag handlers
   const handleMouseDown = (node: GraphNode, event: React.MouseEvent) => {
@@ -503,71 +612,77 @@ const GraphViz: React.FC<GraphVizProps> = ({
   }, {} as { [key: string]: GraphNode[] });
 
   return (
-    <div className="graph-viz-container">
-      <div className="graph-controls">
-        <div className="graph-legend">
-          <h4>Graph Legend</h4>
-          <div className="legend-items">
-            {Object.keys(nodesByGroup).map(group => (
-              <div key={group} className="legend-item">
-                <div 
-                  className="legend-color" 
-                  style={{ backgroundColor: getNodeColor(group) }}
-                ></div>
-                <span>{getNodeIcon(group)} {group} ({nodesByGroup[group].length})</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        
-        <div className="graph-info">
-          <div className="info-stat">
-            <strong>Nodes:</strong> {simulationNodes.length}
-          </div>
-          <div className="info-stat">
-            <strong>Connections:</strong> {edges.length}
-          </div>
-          <div className="info-stat">
-            <strong>Subgraphs:</strong> {componentCount}
-          </div>
-          {combinedScaleFactor > 1.2 && (
-            <div className="info-stat" style={{ color: '#3498db' }}>
-              <strong>Auto-zoom:</strong> {Math.round((1/combinedScaleFactor) * 100)}%
-            </div>
-          )}
-          {selectedNode && (
-            <div className="info-stat selected">
-              <strong>Selected:</strong> {simulationNodes.find(n => n.id === selectedNode)?.label}
-            </div>
-          )}
-        </div>
-      </div>
-      
-      <div 
-        className="graph-canvas-2d"
-        style={{ 
-          height: `${Math.min(800, heightNum + 50)}px`, // Adaptive height with max limit
-          border: '1px solid #bdc3c7',
-          borderRadius: '8px',
-          backgroundColor: '#f8f9fa',
-          overflow: 'auto', // Allow scrolling for large graphs
-          position: 'relative'
-        }}
-      >
-        <svg
-          ref={svgRef}
-          width={width}
-          height={heightNum}
-          viewBox={`0 0 ${width} ${heightNum}`}
-          style={{ cursor: draggedNode ? 'grabbing' : 'grab' }}
+    <div ref={containerRef} className="graph-viz-container">
+
+      {/* Main Content Area - Side by Side Layout */}
+      <div className="graph-main-content">
+        {/* Panel Toggle Button - Fixed Position */}
+        <button 
+          className="side-panel-toggle-btn-fixed"
+          onClick={toggleSidePanel}
+          title={sidePanelCollapsed ? "Show side panel" : "Hide side panel"}
         >
+          {sidePanelCollapsed ? '◀' : '▶'}
+        </button>
+        
+        {/* Graph Canvas */}
+        <div 
+          className={`graph-canvas-container ${sidePanelCollapsed ? 'full-width' : ''}`}
+        >
+          <div 
+            className={`graph-canvas-2d ${focusedNodeId ? 'focused' : ''}`}
+            style={{ 
+              height: '100%',
+              minHeight: '500px',
+              border: '1px solid #bdc3c7',
+              borderRadius: '8px',
+              backgroundColor: '#f8f9fa',
+              overflow: 'hidden',
+              position: 'relative'
+            }}
+          >
+            {/* Graph Stats Overlay */}
+            <div className="graph-stats-overlay">
+              <div className="graph-stat">
+                <strong>{simulationNodes.length}</strong> nodes
+              </div>
+              <div className="graph-stat">
+                <strong>{edges.length}</strong> connections
+              </div>
+              <div className="graph-stat">
+                <strong>{componentCount}</strong> subgraphs
+              </div>
+              {combinedScaleFactor > 1.2 && (
+                <div className="graph-stat auto-zoom">
+                  <strong>{Math.round((1/combinedScaleFactor) * 100)}%</strong> zoom
+                </div>
+              )}
+            </div>
+            <svg
+              ref={svgRef}
+              width="100%"
+              height="100%"
+              viewBox={`0 0 ${width} ${heightNum}`}
+              preserveAspectRatio="xMidYMid meet"
+              style={{ 
+                cursor: draggedNode ? 'grabbing' : 'grab',
+                maxWidth: '100%',
+                maxHeight: '100%'
+              }}
+            >
           {/* Grid background */}
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e9ecef" strokeWidth="0.5"/>
             </pattern>
           </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
+          <rect 
+            width="100%" 
+            height="100%" 
+            fill="url(#grid)" 
+            onClick={handleGraphBackgroundClick}
+            style={{ cursor: 'default' }}
+          />
           
           {/* Edges */}
           <g className="edges">
@@ -603,13 +718,19 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     y2={targetY}
                     stroke="#7f8c8d"
                     strokeWidth="2"
-                    opacity="0.6"
+                    opacity={shouldFadeEdge(edge) ? "0.15" : "0.6"}
+                    style={{
+                      transition: 'opacity 0.3s ease-in-out'
+                    }}
                   />
                   {/* Arrow */}
                   <polygon
                     points={`${targetX},${targetY} ${targetX - 8 + 3 * Math.cos(Math.atan2(dy, dx) + 0.5)},${targetY - 8 + 3 * Math.sin(Math.atan2(dy, dx) + 0.5)} ${targetX - 8 + 3 * Math.cos(Math.atan2(dy, dx) - 0.5)},${targetY - 8 + 3 * Math.sin(Math.atan2(dy, dx) - 0.5)}`}
                     fill="#7f8c8d"
-                    opacity="0.6"
+                    opacity={shouldFadeEdge(edge) ? "0.15" : "0.6"}
+                    style={{
+                      transition: 'opacity 0.3s ease-in-out'
+                    }}
                   />
                 </g>
               );
@@ -625,6 +746,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
               const color = getNodeColor(node.group);
               const isSelected = selectedNode === node.id;
               const isDragged = draggedNode === node.id;
+              const isFocused = focusedNodeId === node.id;
+              const shouldFade = shouldFadeNode(node.id);
               
               return (
                 <g key={node.id}>
@@ -634,10 +757,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     cy={node.y}
                     r={radius}
                     fill={color}
-                    stroke={isSelected ? '#2c3e50' : '#ffffff'}
-                    strokeWidth={isSelected ? 3 : 2}
-                    opacity={isDragged ? 0.8 : 1}
-                    style={{ cursor: 'pointer' }}
+                    stroke={isFocused ? '#e74c3c' : (isSelected ? '#2c3e50' : '#ffffff')}
+                    strokeWidth={isFocused ? 4 : (isSelected ? 3 : 2)}
+                    opacity={shouldFade ? 0.25 : (isDragged ? 0.8 : 1)}
+                    style={{ 
+                      cursor: 'pointer',
+                      transition: 'opacity 0.3s ease-in-out, stroke 0.3s ease-in-out, stroke-width 0.3s ease-in-out'
+                    }}
                     onClick={(e) => handleNodeClick(node, e)}
                     onDoubleClick={(e) => handleNodeDoubleClick(node, e)}
                     onMouseDown={(e) => handleMouseDown(node, e)}
@@ -650,8 +776,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     textAnchor="middle"
                     fontSize="12"
                     fill="#2c3e50"
-                    fontWeight="500"
-                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                    fontWeight={isFocused ? '700' : '500'}
+                    opacity={shouldFade ? 0.3 : 1}
+                    style={{ 
+                      pointerEvents: 'none', 
+                      userSelect: 'none',
+                      transition: 'opacity 0.3s ease-in-out, font-weight 0.3s ease-in-out'
+                    }}
                   >
                     {node.label.length > 15 ? `${node.label.substring(0, 15)}...` : node.label}
                   </text>
@@ -661,8 +792,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     x={node.x}
                     y={node.y + 4}
                     textAnchor="middle"
-                    fontSize="14"
-                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                    fontSize={isFocused ? '16' : '14'}
+                    opacity={shouldFade ? 0.3 : 1}
+                    style={{ 
+                      pointerEvents: 'none', 
+                      userSelect: 'none',
+                      transition: 'opacity 0.3s ease-in-out, font-size 0.3s ease-in-out'
+                    }}
                   >
                     {getNodeIcon(node.group)}
                   </text>
@@ -670,69 +806,58 @@ const GraphViz: React.FC<GraphVizProps> = ({
               );
             })}
           </g>
-        </svg>
-      </div>
+          </svg>
+          </div>
+        </div>
 
-      {/* Node Panel Overlay */}
-      {showNodePanel && (
-        <div 
-          className={`node-panel-overlay ${showNodePanel ? 'show' : ''}`}
-          onClick={() => setShowNodePanel(false)}
-        />
-      )}
-
-      {/* Node Details Panel */}
-      <div className={`node-details-panel ${showNodePanel ? 'open' : ''}`}>
-        {selectedNodeData && (
-          <>
-            {/* Panel Header */}
-            <div className="node-panel-header">
-              <div className="node-panel-title-container">
-                {editingNodeName ? (
-                  <input 
-                    type="text" 
-                    className="node-panel-title-input editing"
-                    value={editedNodeName}
-                    onChange={(e) => setEditedNodeName(e.target.value)}
-                    onBlur={() => {
-                      // Save name change
-                      console.log('Saving node name change:', editedNodeName);
-                      setEditingNodeName(false);
-                      // This would typically call an API to update the node name
-                      alert('Node name editing would update the database (read-only mode)');
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.currentTarget.blur();
-                      } else if (e.key === 'Escape') {
-                        setEditedNodeName(selectedNodeData.label);
-                        setEditingNodeName(false);
-                      }
-                    }}
-                    autoFocus
-                    placeholder="Enter node name"
-                  />
-                ) : (
-                  <div className="node-panel-title-display">
-                    <span className="node-panel-title-text">{editedNodeName}</span>
-                    <button 
-                      className="node-edit-btn"
-                      onClick={() => setEditingNodeName(true)}
-                      title="Edit node name"
-                    >
-                      ✏️
-                    </button>
+        {/* Side Panel */}
+        <div className={`graph-side-panel ${sidePanelCollapsed ? 'collapsed' : ''}`}>
+          {!sidePanelCollapsed && (
+            <div className="side-panel-content">
+              {selectedNodeData ? (
+                <>
+                  {/* Panel Header */}
+                  <div className="side-panel-header">
+                    <div className="node-panel-title-container">
+                      {editingNodeName ? (
+                        <input 
+                          type="text" 
+                          className="node-panel-title-input editing"
+                          value={editedNodeName}
+                          onChange={(e) => setEditedNodeName(e.target.value)}
+                          onBlur={() => {
+                            // Save name change
+                            console.log('Saving node name change:', editedNodeName);
+                            setEditingNodeName(false);
+                            // This would typically call an API to update the node name
+                            alert('Node name editing would update the database (read-only mode)');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.currentTarget.blur();
+                            } else if (e.key === 'Escape') {
+                              setEditedNodeName(selectedNodeData.label);
+                              setEditingNodeName(false);
+                            }
+                          }}
+                          autoFocus
+                          placeholder="Enter node name"
+                        />
+                      ) : (
+                        <div className="node-panel-title-display">
+                          <span className="node-panel-title-text">{editedNodeName}</span>
+                          <button 
+                            className="node-edit-btn"
+                            onClick={() => setEditingNodeName(true)}
+                            title="Edit node name"
+                          >
+                            ✏️
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="node-panel-type">{selectedNodeData.group}</div>
                   </div>
-                )}
-              </div>
-              <div className="node-panel-type">{selectedNodeData.group}</div>
-              <button 
-                className="node-panel-close"
-                onClick={() => setShowNodePanel(false)}
-              >
-                ✕
-              </button>
-            </div>
 
             {/* Panel Content */}
             <div className="node-panel-content">
@@ -823,10 +948,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
                                   </div>
                                   <div 
                                     className="connection-details"
-                                    onClick={() => {
-                                      if (connectedNode?.id && onNavigateToNode) {
-                                        console.log('Navigate to node:', connectedNode.id, connectedNode.label);
-                                        onNavigateToNode(connectedNode.id);
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (connectedNode?.id) {
+                                        handleConnectionClick(connectedNode.id, connectedNode);
                                       }
                                     }}
                                     style={{ cursor: 'pointer' }}
@@ -885,46 +1010,53 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 className="node-action-btn primary"
                 onClick={() => {
                   // Save changes logic would go here
-                  console.log('Saving node changes...');
-                  setShowNodePanel(false);
-                }}
-              >
-                💾 Save Changes
-              </button>
-              {(() => {
-                // Check if node has any connections (use fetched connections for accurate count)
-                const hasConnections = nodeConnections.length > 0;
-                
-                return (
-                  <button 
-                    className={`node-action-btn ${hasConnections ? 'danger-disabled' : 'danger'}`}
-                    disabled={hasConnections}
-                    onClick={() => {
-                      if (hasConnections) {
-                        alert('Remove all connections before deleting this node');
-                      } else {
-                        if (window.confirm(`Are you sure you want to delete "${selectedNodeData.label}"?`)) {
-                          console.log('Deleting node:', selectedNodeData.id);
-                          setShowNodePanel(false);
-                          // Delete logic would go here
-                        }
-                      }
+                      console.log('Saving node changes...');
                     }}
-                    title={hasConnections ? 'Remove all connections before deleting this node' : 'Delete this node'}
                   >
-                    🗑️ Delete Node
+                    💾 Save Changes
                   </button>
-                );
-              })()}
+                  {(() => {
+                    // Check if node has any connections (use fetched connections for accurate count)
+                    const hasConnections = nodeConnections.length > 0;
+                    
+                    return (
+                      <button 
+                        className={`node-action-btn ${hasConnections ? 'danger-disabled' : 'danger'}`}
+                        disabled={hasConnections}
+                        onClick={() => {
+                          if (hasConnections) {
+                            alert('Remove all connections before deleting this node');
+                          } else {
+                            if (window.confirm(`Are you sure you want to delete "${selectedNodeData.label}"?`)) {
+                              console.log('Deleting node:', selectedNodeData.id);
+                              // Delete logic would go here
+                            }
+                          }
+                        }}
+                        title={hasConnections ? 'Remove all connections before deleting this node' : 'Delete this node'}
+                      >
+                        🗑️ Delete Node
+                      </button>
+                    );
+                  })()}
+                </div>
+              </>
+            ) : (
+              <div className="side-panel-empty">
+                <div className="empty-icon">🎯</div>
+                <p>Click on a node to view its details and connections</p>
+              </div>
+            )}
             </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
       
       <div className="graph-instructions">
         <p>
           <strong>Instructions:</strong> 
-          Drag nodes to reposition • Click to select • Double-click to edit • 
+          Drag nodes to reposition • Click to focus and view connections • Double-click to edit • 
+          Click connections in side panel to navigate • Toggle side panel with ▶/◀ button • 
           Subgraphs auto-arranged in grid layout • Auto-zoom adjusts for complex graphs • 
           Visual hierarchy: Industries (top) → Sectors/Departments → Pain Points → Projects (bottom)
         </p>
