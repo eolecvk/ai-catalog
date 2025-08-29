@@ -672,7 +672,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
               borderRadius: '8px',
               backgroundColor: '#f8f9fa',
               overflow: 'hidden',
-              position: 'relative'
+              position: 'relative',
+              padding: '1rem'
             }}
           >
             {/* Graph Stats Overlay */}
@@ -870,7 +871,46 @@ const GraphViz: React.FC<GraphVizProps> = ({
                       transition: 'opacity 0.3s ease-in-out, font-weight 0.3s ease-in-out'
                     }}
                   >
-                    {node.label.length > 15 ? `${node.label.substring(0, 15)}...` : node.label}
+                    {(() => {
+                      // Split long labels into multiple lines
+                      const maxCharsPerLine = 15;
+                      const words = node.label.split(' ');
+                      const lines: string[] = [];
+                      let currentLine = '';
+                      
+                      for (const word of words) {
+                        if ((currentLine + word).length <= maxCharsPerLine) {
+                          currentLine += (currentLine ? ' ' : '') + word;
+                        } else {
+                          if (currentLine) {
+                            lines.push(currentLine);
+                            currentLine = word;
+                          } else {
+                            // Word is too long, split it
+                            lines.push(word.substring(0, maxCharsPerLine));
+                            currentLine = word.substring(maxCharsPerLine);
+                          }
+                        }
+                      }
+                      if (currentLine) lines.push(currentLine);
+                      
+                      // Limit to 3 lines max
+                      const maxLines = 3;
+                      if (lines.length > maxLines) {
+                        lines[maxLines - 1] = lines[maxLines - 1].substring(0, maxCharsPerLine - 3) + '...';
+                        lines.splice(maxLines);
+                      }
+                      
+                      return lines.map((line, index) => (
+                        <tspan
+                          key={index}
+                          x={node.x}
+                          dy={index === 0 ? 0 : '1.2em'}
+                        >
+                          {line}
+                        </tspan>
+                      ));
+                    })()}
                   </text>
                   
                   {/* Node icon */}

@@ -31,7 +31,7 @@ const GRAPH_SCHEMA = {
   ],
   relationshipTypes: [
     'HAS_SECTOR', 'EXPERIENCES', 'HAS_OPPORTUNITY', 'ADDRESSES',
-    'IS_INSTANCE_OF', 'REQUIRES_ROLE', 'NEEDS_SUBMODULE', 'CONTAINS'
+    'IS_INSTANCE_OF', 'REQUIRES_ROLE', 'NEEDS_SUBMODULE', 'CONTAINS', 'USES_MODULE'
   ],
   nodeProperties: {
     'Industry': ['name'],
@@ -1972,6 +1972,7 @@ async function generateCypherExport(session, version = GRAPH_VERSIONS.BASE) {
   lines.push('//   IS_INSTANCE_OF: ProjectOpportunity -> ProjectBlueprint');
   lines.push('//   REQUIRES_ROLE: ProjectOpportunity -> Role');
   lines.push('//   NEEDS_SUBMODULE: ProjectOpportunity -> SubModule');
+  lines.push('//   USES_MODULE: ProjectOpportunity -> Module');
   lines.push('//   CONTAINS: Module -> SubModule');
   lines.push('');
   
@@ -2050,6 +2051,7 @@ async function generateCypherExport(session, version = GRAPH_VERSIONS.BASE) {
     'IS_INSTANCE_OF',
     'REQUIRES_ROLE',
     'NEEDS_SUBMODULE',
+    'USES_MODULE',
     'CONTAINS'
   ];
   

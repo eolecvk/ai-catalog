@@ -51,22 +51,22 @@ const App: React.FC = () => {
     subModules: []
   });
 
-  // Admin mode state
-  const [isAdminMode, setIsAdminMode] = useState(false);
-  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
-  const [adminActiveSection, setAdminActiveSection] = useState('overview');
+  // Builder mode state
+  const [isBuilderMode, setIsBuilderMode] = useState(false);
+  const [builderAuthenticated, setBuilderAuthenticated] = useState(false);
+  const [builderActiveSection, setBuilderActiveSection] = useState('overview');
   const [showTablesSubsections, setShowTablesSubsections] = useState(false);
   const [activeTableSection, setActiveTableSection] = useState('industries');
-  const [adminStats, setAdminStats] = useState<any>(null);
-  const [adminNodes, setAdminNodes] = useState<any[]>([]);
-  const [adminLoading, setAdminLoading] = useState(false);
+  const [builderStats, setBuilderStats] = useState<any>(null);
+  const [builderNodes, setBuilderNodes] = useState<any[]>([]);
+  const [builderLoading, setBuilderLoading] = useState(false);
   const [currentGraphVersion, setCurrentGraphVersion] = useState('base');
   const [availableVersions, setAvailableVersions] = useState<string[]>(['base']);
   
-  // Admin modals and forms
-  const [showAdminNodeModal, setShowAdminNodeModal] = useState(false);
-  const [showAdminEditModal, setShowAdminEditModal] = useState(false);
-  const [adminNodeForm, setAdminNodeForm] = useState<any>({});
+  // Builder modals and forms
+  const [showBuilderNodeModal, setShowBuilderNodeModal] = useState(false);
+  const [showBuilderEditModal, setShowBuilderEditModal] = useState(false);
+  const [builderNodeForm, setBuilderNodeForm] = useState<any>({});
   const [editingNode, setEditingNode] = useState<any>(null);
   
   // Graph visualization state
@@ -435,51 +435,45 @@ const App: React.FC = () => {
     }
   };
 
-  // Admin mode functions
-  const handleAdminToggle = () => {
-    if (isAdminMode) {
-      setIsAdminMode(false);
-      setAdminAuthenticated(false);
+  // Builder mode functions
+  const handleBuilderToggle = () => {
+    setIsBuilderMode(!isBuilderMode);
+    if (!isBuilderMode) {
+      setBuilderAuthenticated(true); // Auto-authenticate when entering builder mode
     } else {
-      const password = prompt("Enter admin password:");
-      if (password === "admin123") { // Simple password for demo
-        setIsAdminMode(true);
-        setAdminAuthenticated(true);
-      } else if (password !== null) {
-        alert("Incorrect password");
-      }
+      setBuilderAuthenticated(false);
     }
   };
 
-  // Admin API functions
-  const fetchAdminStats = async (version = currentGraphVersion) => {
-    setAdminLoading(true);
+  // Builder API functions
+  const fetchBuilderStats = async (version = currentGraphVersion) => {
+    setBuilderLoading(true);
     try {
       const response = await fetch(`/api/admin/stats?version=${version}`);
       const stats = await response.json();
-      setAdminStats(stats);
+      setBuilderStats(stats);
     } catch (error) {
       console.error('Error fetching admin stats:', error);
     } finally {
-      setAdminLoading(false);
+      setBuilderLoading(false);
     }
   };
 
-  const fetchAdminNodes = async (nodeType: string, version = currentGraphVersion) => {
-    setAdminLoading(true);
+  const fetchBuilderNodes = async (nodeType: string, version = currentGraphVersion) => {
+    setBuilderLoading(true);
     try {
       const response = await fetch(`/api/admin/nodes/${nodeType}?version=${version}`);
       const nodes = await response.json();
-      setAdminNodes(nodes);
+      setBuilderNodes(nodes);
     } catch (error) {
       console.error('Error fetching admin nodes:', error);
     } finally {
-      setAdminLoading(false);
+      setBuilderLoading(false);
     }
   };
 
   const createDraftVersion = async () => {
-    setAdminLoading(true);
+    setBuilderLoading(true);
     try {
       const response = await fetch('/api/admin/versions/create-draft', {
         method: 'POST'
@@ -489,7 +483,7 @@ const App: React.FC = () => {
         alert('Draft version created successfully!');
         setCurrentGraphVersion('admin_draft');
         await fetchAvailableVersions();
-        await fetchAdminStats('admin_draft');
+        await fetchBuilderStats('admin_draft');
       } else {
         alert(`Error: ${result.error}`);
       }
@@ -497,7 +491,7 @@ const App: React.FC = () => {
       console.error('Error creating draft version:', error);
       alert('Error creating draft version');
     } finally {
-      setAdminLoading(false);
+      setBuilderLoading(false);
     }
   };
 
@@ -506,7 +500,7 @@ const App: React.FC = () => {
       return;
     }
     
-    setAdminLoading(true);
+    setBuilderLoading(true);
     try {
       const response = await fetch('/api/admin/versions/draft', {
         method: 'DELETE'
@@ -516,7 +510,7 @@ const App: React.FC = () => {
         alert('Reset to base successfully!');
         setCurrentGraphVersion('base');
         await fetchAvailableVersions();
-        await fetchAdminStats('base');
+        await fetchBuilderStats('base');
       } else {
         alert(`Error: ${result.error}`);
       }
@@ -524,7 +518,7 @@ const App: React.FC = () => {
       console.error('Error resetting to base:', error);
       alert('Error resetting to base');
     } finally {
-      setAdminLoading(false);
+      setBuilderLoading(false);
     }
   };
 
@@ -535,12 +529,12 @@ const App: React.FC = () => {
       return;
     }
     
-    setAdminNodeForm({
+    setBuilderNodeForm({
       type: nodeType,
       name: '',
       impact: ''
     });
-    setShowAdminNodeModal(true);
+    setShowBuilderNodeModal(true);
   };
 
   const handleEditNode = (node: any) => {
@@ -550,12 +544,12 @@ const App: React.FC = () => {
     }
     
     setEditingNode(node);
-    setAdminNodeForm({
-      type: adminActiveSection,
+    setBuilderNodeForm({
+      type: builderActiveSection,
       name: node.properties.name || node.properties.title,
       impact: node.properties.impact || ''
     });
-    setShowAdminEditModal(true);
+    setShowBuilderEditModal(true);
   };
 
   const handleDeleteNode = async (nodeId: string) => {
@@ -568,15 +562,15 @@ const App: React.FC = () => {
       return;
     }
     
-    setAdminLoading(true);
+    setBuilderLoading(true);
     try {
-      const response = await fetch(`/api/admin/nodes/${adminActiveSection}/${nodeId}?version=${currentGraphVersion}`, {
+      const response = await fetch(`/api/admin/nodes/${builderActiveSection}/${nodeId}?version=${currentGraphVersion}`, {
         method: 'DELETE'
       });
       
       if (response.ok) {
-        await fetchAdminNodes(adminActiveSection, currentGraphVersion);
-        await fetchAdminStats(currentGraphVersion);
+        await fetchBuilderNodes(builderActiveSection, currentGraphVersion);
+        await fetchBuilderStats(currentGraphVersion);
       } else {
         const error = await response.json();
         alert(`Error deleting node: ${error.error}`);
@@ -585,29 +579,29 @@ const App: React.FC = () => {
       console.error('Error deleting node:', error);
       alert('Failed to delete node');
     } finally {
-      setAdminLoading(false);
+      setBuilderLoading(false);
     }
   };
 
   const handleCreateNode = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAdminLoading(true);
+    setBuilderLoading(true);
     
     try {
-      const response = await fetch(`/api/admin/nodes/${adminNodeForm.type}?version=${currentGraphVersion}`, {
+      const response = await fetch(`/api/admin/nodes/${builderNodeForm.type}?version=${currentGraphVersion}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: adminNodeForm.name,
-          impact: adminNodeForm.impact
+          name: builderNodeForm.name,
+          impact: builderNodeForm.impact
         })
       });
       
       if (response.ok) {
-        setShowAdminNodeModal(false);
-        setAdminNodeForm({});
-        await fetchAdminNodes(adminActiveSection, currentGraphVersion);
-        await fetchAdminStats(currentGraphVersion);
+        setShowBuilderNodeModal(false);
+        setBuilderNodeForm({});
+        await fetchBuilderNodes(builderActiveSection, currentGraphVersion);
+        await fetchBuilderStats(currentGraphVersion);
       } else {
         const error = await response.json();
         alert(`Error creating node: ${error.error}`);
@@ -616,29 +610,29 @@ const App: React.FC = () => {
       console.error('Error creating node:', error);
       alert('Failed to create node');
     } finally {
-      setAdminLoading(false);
+      setBuilderLoading(false);
     }
   };
 
   const handleUpdateNode = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAdminLoading(true);
+    setBuilderLoading(true);
     
     try {
-      const response = await fetch(`/api/admin/nodes/${adminActiveSection}/${editingNode.id}?version=${currentGraphVersion}`, {
+      const response = await fetch(`/api/admin/nodes/${builderActiveSection}/${editingNode.id}?version=${currentGraphVersion}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: adminNodeForm.name,
-          impact: adminNodeForm.impact
+          name: builderNodeForm.name,
+          impact: builderNodeForm.impact
         })
       });
       
       if (response.ok) {
-        setShowAdminEditModal(false);
+        setShowBuilderEditModal(false);
         setEditingNode(null);
-        setAdminNodeForm({});
-        await fetchAdminNodes(adminActiveSection, currentGraphVersion);
+        setBuilderNodeForm({});
+        await fetchBuilderNodes(builderActiveSection, currentGraphVersion);
       } else {
         const error = await response.json();
         alert(`Error updating node: ${error.error}`);
@@ -647,7 +641,7 @@ const App: React.FC = () => {
       console.error('Error updating node:', error);
       alert('Failed to update node');
     } finally {
-      setAdminLoading(false);
+      setBuilderLoading(false);
     }
   };
 
@@ -713,17 +707,16 @@ const App: React.FC = () => {
     }
 
     setImportLoading(true);
-    setImportValidationErrors([]);
+    setImportValidationErrors([]); // Clear previous validation errors
     setImportResult(null);
 
     try {
       const fileContent = await importFile.text();
       
-      const response = await fetch('/api/admin/import', {
+      const response = await fetch(`/api/admin/import?versionName=${encodeURIComponent(importVersionName.trim())}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain',
-          'X-Version-Name': importVersionName.trim(),
         },
         body: fileContent,
       });
@@ -750,9 +743,43 @@ const App: React.FC = () => {
           setImportResult(null);
         }, 3000);
       } else {
+        let errorMessage = `❌ Import failed: ${result.error}`;
+        
+        // Add helpful context for common errors
+        if (result.error === 'Schema validation failed') {
+          errorMessage += '\n\n💡 Your Cypher script contains elements that don\'t match our schema.';
+          
+          // Only promise detailed errors if we actually have them
+          if (result.validationErrors && result.validationErrors.length > 0) {
+            errorMessage += '\n📋 See detailed errors below for specific issues to fix.';
+          } else {
+            errorMessage += '\n📋 No specific validation errors found.';
+          }
+        }
+        
+        // Add debug information for the user
+        if (result.stats) {
+          errorMessage += `\n\n📊 Script Analysis:`;
+          errorMessage += `\n• Node creations found: ${result.stats.nodeCreates || 0}`;
+          errorMessage += `\n• Relationship creations found: ${result.stats.relCreates || 0}`;
+        }
+        
+        // Show validation errors info for debugging
+        errorMessage += `\n\n🔍 Debug Info:`;
+        errorMessage += `\n• Has validationErrors field: ${result.hasOwnProperty('validationErrors')}`;
+        errorMessage += `\n• ValidationErrors type: ${typeof result.validationErrors}`;
+        if (result.validationErrors) {
+          errorMessage += `\n• ValidationErrors length: ${result.validationErrors.length}`;
+          errorMessage += `\n• ValidationErrors content: ${JSON.stringify(result.validationErrors)}`;
+        }
+        
+        // Show the complete server response for debugging
+        errorMessage += `\n\n🐛 Full Server Response:`;
+        errorMessage += `\n${JSON.stringify(result, null, 2)}`;
+        
         setImportResult({
           success: false,
-          message: `❌ Import failed: ${result.error}`,
+          message: errorMessage,
         });
         
         if (result.validationErrors && result.validationErrors.length > 0) {
@@ -1024,18 +1051,18 @@ const App: React.FC = () => {
     }
   };
 
-  // Load admin data when entering admin mode
+  // Load builder data when entering builder mode
   useEffect(() => {
-    if (isAdminMode && adminAuthenticated) {
+    if (isBuilderMode && builderAuthenticated) {
       fetchAvailableVersions();
-      fetchAdminStats();
+      fetchBuilderStats();
       loadFilterOptions();
     }
-  }, [isAdminMode, adminAuthenticated]);
+  }, [isBuilderMode, builderAuthenticated]);
 
   // Reload graph data when filters change
   useEffect(() => {
-    if (isAdminMode && adminAuthenticated && viewMode === 'graph' && adminActiveSection) {
+    if (isBuilderMode && builderAuthenticated && viewMode === 'graph' && builderActiveSection) {
       const nodeTypeMap: { [key: string]: string } = {
         'industries': 'industries',
         'sectors': 'sectors', 
@@ -1048,17 +1075,17 @@ const App: React.FC = () => {
         'submodules': 'submodules'
       };
       
-      const nodeType = nodeTypeMap[adminActiveSection];
+      const nodeType = nodeTypeMap[builderActiveSection];
       if (nodeType) {
         fetchGraphData(nodeType);
       }
     }
-  }, [selectedIndustries, selectedSector, selectedDepartment, isAdminMode, adminAuthenticated, viewMode, adminActiveSection, fetchGraphData]);
+  }, [selectedIndustries, selectedSector, selectedDepartment, isBuilderMode, builderAuthenticated, viewMode, builderActiveSection, fetchGraphData]);
 
   // Refresh data when version changes
   useEffect(() => {
-    if (isAdminMode && adminAuthenticated && adminActiveSection === 'overview') {
-      fetchAdminStats(currentGraphVersion);
+    if (isBuilderMode && builderAuthenticated && builderActiveSection === 'overview') {
+      fetchBuilderStats(currentGraphVersion);
     }
   }, [currentGraphVersion]);
 
@@ -1077,7 +1104,7 @@ const App: React.FC = () => {
   // Handle overview card click to navigate to graph view
   const handleOverviewCardClick = async (nodeType: string) => {
     // Switch to graph section
-    setAdminActiveSection('graph');
+    setBuilderActiveSection('graph');
     setShowTablesSubsections(false);
     
     // Set view mode to graph
@@ -1453,29 +1480,29 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      <header className={`app-header ${isAdminMode ? 'admin-mode' : ''}`}>
+      <header className={`app-header ${isBuilderMode ? 'builder-mode' : ''}`}>
         <div className="header-content">
-          <h1>{isAdminMode ? 'AI Catalog - ADMIN' : 'AI Project Catalog'}</h1>
+          <h1>{isBuilderMode ? 'AI Catalog - BUILDER' : 'AI Project Catalog - EXPLORER'}</h1>
           <button 
-            className={`admin-toggle ${isAdminMode ? 'active' : ''}`}
-            onClick={handleAdminToggle}
-            title={isAdminMode ? 'Exit Admin Mode' : 'Enter Admin Mode'}
+            className={`builder-toggle ${isBuilderMode ? 'active' : ''}`}
+            onClick={handleBuilderToggle}
+            title={isBuilderMode ? 'Switch to Explorer Mode' : 'Switch to Builder Mode'}
           >
-            {isAdminMode ? '👤 Exit Admin' : '⚙️ Admin'}
+            {isBuilderMode ? '🔍 Explorer' : '🔧 Builder'}
           </button>
         </div>
       </header>
 
-      {isAdminMode && adminAuthenticated ? (
-        /* Admin Dashboard */
-        <div className="admin-dashboard">
-          <div className="admin-nav">
-            <div className="admin-nav-items">
+      {isBuilderMode && builderAuthenticated ? (
+        /* Builder Dashboard */
+        <div className="builder-dashboard">
+          <div className="builder-nav">
+            <div className="builder-nav-items">
               {/* Main Sections */}
               <button 
-                className={`admin-nav-item ${adminActiveSection === 'overview' ? 'active' : ''}`}
+                className={`builder-nav-item ${builderActiveSection === 'overview' ? 'active' : ''}`}
                 onClick={() => {
-                  setAdminActiveSection('overview');
+                  setBuilderActiveSection('overview');
                   setShowTablesSubsections(false);
                 }}
               >
@@ -1483,9 +1510,9 @@ const App: React.FC = () => {
               </button>
               
               <button 
-                className={`admin-nav-item ${adminActiveSection === 'graph' ? 'active' : ''}`}
+                className={`builder-nav-item ${builderActiveSection === 'graph' ? 'active' : ''}`}
                 onClick={() => {
-                  setAdminActiveSection('graph');
+                  setBuilderActiveSection('graph');
                   setShowTablesSubsections(false);
                   if (viewMode === 'table') setViewMode('graph');
                 }}
@@ -1494,14 +1521,14 @@ const App: React.FC = () => {
               </button>
               
               <button 
-                className={`admin-nav-item ${adminActiveSection === 'tables' ? 'active' : ''}`}
+                className={`builder-nav-item ${builderActiveSection === 'tables' ? 'active' : ''}`}
                 onClick={() => {
-                  setAdminActiveSection('tables');
+                  setBuilderActiveSection('tables');
                   setShowTablesSubsections(true);
                   if (viewMode === 'graph') setViewMode('table');
                   // Load default table section
                   resetFilters();
-                  fetchAdminNodes(activeTableSection === 'industries' ? 'industry' : 
+                  fetchBuilderNodes(activeTableSection === 'industries' ? 'industry' : 
                                  activeTableSection === 'sectors' ? 'sector' :
                                  activeTableSection === 'departments' ? 'department' :
                                  activeTableSection === 'painpoints' ? 'painpoint' :
@@ -1512,54 +1539,54 @@ const App: React.FC = () => {
               </button>
               
               {/* Table Subsections - Only show when Tables is active */}
-              {showTablesSubsections && adminActiveSection === 'tables' && (
-                <div className="admin-table-subsections">
+              {showTablesSubsections && builderActiveSection === 'tables' && (
+                <div className="builder-table-subsections">
                   <button 
-                    className={`admin-nav-subitem ${activeTableSection === 'industries' ? 'active' : ''}`}
+                    className={`builder-nav-subitem ${activeTableSection === 'industries' ? 'active' : ''}`}
                     onClick={() => {
                       setActiveTableSection('industries');
                       resetFilters();
-                      fetchAdminNodes('industry', currentGraphVersion);
+                      fetchBuilderNodes('industry', currentGraphVersion);
                     }}
                   >
                     🏢 Industries
                   </button>
                   <button 
-                    className={`admin-nav-subitem ${activeTableSection === 'sectors' ? 'active' : ''}`}
+                    className={`builder-nav-subitem ${activeTableSection === 'sectors' ? 'active' : ''}`}
                     onClick={() => {
                       setActiveTableSection('sectors');
                       resetFilters();
-                      fetchAdminNodes('sector', currentGraphVersion);
+                      fetchBuilderNodes('sector', currentGraphVersion);
                     }}
                   >
                     🏛️ Sectors
                   </button>
                   <button 
-                    className={`admin-nav-subitem ${activeTableSection === 'departments' ? 'active' : ''}`}
+                    className={`builder-nav-subitem ${activeTableSection === 'departments' ? 'active' : ''}`}
                     onClick={() => {
                       setActiveTableSection('departments');
                       resetFilters();
-                      fetchAdminNodes('department', currentGraphVersion);
+                      fetchBuilderNodes('department', currentGraphVersion);
                     }}
                   >
                     🏢 Departments
                   </button>
                   <button 
-                    className={`admin-nav-subitem ${activeTableSection === 'painpoints' ? 'active' : ''}`}
+                    className={`builder-nav-subitem ${activeTableSection === 'painpoints' ? 'active' : ''}`}
                     onClick={() => {
                       setActiveTableSection('painpoints');
                       resetFilters();
-                      fetchAdminNodes('painpoint', currentGraphVersion);
+                      fetchBuilderNodes('painpoint', currentGraphVersion);
                     }}
                   >
                     ⚠️ Pain Points
                   </button>
                   <button 
-                    className={`admin-nav-subitem ${activeTableSection === 'projects' ? 'active' : ''}`}
+                    className={`builder-nav-subitem ${activeTableSection === 'projects' ? 'active' : ''}`}
                     onClick={() => {
                       setActiveTableSection('projects');
                       resetFilters();
-                      fetchAdminNodes('project', currentGraphVersion);
+                      fetchBuilderNodes('project', currentGraphVersion);
                     }}
                   >
                     🚀 Projects
@@ -1569,7 +1596,7 @@ const App: React.FC = () => {
             </div>
             
             {/* Version Management in Side Panel */}
-            <div className="admin-version-sidebar">
+            <div className="builder-version-sidebar">
               <div className="version-info-sidebar">
                 <label>Version: </label>
                 <select 
@@ -1590,7 +1617,7 @@ const App: React.FC = () => {
                   <button 
                     className="version-btn-sidebar create-draft" 
                     onClick={createDraftVersion}
-                    disabled={adminLoading}
+                    disabled={builderLoading}
                     title="Create Draft Version"
                   >
                     📝 Draft
@@ -1602,7 +1629,7 @@ const App: React.FC = () => {
                     <button 
                       className="version-btn-sidebar reset" 
                       onClick={resetToBase}
-                      disabled={adminLoading}
+                      disabled={builderLoading}
                       title="Reset to Base"
                     >
                       🔄 Reset
@@ -1610,7 +1637,7 @@ const App: React.FC = () => {
                     <button 
                       className="version-btn-sidebar promote" 
                       onClick={() => alert('Promote to base feature coming soon!')}
-                      disabled={adminLoading}
+                      disabled={builderLoading}
                       title="Promote to Base"
                     >
                       ⬆️ Promote
@@ -1640,18 +1667,18 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          <div className="admin-content">
+          <div className="builder-content">
 
-            {adminLoading && (
-              <div className="admin-loading">
+            {builderLoading && (
+              <div className="builder-loading">
                 <div className="spinner"></div>
                 <p>Loading...</p>
               </div>
             )}
 
             {/* Overview Section */}
-            {adminActiveSection === 'overview' && !adminLoading && (
-              <div className="admin-overview">
+            {builderActiveSection === 'overview' && !builderLoading && (
+              <div className="builder-overview">
                 <div className="node-cards-grid">
                   <div 
                     className="node-card clickable industry-node" 
@@ -1660,7 +1687,7 @@ const App: React.FC = () => {
                   >
                     <div className="node-circle">
                       <span className="node-icon">🏢</span>
-                      <span className="node-count">{adminStats?.Industry || 0}</span>
+                      <span className="node-count">{builderStats?.Industry || 0}</span>
                     </div>
                     <span className="node-label">Industries</span>
                   </div>
@@ -1671,7 +1698,7 @@ const App: React.FC = () => {
                   >
                     <div className="node-circle">
                       <span className="node-icon">🏛️</span>
-                      <span className="node-count">{adminStats?.Sector || 0}</span>
+                      <span className="node-count">{builderStats?.Sector || 0}</span>
                     </div>
                     <span className="node-label">Sectors</span>
                   </div>
@@ -1682,7 +1709,7 @@ const App: React.FC = () => {
                   >
                     <div className="node-circle">
                       <span className="node-icon">🏢</span>
-                      <span className="node-count">{adminStats?.Department || 0}</span>
+                      <span className="node-count">{builderStats?.Department || 0}</span>
                     </div>
                     <span className="node-label">Departments</span>
                   </div>
@@ -1693,7 +1720,7 @@ const App: React.FC = () => {
                   >
                     <div className="node-circle">
                       <span className="node-icon">⚠️</span>
-                      <span className="node-count">{adminStats?.PainPoint || 0}</span>
+                      <span className="node-count">{builderStats?.PainPoint || 0}</span>
                     </div>
                     <span className="node-label">Pain Points</span>
                   </div>
@@ -1704,7 +1731,7 @@ const App: React.FC = () => {
                   >
                     <div className="node-circle">
                       <span className="node-icon">🚀</span>
-                      <span className="node-count">{adminStats?.ProjectOpportunity || 0}</span>
+                      <span className="node-count">{builderStats?.ProjectOpportunity || 0}</span>
                     </div>
                     <span className="node-label">Projects</span>
                   </div>
@@ -1713,10 +1740,10 @@ const App: React.FC = () => {
             )}
 
             {/* Graph Section */}
-            {adminActiveSection === 'graph' && !adminLoading && (
-              <div className="admin-graph-section">
+            {builderActiveSection === 'graph' && !builderLoading && (
+              <div className="builder-graph-section">
                 {graphLoading ? (
-                  <div className="admin-loading">
+                  <div className="builder-loading">
                     <div className="spinner"></div>
                     <p>Loading graph visualization...</p>
                   </div>
@@ -1736,9 +1763,9 @@ const App: React.FC = () => {
             )}
 
             {/* Tables Section */}
-            {adminActiveSection === 'tables' && !adminLoading && (
-              <div className="admin-node-management">
-                <div className="admin-section-header">
+            {builderActiveSection === 'tables' && !builderLoading && (
+              <div className="builder-node-management">
+                <div className="builder-section-header">
                   <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     {/* Graph Filters */}
                     {viewMode === 'graph' && (
@@ -1806,7 +1833,7 @@ const App: React.FC = () => {
                 
                 {/* Table View */}
                 {viewMode === 'table' && (
-                  <div className="admin-table">
+                  <div className="builder-table">
                     <table>
                       <thead>
                         <tr>
@@ -1823,7 +1850,7 @@ const App: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {adminNodes.map((node) => (
+                        {builderNodes.map((node) => (
                           <tr key={node.id}>
                             <td>{node.properties.name || node.properties.title}</td>
                             {activeTableSection === 'painpoints' && (
@@ -1834,13 +1861,13 @@ const App: React.FC = () => {
                             )}
                             <td>
                               <button 
-                                className="admin-btn-small edit"
+                                className="builder-btn-small edit"
                                 onClick={() => handleEditNode(node)}
                               >
                                 ✏️ Edit
                               </button>
                               <button 
-                                className="admin-btn-small delete"
+                                className="builder-btn-small delete"
                                 onClick={() => handleDeleteNode(node.id)}
                               >
                                 🗑️ Delete
@@ -1852,7 +1879,7 @@ const App: React.FC = () => {
                         <tr className="add-new-row">
                           <td colSpan={activeTableSection === 'painpoints' || activeTableSection === 'sectors' ? 3 : 2}>
                             <button 
-                              className="admin-add-new-btn"
+                              className="builder-add-new-btn"
                               onClick={() => handleAddNewNode(activeTableSection.slice(0, -1))}
                             >
                               ➕ Add New {activeTableSection === 'industries' ? 'Industry' :
@@ -1872,7 +1899,7 @@ const App: React.FC = () => {
                 {viewMode === 'graph' && (
                   <div className="graph-view-container">
                     {graphLoading ? (
-                      <div className="admin-loading">
+                      <div className="builder-loading">
                         <div className="spinner"></div>
                         <p>Loading graph visualization...</p>
                       </div>
@@ -1880,7 +1907,7 @@ const App: React.FC = () => {
                       <GraphViz
                         nodes={graphData.nodes}
                         edges={graphData.edges}
-                        nodeType={adminActiveSection}
+                        nodeType={builderActiveSection}
                         onNodeSelect={handleGraphNodeSelect}
                         onNodeDoubleClick={handleGraphNodeEdit}
                         onNavigateToNode={handleNavigateToNode}
@@ -1894,8 +1921,8 @@ const App: React.FC = () => {
             )}
 
             {/* Relationships Section */}
-            {adminActiveSection === 'relationships' && !adminLoading && (
-              <div className="admin-relationships">
+            {builderActiveSection === 'relationships' && !builderLoading && (
+              <div className="builder-relationships">
                 <h3>Graph Relationships</h3>
                 <p>Relationship management interface coming soon...</p>
               </div>
@@ -2711,15 +2738,15 @@ const App: React.FC = () => {
         </>
       )}
 
-      {/* Admin Modals - Always available when in admin mode */}
-      {isAdminMode && adminAuthenticated && (
+      {/* Builder Modals - Always available when in builder mode */}
+      {isBuilderMode && builderAuthenticated && (
         <>
-          {showAdminNodeModal && (
-            <div className="modal-backdrop" onClick={() => setShowAdminNodeModal(false)}>
+          {showBuilderNodeModal && (
+            <div className="modal-backdrop" onClick={() => setShowBuilderNodeModal(false)}>
               <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
-                  <h2>Add New {adminNodeForm.type}</h2>
-                  <button className="modal-close" onClick={() => setShowAdminNodeModal(false)}>×</button>
+                  <h2>Add New {builderNodeForm.type}</h2>
+                  <button className="modal-close" onClick={() => setShowBuilderNodeModal(false)}>×</button>
                 </div>
                 
                 <form onSubmit={handleCreateNode}>
@@ -2728,31 +2755,31 @@ const App: React.FC = () => {
                     <input
                       type="text"
                       className="form-input"
-                      value={adminNodeForm.name}
-                      onChange={(e) => setAdminNodeForm({...adminNodeForm, name: e.target.value})}
+                      value={builderNodeForm.name}
+                      onChange={(e) => setBuilderNodeForm({...builderNodeForm, name: e.target.value})}
                       required
-                      placeholder={`Enter ${adminNodeForm.type} name`}
+                      placeholder={`Enter ${builderNodeForm.type} name`}
                     />
                   </div>
                   
-                  {(adminNodeForm.type === 'painpoint') && (
+                  {(builderNodeForm.type === 'painpoint') && (
                     <div className="form-group">
                       <label className="form-label">Impact Description</label>
                       <textarea
                         className="form-textarea"
-                        value={adminNodeForm.impact}
-                        onChange={(e) => setAdminNodeForm({...adminNodeForm, impact: e.target.value})}
+                        value={builderNodeForm.impact}
+                        onChange={(e) => setBuilderNodeForm({...builderNodeForm, impact: e.target.value})}
                         placeholder="Describe the business impact"
                       />
                     </div>
                   )}
                   
                   <div className="modal-actions">
-                    <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowAdminNodeModal(false)}>
+                    <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowBuilderNodeModal(false)}>
                       Cancel
                     </button>
-                    <button type="submit" className="modal-btn modal-btn-primary" disabled={adminLoading || !adminNodeForm.name}>
-                      {adminLoading ? 'Creating...' : 'Create'}
+                    <button type="submit" className="modal-btn modal-btn-primary" disabled={builderLoading || !builderNodeForm.name}>
+                      {builderLoading ? 'Creating...' : 'Create'}
                     </button>
                   </div>
                 </form>
@@ -2760,12 +2787,12 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {showAdminEditModal && (
-            <div className="modal-backdrop" onClick={() => setShowAdminEditModal(false)}>
+          {showBuilderEditModal && (
+            <div className="modal-backdrop" onClick={() => setShowBuilderEditModal(false)}>
               <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
-                  <h2>Edit {adminActiveSection.slice(0, -1)}</h2>
-                  <button className="modal-close" onClick={() => setShowAdminEditModal(false)}>×</button>
+                  <h2>Edit {builderActiveSection.slice(0, -1)}</h2>
+                  <button className="modal-close" onClick={() => setShowBuilderEditModal(false)}>×</button>
                 </div>
                 
                 <form onSubmit={handleUpdateNode}>
@@ -2774,10 +2801,10 @@ const App: React.FC = () => {
                     <input
                       type="text"
                       className="form-input"
-                      value={adminNodeForm.name}
-                      onChange={(e) => setAdminNodeForm({...adminNodeForm, name: e.target.value})}
+                      value={builderNodeForm.name}
+                      onChange={(e) => setBuilderNodeForm({...builderNodeForm, name: e.target.value})}
                       required
-                      placeholder={`Enter ${adminActiveSection.slice(0, -1)} name`}
+                      placeholder={`Enter ${builderActiveSection.slice(0, -1)} name`}
                     />
                   </div>
                   
@@ -2786,19 +2813,19 @@ const App: React.FC = () => {
                       <label className="form-label">Impact Description</label>
                       <textarea
                         className="form-textarea"
-                        value={adminNodeForm.impact}
-                        onChange={(e) => setAdminNodeForm({...adminNodeForm, impact: e.target.value})}
+                        value={builderNodeForm.impact}
+                        onChange={(e) => setBuilderNodeForm({...builderNodeForm, impact: e.target.value})}
                         placeholder="Describe the business impact"
                       />
                     </div>
                   )}
                   
                   <div className="modal-actions">
-                    <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowAdminEditModal(false)}>
+                    <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowBuilderEditModal(false)}>
                       Cancel
                     </button>
-                    <button type="submit" className="modal-btn modal-btn-primary" disabled={adminLoading || !adminNodeForm.name}>
-                      {adminLoading ? 'Updating...' : 'Update'}
+                    <button type="submit" className="modal-btn modal-btn-primary" disabled={builderLoading || !builderNodeForm.name}>
+                      {builderLoading ? 'Updating...' : 'Update'}
                     </button>
                   </div>
                 </form>
@@ -2854,12 +2881,23 @@ const App: React.FC = () => {
                   
                   {importValidationErrors.length > 0 && (
                     <div className="import-errors">
-                      <h4>❌ Schema Validation Errors:</h4>
-                      <ul>
+                      <h4>🔍 Schema Validation Issues ({importValidationErrors.length} found):</h4>
+                      <div className="validation-errors-list">
                         {importValidationErrors.map((error, index) => (
-                          <li key={index}>{error}</li>
+                          <div key={index} className="validation-error-item">
+                            <span className="error-icon">⚠️</span>
+                            <span className="error-text">{error}</span>
+                          </div>
                         ))}
-                      </ul>
+                      </div>
+                      <div className="validation-help">
+                        <p><strong>💡 How to fix these issues:</strong></p>
+                        <ul>
+                          <li>Check that all node types match: Industry, Sector, Department, PainPoint, ProjectOpportunity, ProjectBlueprint, Role, SubModule, Module</li>
+                          <li>Ensure all relationship types are valid: HAS_SECTOR, EXPERIENCES, HAS_OPPORTUNITY, ADDRESSES, IS_INSTANCE_OF, REQUIRES_ROLE, NEEDS_SUBMODULE, USES_MODULE, CONTAINS</li>
+                          <li>Include required properties: 'name' for most nodes, 'title' for ProjectOpportunity/ProjectBlueprint</li>
+                        </ul>
+                      </div>
                     </div>
                   )}
                   

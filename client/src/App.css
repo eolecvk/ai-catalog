@@ -23,7 +23,7 @@
   position: relative;
 }
 
-.admin-toggle {
+.builder-toggle {
   background: rgba(255, 255, 255, 0.2);
   color: white;
   border: 2px solid rgba(255, 255, 255, 0.3);
@@ -35,18 +35,18 @@
   transition: all 0.3s ease;
 }
 
-.admin-toggle:hover {
+.builder-toggle:hover {
   background: rgba(255, 255, 255, 0.3);
   border-color: rgba(255, 255, 255, 0.5);
 }
 
-.admin-toggle.active {
+.builder-toggle.active {
   background: rgba(255, 255, 255, 0.9);
   color: #e74c3c;
   border-color: #e74c3c;
 }
 
-.app-header.admin-mode {
+.app-header.builder-mode {
   background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
 }
 
@@ -1048,8 +1048,8 @@
   position: relative;
 }
 
-/* Admin Dashboard Styles */
-.admin-dashboard {
+/* Builder Dashboard Styles */
+.builder-dashboard {
   display: flex;
   min-height: 80vh;
   background: #f8f9fa;
@@ -1058,27 +1058,27 @@
   margin: 0 1rem;
 }
 
-.admin-nav {
+.builder-nav {
   width: 250px;
   background: #2c3e50;
   padding: 2rem 1rem;
   border-radius: 12px 0 0 12px;
 }
 
-.admin-nav h2 {
+.builder-nav h2 {
   color: white;
   margin-bottom: 2rem;
   font-size: 1.2rem;
   font-weight: 600;
 }
 
-.admin-nav-items {
+.builder-nav-items {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.admin-nav-item {
+.builder-nav-item {
   background: none;
   border: none;
   color: #bdc3c7;
@@ -1090,17 +1090,17 @@
   font-size: 0.9rem;
 }
 
-.admin-nav-item:hover {
+.builder-nav-item:hover {
   background: rgba(52, 152, 219, 0.1);
   color: #3498db;
 }
 
-.admin-nav-item.active {
+.builder-nav-item.active {
   background: #3498db;
   color: white;
 }
 
-.admin-content {
+.builder-content {
   flex: 1;
   padding: 2rem;
   background: white;
@@ -1108,7 +1108,7 @@
   color: #374151;
 }
 
-.admin-overview h3 {
+.builder-overview h3 {
   color: #2c3e50;
   margin-bottom: 1.5rem;
   font-size: 1.5rem;
@@ -1163,13 +1163,13 @@
   margin-top: 0.25rem;
 }
 
-.admin-actions {
+.builder-actions {
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
 }
 
-.admin-action-btn {
+.builder-action-btn {
   padding: 0.8rem 1.5rem;
   border: none;
   border-radius: 8px;
@@ -1181,34 +1181,34 @@
   gap: 0.5rem;
 }
 
-.admin-action-btn.primary {
+.builder-action-btn.primary {
   background: #27ae60;
   color: white;
 }
 
-.admin-action-btn.primary:hover {
+.builder-action-btn.primary:hover {
   background: #229954;
 }
 
-.admin-action-btn.secondary {
+.builder-action-btn.secondary {
   background: #95a5a6;
   color: white;
 }
 
-.admin-action-btn.secondary:hover {
+.builder-action-btn.secondary:hover {
   background: #7f8c8d;
 }
 
-.admin-action-btn.warning {
+.builder-action-btn.warning {
   background: #f39c12;
   color: white;
 }
 
-.admin-action-btn.warning:hover {
+.builder-action-btn.warning:hover {
   background: #e67e22;
 }
 
-.admin-loading {
+.builder-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1217,31 +1217,31 @@
   color: #7f8c8d;
 }
 
-.admin-section-header {
+.builder-section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
 }
 
-.admin-section-header h3 {
+.builder-section-header h3 {
   color: #2c3e50;
   margin: 0;
 }
 
-.admin-table {
+.builder-table {
   background: #f8f9fa;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.admin-table table {
+.builder-table table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.admin-table th {
+.builder-table th {
   background: #34495e;
   color: white;
   padding: 1rem;
@@ -1249,17 +1249,17 @@
   font-weight: 600;
 }
 
-.admin-table td {
+.builder-table td {
   padding: 0.8rem 1rem;
   border-bottom: 1px solid #dee2e6;
   color: #2c3e50;
 }
 
-.admin-table tr:hover {
+.builder-table tr:hover {
   background: #e9ecef;
 }
 
-.admin-btn-small {
+.builder-btn-small {
   padding: 0.3rem 0.6rem;
   border: none;
   border-radius: 4px;
@@ -1269,21 +1269,21 @@
   transition: all 0.2s ease;
 }
 
-.admin-btn-small.edit {
+.builder-btn-small.edit {
   background: #3498db;
   color: white;
 }
 
-.admin-btn-small.edit:hover {
+.builder-btn-small.edit:hover {
   background: #2980b9;
 }
 
-.admin-btn-small.delete {
+.builder-btn-small.delete {
   background: #e74c3c;
   color: white;
 }
 
-.admin-btn-small.delete:hover {
+.builder-btn-small.delete:hover {
   background: #c0392b;
 }
 
@@ -1428,32 +1428,32 @@
 }
 
 /* Admin Modal Overrides */
-.admin-dashboard .modal-backdrop {
+.builder-dashboard .modal-backdrop {
   z-index: 2000;
 }
 
-.admin-dashboard .modal-content {
+.builder-dashboard .modal-content {
   background: white;
   color: #2c3e50;
 }
 
-.admin-dashboard .modal-header h2 {
+.builder-dashboard .modal-header h2 {
   color: #2c3e50;
   margin: 0;
 }
 
-.admin-dashboard .form-label {
+.builder-dashboard .form-label {
   color: #2c3e50;
 }
 
-.admin-dashboard .form-input,
-.admin-dashboard .form-textarea {
+.builder-dashboard .form-input,
+.builder-dashboard .form-textarea {
   border: 2px solid #bdc3c7;
   color: #2c3e50;
 }
 
-.admin-dashboard .form-input:focus,
-.admin-dashboard .form-textarea:focus {
+.builder-dashboard .form-input:focus,
+.builder-dashboard .form-textarea:focus {
   border-color: #3498db;
   box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
 }
@@ -1468,12 +1468,12 @@
   background: #2980b9;
 }
 
-.admin-action-btn.secondary {
+.builder-action-btn.secondary {
   background: #95a5a6;
   color: white;
 }
 
-.admin-action-btn.secondary:hover {
+.builder-action-btn.secondary:hover {
   background: #7f8c8d;
 }
 
@@ -1865,7 +1865,76 @@
   border-color: #3b82f6;
 }
 
-/* Checkbox styling for admin dashboard */
+/* Import validation errors styling */
+.import-errors {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.import-errors h4 {
+  color: #dc2626;
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+}
+
+.validation-errors-list {
+  margin-bottom: 1.5rem;
+}
+
+.validation-error-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: white;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  border-left: 3px solid #dc2626;
+}
+
+.error-icon {
+  color: #dc2626;
+  font-size: 0.9rem;
+  margin-top: 0.1rem;
+}
+
+.error-text {
+  flex: 1;
+  font-size: 0.9rem;
+  color: #374151;
+  line-height: 1.4;
+}
+
+.validation-help {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.validation-help p {
+  margin: 0 0 0.5rem 0;
+  color: #1e40af;
+  font-size: 0.9rem;
+}
+
+.validation-help ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #374151;
+}
+
+.validation-help li {
+  margin-bottom: 0.3rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* Checkbox styling for builder dashboard */
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -2071,7 +2140,7 @@
 }
 
 .node-panel-section {
-  margin-bottom: 1.25rem; /* Reduced from 2rem */
+  margin-bottom: 1rem; /* Further reduced for compactness */
 }
 
 .node-panel-section:last-child {
@@ -2079,11 +2148,11 @@
 }
 
 .node-panel-section-title {
-  margin: 0 0 0.75rem 0; /* Reduced from 1rem */
-  font-size: 1rem; /* Reduced from 1.1rem */
+  margin: 0 0 0.5rem 0; /* Further reduced for compactness */
+  font-size: 0.95rem; /* Slightly smaller */
   font-weight: 600;
   color: #374151;
-  padding-bottom: 0.4rem; /* Reduced from 0.5rem */
+  padding-bottom: 0.3rem; /* Further reduced */
   border-bottom: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
@@ -2092,13 +2161,13 @@
 
 .node-property {
   display: flex;
-  margin-bottom: 0.6rem; /* Reduced from 0.75rem */
-  padding: 0.6rem; /* Reduced from 0.75rem */
+  margin-bottom: 0.4rem; /* Further reduced for compactness */
+  padding: 0.5rem; /* Further reduced */
   background: #f9fafb;
-  border-radius: 5px; /* Reduced from 6px */
+  border-radius: 4px; /* Further reduced */
   border: 1px solid #f3f4f6;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .property-label {
@@ -2125,13 +2194,13 @@
 .connection-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem; /* Reduced from 0.75rem */
-  padding: 0.5rem 0.6rem; /* Reduced and optimized */
+  gap: 0.4rem; /* Further reduced for compactness */
+  padding: 0.4rem 0.5rem; /* Further reduced */
   background: #f9fafb;
-  border-radius: 5px; /* Reduced from 6px */
+  border-radius: 4px; /* Further reduced */
   border: 1px solid #f3f4f6;
-  font-size: 0.85rem; /* Reduced from 0.875rem */
-  margin-bottom: 0.4rem;
+  font-size: 0.82rem; /* Further reduced */
+  margin-bottom: 0.3rem; /* Further reduced */
 }
 
 .connection-direction {
@@ -2256,24 +2325,24 @@
 
 /* Connection Group Styles */
 .connection-group {
-  margin-bottom: 1rem; /* Reduced from 1.5rem */
+  margin-bottom: 0.75rem; /* Further reduced for compactness */
 }
 
 .connection-group-title {
-  margin: 0 0 0.5rem 0; /* Reduced from 0.75rem */
-  font-size: 0.85rem; /* Reduced from 0.9rem */
+  margin: 0 0 0.4rem 0; /* Further reduced for compactness */
+  font-size: 0.82rem; /* Further reduced */
   font-weight: 600;
   color: #4b5563;
-  padding: 0.4rem 0.6rem; /* Reduced padding */
+  padding: 0.3rem 0.5rem; /* Further reduced padding */
   background: #f3f4f6;
-  border-radius: 5px; /* Reduced from 6px */
+  border-radius: 4px; /* Further reduced */
   border-left: 3px solid #3b82f6;
 }
 
 .connection-group-items {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem; /* Reduced from 0.5rem */
+  gap: 0.25rem; /* Further reduced for compactness */
 }
 
 .connection-item.clickable:hover {
@@ -2518,17 +2587,19 @@ html, body {
   min-height: 0;
   box-sizing: border-box;
   position: relative;
+  gap: 1rem; /* Add spacing between graph and side panel */
 }
 
 .graph-canvas-container {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 1rem;
+  padding: 0; /* Remove padding to align with side panel */
   transition: all 0.3s ease;
   min-width: 0;
   width: 0; /* Force flex child to respect container */
   box-sizing: border-box;
+  height: 700px; /* Match side panel height exactly */
 }
 
 .graph-canvas-container.full-width {
@@ -2543,11 +2614,12 @@ html, body {
 
 .graph-side-panel {
   width: 400px;
-  height: 600px; /* Fixed height */
+  height: 700px; /* Match graph visualization height */
   flex-shrink: 0;
   flex-grow: 0;
   background: white;
-  border-left: 1px solid #dee2e6;
+  border: 1px solid #bdc3c7;
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
   transition: all 0.3s ease;
@@ -2559,15 +2631,15 @@ html, body {
 
 .side-panel-content {
   flex: 1;
-  padding: 1rem; /* Reduced from 1.5rem */
+  padding: 0.75rem; /* Further reduced for more compact layout */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
 
 .side-panel-header {
-  margin-bottom: 1rem; /* Reduced from 1.5rem */
-  padding-bottom: 0.75rem; /* Reduced from 1rem */
+  margin-bottom: 0.75rem; /* Further reduced for compactness */
+  padding-bottom: 0.5rem; /* Further reduced */
   border-bottom: 1px solid #e9ecef;
 }
 
@@ -2598,18 +2670,23 @@ html, body {
 @media (max-width: 1200px) {
   .graph-side-panel {
     width: 350px;
-    height: 550px; /* Maintain fixed height */
+    height: 600px; /* Maintain fixed height */
+  }
+  
+  .graph-canvas-container {
+    height: 600px; /* Match side panel height at this breakpoint */
   }
 }
 
 @media (max-width: 1024px) {
   .graph-side-panel {
     width: 320px;
-    height: 500px; /* Maintain fixed height */
+    height: 550px; /* Maintain fixed height */
   }
   
   .graph-canvas-container {
-    padding: 0.75rem;
+    padding: 0; /* Remove padding to align with side panel */
+    height: 550px; /* Match side panel height at this breakpoint */
   }
   
   .side-panel-content {
@@ -2637,9 +2714,10 @@ html, body {
   
   .graph-canvas-container {
     flex: none;
-    height: 60vh;
-    min-height: 400px;
+    height: 350px; /* Match side panel height exactly */
+    min-height: 350px;
     width: 100%;
+    padding: 0; /* Remove padding to align with side panel */
   }
   
   .panel-toggle-btn {
@@ -2671,9 +2749,9 @@ html, body {
   }
   
   .graph-canvas-container {
-    height: 50vh;
-    min-height: 350px;
-    padding: 0.5rem;
+    height: 300px; /* Match side panel height exactly */
+    min-height: 300px;
+    padding: 0; /* Remove padding to align with side panel */
   }
   
   .side-panel-content {
@@ -2698,7 +2776,7 @@ html, body {
 }
 
 /* Admin Navigation Subsections */
-.admin-table-subsections {
+.builder-table-subsections {
   display: flex;
   flex-direction: column;
   margin-left: 1rem;
@@ -2707,7 +2785,7 @@ html, body {
   padding-left: 1rem;
 }
 
-.admin-nav-subitem {
+.builder-nav-subitem {
   background: none;
   border: none;
   padding: 0.5rem 0.75rem;
@@ -2720,12 +2798,12 @@ html, body {
   transition: all 0.2s ease;
 }
 
-.admin-nav-subitem:hover {
+.builder-nav-subitem:hover {
   background: rgba(52, 152, 219, 0.1);
   color: #3498db;
 }
 
-.admin-nav-subitem.active {
+.builder-nav-subitem.active {
   background: #3498db;
   color: white;
 }
@@ -2885,7 +2963,7 @@ html, body {
 }
 
 /* Admin Version Management Sidebar */
-.admin-version-sidebar {
+.builder-version-sidebar {
   border-top: 1px solid #e9ecef;
   margin-top: 1rem;
   padding-top: 1rem;
@@ -2977,7 +3055,7 @@ html, body {
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
-  .admin-version-sidebar {
+  .builder-version-sidebar {
     padding-top: 0.75rem;
     margin-top: 0.75rem;
   }
@@ -3067,7 +3145,7 @@ html, body {
   text-align: center;
 }
 
-.admin-add-new-btn {
+.builder-add-new-btn {
   background: #28a745;
   color: white;
   border: none;
@@ -3081,7 +3159,7 @@ html, body {
   max-width: 300px;
 }
 
-.admin-add-new-btn:hover {
+.builder-add-new-btn:hover {
   background: #218838;
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
