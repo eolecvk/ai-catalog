@@ -184,7 +184,8 @@ const App: React.FC = () => {
 
   const fetchIndustries = async () => {
     try {
-      const response = await fetch('/api/industries');
+      const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+      const response = await fetch(`/api/industries${versionParam}`);
       const data = await response.json();
       setIndustries(data);
     } catch (error) {
@@ -650,6 +651,7 @@ const App: React.FC = () => {
   
   // Import state
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showManageVersionsModal, setShowManageVersionsModal] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importVersionName, setImportVersionName] = useState('');
@@ -788,9 +790,26 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error('Import error:', error);
+      let errorMessage = '❌ Failed to import graph';
+      
+      if (error instanceof Error) {
+        errorMessage += `: ${error.message}`;
+      } else if (typeof error === 'string') {
+        errorMessage += `: ${error}`;
+      } else {
+        errorMessage += ': Network error or unexpected issue occurred';
+      }
+      
+      // Add helpful troubleshooting info
+      errorMessage += '\n\n🔧 Troubleshooting:';
+      errorMessage += '\n• Check your internet connection';
+      errorMessage += '\n• Ensure the server is running';
+      errorMessage += '\n• Verify the file is a valid Cypher script';
+      errorMessage += '\n• Try a smaller file to test the connection';
+      
       setImportResult({
         success: false,
-        message: '❌ Failed to import graph. Please check the console for details.',
+        message: errorMessage,
       });
     } finally {
       setImportLoading(false);
@@ -821,6 +840,47 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Promotion error:', error);
       alert('❌ Failed to promote version. Please check the console for details.');
+    }
+  };
+
+  const handleDeleteVersion = async (versionName: string) => {
+    if (versionName === 'base') {
+      alert('❌ Cannot delete the base version');
+      return;
+    }
+
+    if (!window.confirm(`⚠️ Are you sure you want to delete version '${versionName}'?\n\nThis action cannot be undone and will permanently remove all data in this version.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/versions/${encodeURIComponent(versionName)}`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert(`✅ Version deleted successfully!\n\nDeleted version: ${versionName}\nNodes removed: ${result.deletedNodes}`);
+        
+        // Refresh available versions
+        await fetchAvailableVersions();
+        
+        // If we were viewing the deleted version, switch to base
+        if (currentGraphVersion === versionName) {
+          setCurrentGraphVersion('base');
+        }
+        
+        // Clear import result if it was for this version
+        if (importResult?.versionName === versionName) {
+          setImportResult(null);
+        }
+      } else {
+        alert(`❌ Delete failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('❌ Failed to delete version. Please check your connection.');
     }
   };
 
@@ -1611,6 +1671,19 @@ const App: React.FC = () => {
                   ))}
                 </select>
               </div>
+              
+              {/* Manage Versions Button */}
+              {availableVersions.length > 1 && (
+                <div className="manage-versions-button">
+                  <button 
+                    className="version-btn-sidebar manage-versions"
+                    onClick={() => setShowManageVersionsModal(true)}
+                    title="Manage all versions"
+                  >
+                    🗂️ Manage Versions
+                  </button>
+                </div>
+              )}
               
               <div className="version-actions-sidebar">
                 {currentGraphVersion === 'base' && (
@@ -2850,6 +2923,7 @@ const App: React.FC = () => {
                 <p>Import a Cypher script to create a new graph version. The import will validate the schema and create a separate version that can be promoted to base later.</p>
               </div>
               
+              
               {!importResult && (
                 <form onSubmit={(e) => { e.preventDefault(); handleImportGraph(); }}>
                   <div className="form-group">
@@ -2965,6 +3039,104 @@ const App: React.FC = () => {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Versions Modal */}
+      {showManageVersionsModal && (
+        <div className="modal-backdrop" onClick={() => setShowManageVersionsModal(false)}>
+          <div className="modal-content manage-versions-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🗂️ Manage Graph Versions</h2>
+              <button className="modal-close" onClick={() => setShowManageVersionsModal(false)}>×</button>
+            </div>
+            
+            <div className="manage-versions-content">
+              <div className="manage-versions-info">
+                <p>Manage your graph versions. You can view, promote, or delete versions. The base version cannot be deleted.</p>
+              </div>
+              
+              {availableVersions.length <= 1 ? (
+                <div className="no-versions-message">
+                  <p>🔒 Only base version exists. Import new data to create additional versions.</p>
+                </div>
+              ) : (
+                <div className="versions-list">
+                  {availableVersions.map(version => (
+                    <div key={version} className={`version-item ${version === 'base' ? 'base-version' : ''}`}>
+                      <div className="version-info">
+                        <span className="version-name">
+                          {version === 'base' ? '🔒 Base' : `📦 ${version}`}
+                        </span>
+                        {currentGraphVersion === version && (
+                          <span className="version-badge current">Current</span>
+                        )}
+                        {version === 'base' && (
+                          <span className="version-badge base">Protected</span>
+                        )}
+                      </div>
+                      
+                      {version !== 'base' && (
+                        <div className="version-actions">
+                          <button
+                            className="version-action-btn view"
+                            onClick={() => {
+                              setCurrentGraphVersion(version);
+                              setShowManageVersionsModal(false);
+                            }}
+                            title="View this version"
+                          >
+                            👁️ View
+                          </button>
+                          <button
+                            className="version-action-btn promote"
+                            onClick={() => {
+                              handlePromoteVersion(version);
+                              setShowManageVersionsModal(false);
+                            }}
+                            title="Promote to base"
+                          >
+                            🚀 Promote
+                          </button>
+                          <button
+                            className="version-action-btn delete"
+                            onClick={() => handleDeleteVersion(version)}
+                            title="Delete this version"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      )}
+                      
+                      {version === 'base' && (
+                        <div className="version-actions">
+                          <button
+                            className="version-action-btn view"
+                            onClick={() => {
+                              setCurrentGraphVersion(version);
+                              setShowManageVersionsModal(false);
+                            }}
+                            title="View base version"
+                          >
+                            👁️ View
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              <div className="manage-versions-footer">
+                <button 
+                  className="modal-btn modal-btn-secondary"
+                  onClick={() => setShowManageVersionsModal(false)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
