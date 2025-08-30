@@ -17,11 +17,63 @@ const driver = neo4j.driver(
   )
 );
 
-// Graph versioning system
+// Graph versioning system with separate databases
 const GRAPH_VERSIONS = {
   BASE: 'base',
   ADMIN_DRAFT: 'admin_draft'
 };
+
+// Database management functions
+function getDatabaseName(version) {
+  if (version === GRAPH_VERSIONS.BASE || version === 'base') {
+    return 'neo4j'; // Default Neo4j database
+  }
+  // Use valid database naming (only ascii, numbers, dots, dashes)
+  const cleanVersion = version.replace(/[^a-zA-Z0-9.-]/g, '-').toLowerCase();
+  return `catalog-${cleanVersion}`;
+}
+
+async function createDatabase(dbName) {
+  const systemSession = driver.session({ database: 'system' });
+  try {
+    await systemSession.run(`CREATE DATABASE \`${dbName}\` IF NOT EXISTS`);
+    console.log(`Database ${dbName} created or already exists`);
+  } catch (error) {
+    console.error(`Failed to create database ${dbName}:`, error.message);
+    throw error;
+  } finally {
+    await systemSession.close();
+  }
+}
+
+async function dropDatabase(dbName) {
+  if (dbName === 'neo4j') {
+    throw new Error('Cannot drop the default neo4j database');
+  }
+  const systemSession = driver.session({ database: 'system' });
+  try {
+    await systemSession.run(`DROP DATABASE \`${dbName}\` IF EXISTS`);
+    console.log(`Database ${dbName} dropped`);
+  } catch (error) {
+    console.error(`Failed to drop database ${dbName}:`, error.message);
+    throw error;
+  } finally {
+    await systemSession.close();
+  }
+}
+
+async function listDatabases() {
+  const systemSession = driver.session({ database: 'system' });
+  try {
+    const result = await systemSession.run('SHOW DATABASES');
+    return result.records.map(record => ({
+      name: record.get('name'),
+      status: record.get('currentStatus')
+    }));
+  } finally {
+    await systemSession.close();
+  }
+}
 
 // Schema definition for validation
 const GRAPH_SCHEMA = {
@@ -46,10 +98,10 @@ const GRAPH_SCHEMA = {
   }
 };
 
-// Helper function to get versioned label
-function getVersionedLabel(baseLabel, version = GRAPH_VERSIONS.BASE) {
-  if (version === GRAPH_VERSIONS.BASE) return baseLabel;
-  return `${baseLabel}_${version}`;
+// Helper function to get database session for a version
+function getVersionSession(version = GRAPH_VERSIONS.BASE) {
+  const dbName = getDatabaseName(version);
+  return driver.session({ database: dbName });
 }
 
 // Schema validation functions
@@ -149,30 +201,7 @@ function validateCypherScript(cypherScript) {
   };
 }
 
-// Helper function to get version-specific queries
-function getVersionedQuery(query, version = GRAPH_VERSIONS.BASE) {
-  if (version === GRAPH_VERSIONS.BASE) return query;
-  
-  // Replace node labels with versioned ones
-  const labelMap = {
-    'Industry': getVersionedLabel('Industry', version),
-    'Sector': getVersionedLabel('Sector', version),
-    'Department': getVersionedLabel('Department', version),
-    'PainPoint': getVersionedLabel('PainPoint', version),
-    'ProjectOpportunity': getVersionedLabel('ProjectOpportunity', version),
-    'ProjectBlueprint': getVersionedLabel('ProjectBlueprint', version),
-    'Role': getVersionedLabel('Role', version),
-    'SubModule': getVersionedLabel('SubModule', version)
-  };
-  
-  let versionedQuery = query;
-  Object.entries(labelMap).forEach(([original, versioned]) => {
-    const regex = new RegExp(`\\b${original}\\b`, 'g');
-    versionedQuery = versionedQuery.replace(regex, versioned);
-  });
-  
-  return versionedQuery;
-}
+// This function has been removed - we now use separate databases instead of label versioning
 
 // Test database connection
 app.get('/api/health', async (req, res) => {
@@ -189,18 +218,12 @@ app.get('/api/health', async (req, res) => {
 
 // Get all industries
 app.get('/api/industries', async (req, res) => {
-  const session = driver.session();
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
-    let query;
-    if (version === GRAPH_VERSIONS.BASE) {
-      // For base version, explicitly exclude versioned nodes
-      query = 'MATCH (i:Industry) WHERE NOT any(label in labels(i) WHERE label CONTAINS "_") RETURN i.name as name ORDER BY i.name';
-    } else {
-      // For versioned queries, use the versioned query helper
-      query = getVersionedQuery('MATCH (i:Industry) RETURN i.name as name ORDER BY i.name', version);
-    }
+    // Simple query - no label versioning needed, just use different databases
+    const query = 'MATCH (i:Industry) RETURN i.name as name ORDER BY i.name';
     
     const result = await session.run(query);
     const industries = result.records.map(record => ({
@@ -216,33 +239,18 @@ app.get('/api/industries', async (req, res) => {
 
 // Get sectors for selected industries, grouped by industry
 app.post('/api/sectors', async (req, res) => {
-  const session = driver.session();
   const { industries } = req.body;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
-    let baseQuery = `
+    // Simple query - database switching handles versioning
+    const query = `
       MATCH (i:Industry)-[:HAS_SECTOR]->(s:Sector)
       WHERE i.name IN $industries
       RETURN i.name as industry, s.name as sector 
       ORDER BY i.name, s.name
     `;
-    
-    let query;
-    if (version === GRAPH_VERSIONS.BASE) {
-      // For base version, explicitly exclude versioned nodes
-      query = `
-        MATCH (i:Industry)-[:HAS_SECTOR]->(s:Sector)
-        WHERE i.name IN $industries
-        AND NOT any(label in labels(i) WHERE label CONTAINS "_")
-        AND NOT any(label in labels(s) WHERE label CONTAINS "_")
-        RETURN i.name as industry, s.name as sector 
-        ORDER BY i.name, s.name
-      `;
-    } else {
-      // For versioned queries, use the versioned query helper
-      query = getVersionedQuery(baseQuery, version);
-    }
     
     const result = await session.run(query, { industries });
     
@@ -268,22 +276,12 @@ app.post('/api/sectors', async (req, res) => {
 
 // Get all departments (independent of sectors for department mode)
 app.get('/api/departments', async (req, res) => {
-  const session = driver.session();
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
-    let query;
-    if (version === GRAPH_VERSIONS.BASE) {
-      // For base version, explicitly exclude versioned nodes
-      query = `
-        MATCH (d:Department)
-        WHERE NOT any(label in labels(d) WHERE label CONTAINS "_")
-        RETURN DISTINCT d.name as name ORDER BY d.name
-      `;
-    } else {
-      // For versioned queries, use the versioned query helper
-      query = getVersionedQuery('MATCH (d:Department) RETURN DISTINCT d.name as name ORDER BY d.name', version);
-    }
+    // Simple query - database switching handles versioning
+    const query = 'MATCH (d:Department) RETURN DISTINCT d.name as name ORDER BY d.name';
     
     const result = await session.run(query);
     const departments = result.records.map(record => ({
@@ -299,31 +297,17 @@ app.get('/api/departments', async (req, res) => {
 
 // Get pain points for selected sectors (sector mode)
 app.post('/api/sector-painpoints', async (req, res) => {
-  const session = driver.session();
   const { sectors } = req.body;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
-    let baseQuery = `
+    // Simple query - database switching handles versioning
+    const query = `
       MATCH (s:Sector)-[:EXPERIENCES]->(pp:PainPoint)
       WHERE s.name IN $sectors
       RETURN DISTINCT pp.name as name, pp.impact as impact ORDER BY pp.name
     `;
-    
-    let query;
-    if (version === GRAPH_VERSIONS.BASE) {
-      // For base version, explicitly exclude versioned nodes
-      query = `
-        MATCH (s:Sector)-[:EXPERIENCES]->(pp:PainPoint)
-        WHERE s.name IN $sectors
-        AND NOT any(label in labels(s) WHERE label CONTAINS "_")
-        AND NOT any(label in labels(pp) WHERE label CONTAINS "_")
-        RETURN DISTINCT pp.name as name, pp.impact as impact ORDER BY pp.name
-      `;
-    } else {
-      // For versioned queries, use the versioned query helper
-      query = getVersionedQuery(baseQuery, version);
-    }
     
     const result = await session.run(query, { sectors });
     const painPoints = result.records.map(record => ({
@@ -340,31 +324,17 @@ app.post('/api/sector-painpoints', async (req, res) => {
 
 // Get pain points for selected departments (department mode)
 app.post('/api/department-painpoints', async (req, res) => {
-  const session = driver.session();
   const { departments } = req.body;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
-    let baseQuery = `
+    // Simple query - database switching handles versioning
+    const query = `
       MATCH (d:Department)-[:EXPERIENCES]->(pp:PainPoint)
       WHERE d.name IN $departments
       RETURN DISTINCT pp.name as name, pp.impact as impact ORDER BY pp.name
     `;
-    
-    let query;
-    if (version === GRAPH_VERSIONS.BASE) {
-      // For base version, explicitly exclude versioned nodes
-      query = `
-        MATCH (d:Department)-[:EXPERIENCES]->(pp:PainPoint)
-        WHERE d.name IN $departments
-        AND NOT any(label in labels(d) WHERE label CONTAINS "_")
-        AND NOT any(label in labels(pp) WHERE label CONTAINS "_")
-        RETURN DISTINCT pp.name as name, pp.impact as impact ORDER BY pp.name
-      `;
-    } else {
-      // For versioned queries, use the versioned query helper
-      query = getVersionedQuery(baseQuery, version);
-    }
     
     const result = await session.run(query, { departments });
     const painPoints = result.records.map(record => ({
@@ -1053,46 +1023,24 @@ app.post('/api/init-database', async (req, res) => {
 
 // Get available graph versions
 app.get('/api/admin/versions', async (req, res) => {
-  const session = driver.session();
-  
   try {
-    // Check which versions exist by looking for versioned nodes
-    const versions = [GRAPH_VERSIONS.BASE];
+    // Get all databases and extract version names
+    const databases = await listDatabases();
+    const versions = [GRAPH_VERSIONS.BASE]; // Always include base
     
-    // Get all unique version suffixes - simplified approach
-    const versionQuery = `
-      MATCH (n) 
-      WHERE any(label in labels(n) WHERE label CONTAINS "_")
-      WITH labels(n) as nodeLabels
-      UNWIND nodeLabels as label
-      WITH label WHERE label CONTAINS "_"
-      WITH split(label, "_")[-1] as versionSuffix
-      WHERE versionSuffix IS NOT NULL AND versionSuffix <> ""
-      RETURN DISTINCT versionSuffix
-    `;
-    
-    const versionResult = await session.run(versionQuery);
-    const foundVersions = new Set();
-    
-    versionResult.records.forEach(record => {
-      const suffix = record.get('versionSuffix');
-      if (suffix && suffix !== 'undefined') {
-        foundVersions.add(suffix);
-      }
-    });
-    
-    // Add found versions to the list
-    foundVersions.forEach(version => {
-      if (!versions.includes(version)) {
-        versions.push(version);
+    databases.forEach(db => {
+      if (db.name.startsWith('catalog-')) {
+        // Extract version name from database name
+        const versionName = db.name.replace('catalog-', '');
+        if (versionName && !versions.includes(versionName)) {
+          versions.push(versionName);
+        }
       }
     });
     
     res.json(versions);
   } catch (error) {
     res.status(500).json({ error: error.message });
-  } finally {
-    await session.close();
   }
 });
 
@@ -1181,7 +1129,6 @@ app.delete('/api/admin/versions/draft', async (req, res) => {
 
 // Delete a specific version
 app.delete('/api/admin/versions/:versionName', async (req, res) => {
-  const session = driver.session();
   const { versionName } = req.params;
   
   try {
@@ -1190,28 +1137,26 @@ app.delete('/api/admin/versions/:versionName', async (req, res) => {
       return res.status(403).json({ error: 'Cannot delete base version' });
     }
     
-    // Check if version exists
-    const checkQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") RETURN count(n) as count`;
-    const checkResult = await session.run(checkQuery);
-    const nodeCount = checkResult.records[0].get('count').toNumber();
+    const dbName = getDatabaseName(versionName);
     
-    if (nodeCount === 0) {
+    // Check if database exists
+    const databases = await listDatabases();
+    const dbExists = databases.find(db => db.name === dbName);
+    
+    if (!dbExists) {
       return res.status(404).json({ error: `Version "${versionName}" not found` });
     }
     
-    // Delete all nodes with this version suffix
-    const deleteQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") DETACH DELETE n`;
-    const deleteResult = await session.run(deleteQuery);
+    // Drop the database
+    await dropDatabase(dbName);
     
     res.json({ 
       message: `Version "${versionName}" deleted successfully`,
-      deletedNodes: nodeCount,
+      database: dbName,
       versionName 
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
-  } finally {
-    await session.close();
   }
 });
 
@@ -1236,47 +1181,46 @@ app.post('/api/admin/versions/promote-draft', async (req, res) => {
 
 // Get all nodes of a specific type
 app.get('/api/admin/nodes/:type', async (req, res) => {
-  const session = driver.session();
   const { type } = req.params;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
-    let baseQuery = '';
+    let query = '';
     
     switch (type.toLowerCase()) {
       case 'industry':
       case 'industries':
-        baseQuery = 'MATCH (n:Industry) RETURN n ORDER BY n.name';
+        query = 'MATCH (n:Industry) RETURN n ORDER BY n.name';
         break;
       case 'sector':
       case 'sectors':
-        baseQuery = 'MATCH (n:Sector) RETURN n, [(n)<-[:HAS_SECTOR]-(i:Industry) | i.name] as industries ORDER BY n.name';
+        query = 'MATCH (n:Sector) RETURN n, [(n)<-[:HAS_SECTOR]-(i:Industry) | i.name] as industries ORDER BY n.name';
         break;
       case 'department':
       case 'departments':
-        baseQuery = 'MATCH (n:Department) RETURN n ORDER BY n.name';
+        query = 'MATCH (n:Department) RETURN n ORDER BY n.name';
         break;
       case 'painpoint':
       case 'painpoints':
-        baseQuery = 'MATCH (n:PainPoint) RETURN n ORDER BY n.name';
+        query = 'MATCH (n:PainPoint) RETURN n ORDER BY n.name';
         break;
       case 'project':
       case 'projects':
-        baseQuery = 'MATCH (n:ProjectOpportunity) RETURN n ORDER BY n.title';
+        query = 'MATCH (n:ProjectOpportunity) RETURN n ORDER BY n.title';
         break;
       case 'blueprint':
       case 'blueprints':
-        baseQuery = 'MATCH (n:ProjectBlueprint) RETURN n ORDER BY n.title';
+        query = 'MATCH (n:ProjectBlueprint) RETURN n ORDER BY n.title';
         break;
       case 'role':
       case 'roles':
-        baseQuery = 'MATCH (n:Role) RETURN n ORDER BY n.name';
+        query = 'MATCH (n:Role) RETURN n ORDER BY n.name';
         break;
       default:
         return res.status(400).json({ error: 'Invalid node type' });
     }
     
-    const query = getVersionedQuery(baseQuery, version);
     const result = await session.run(query);
     const nodes = result.records.map(record => {
       const node = record.get('n');
@@ -1305,8 +1249,8 @@ app.get('/api/admin/nodes/:type', async (req, res) => {
 
 // Get graph statistics
 app.get('/api/admin/stats', async (req, res) => {
-  const session = driver.session();
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
     const stats = { version };
@@ -1324,24 +1268,17 @@ app.get('/api/admin/stats', async (req, res) => {
     ];
     
     for (const { type, query } of nodeCountQueries) {
-      const versionedQuery = getVersionedQuery(query, version);
-      const result = await session.run(versionedQuery);
+      const result = await session.run(query);
       stats[type] = result.records[0].get('count').toNumber();
     }
     
-    // Count relationships for this version
-    let relationshipQuery = 'MATCH ()-[r]->() RETURN count(r) as count';
-    if (version !== GRAPH_VERSIONS.BASE) {
-      relationshipQuery = `MATCH (n)-[r]->(m) WHERE any(label in labels(n) WHERE label ENDS WITH "_${version}") AND any(label in labels(m) WHERE label ENDS WITH "_${version}") RETURN count(r) as count`;
-    }
+    // Count relationships
+    const relationshipQuery = 'MATCH ()-[r]->() RETURN count(r) as count';
     const relResult = await session.run(relationshipQuery);
     stats.TotalRelationships = relResult.records[0].get('count').toNumber();
     
-    // Find orphaned nodes for this version
-    let orphanQuery = 'MATCH (n) WHERE NOT (n)--() RETURN count(n) as count';
-    if (version !== GRAPH_VERSIONS.BASE) {
-      orphanQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${version}") AND NOT (n)--() RETURN count(n) as count`;
-    }
+    // Find orphaned nodes
+    const orphanQuery = 'MATCH (n) WHERE NOT (n)--() RETURN count(n) as count';
     const orphanResult = await session.run(orphanQuery);
     stats.OrphanedNodes = orphanResult.records[0].get('count').toNumber();
     
@@ -1390,7 +1327,7 @@ app.post('/api/admin/nodes/:type', async (req, res) => {
         return res.status(400).json({ error: 'Node type not supported for creation' });
     }
     
-    const query = getVersionedQuery(baseQuery, version);
+    const query = baseQuery;
     const result = await session.run(query, params);
     const createdNode = result.records[0].get('n');
     
@@ -1445,7 +1382,7 @@ app.put('/api/admin/nodes/:type/:id', async (req, res) => {
         return res.status(400).json({ error: 'Node type not supported for updates' });
     }
     
-    const query = getVersionedQuery(baseQuery, version);
+    const query = baseQuery;
     const result = await session.run(query, params);
     if (result.records.length === 0) {
       return res.status(404).json({ error: 'Node not found' });
@@ -1557,14 +1494,14 @@ app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
   
   try {
     // Query to get the specific node and its direct neighbors
-    const graphQuery = getVersionedQuery(`
+    const graphQuery = `
       MATCH (center) WHERE id(center) = $nodeId
       OPTIONAL MATCH (center)-[r1]->(connected)
       OPTIONAL MATCH (source)-[r2]->(center)
       RETURN center,
              collect(DISTINCT {node: connected, relationship: r1, direction: 'outgoing'}) as outgoing,
              collect(DISTINCT {node: source, relationship: r2, direction: 'incoming'}) as incoming
-    `, version);
+    `;
     
     const result = await session.run(graphQuery, { nodeId: parseInt(nodeId) });
     
@@ -1638,14 +1575,14 @@ app.get('/api/admin/node/:nodeId/connections', async (req, res) => {
   
   try {
     // Query to find all connections (both incoming and outgoing) for a specific node
-    const connectionQuery = getVersionedQuery(`
+    const connectionQuery = `
       MATCH (n) WHERE id(n) = $nodeId
       OPTIONAL MATCH (n)-[r]->(target)
       OPTIONAL MATCH (source)-[r2]->(n)
       RETURN n, 
              collect(DISTINCT {relationship: r, target: target, direction: 'outgoing'}) as outgoing,
              collect(DISTINCT {relationship: r2, source: source, direction: 'incoming'}) as incoming
-    `, version);
+    `;
     
     const result = await session.run(connectionQuery, { nodeId: parseInt(nodeId) });
     
@@ -1754,7 +1691,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
     switch (primaryLabel) {
       case 'Industry':
         // Industries: Show only Industry nodes
-        const industryQuery = getVersionedQuery(`MATCH (i:Industry) RETURN i`, version);
+        const industryQuery = `MATCH (i:Industry) RETURN i`;
         const industryResult = await session.run(industryQuery);
         
         industryResult.records.forEach(record => {
@@ -1776,11 +1713,11 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
           break;
         }
         
-        const sectorQuery = getVersionedQuery(`
+        const sectorQuery = `
           MATCH (i:Industry)-[r:HAS_SECTOR]->(s:Sector) 
           WHERE i.name IN $industries
           RETURN i, r, s
-        `, version);
+        `;
         
         const sectorParams = { industries };
         const sectorResult = await session.run(sectorQuery, sectorParams);
@@ -1829,7 +1766,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
         
       case 'Department':
         // Departments: Show only Department nodes
-        const deptQuery = getVersionedQuery(`MATCH (d:Department) RETURN d`, version);
+        const deptQuery = `MATCH (d:Department) RETURN d`;
         const deptResult = await session.run(deptQuery);
         
         deptResult.records.forEach(record => {
@@ -1885,8 +1822,8 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
           RETURN p, s, d, i, r1, r2, r3
         `;
         
-        const painPointResult = await session.run(getVersionedQuery(painPointQuery, version), painPointParams);
-        const connectedResult = await session.run(getVersionedQuery(connectedQuery, version));
+        const painPointResult = await session.run(painPointQuery, painPointParams);
+        const connectedResult = await session.run(connectedQuery);
         
         // Add pain point nodes
         painPointResult.records.forEach(record => {
@@ -1993,7 +1930,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
         
       default:
         // For other node types, keep existing behavior
-        const defaultQuery = getVersionedQuery(`MATCH (n:${primaryLabel}) RETURN n`, version);
+        const defaultQuery = `MATCH (n:${primaryLabel}) RETURN n`;
         const defaultResult = await session.run(defaultQuery);
         
         defaultResult.records.forEach(record => {
@@ -2035,9 +1972,7 @@ app.post('/api/admin/query', async (req, res) => {
   
   try {
     // Apply versioning to the query if needed
-    const versionedQuery = getVersionedQuery(query, version);
-    
-    const result = await session.run(versionedQuery);
+    const result = await session.run(query);
     
     const results = result.records.map((record, index) => {
       const recordData = {};
@@ -2169,7 +2104,7 @@ async function generateCypherExport(session, version = GRAPH_VERSIONS.BASE) {
     lines.push('');
     
     // Get all nodes of this type
-    const query = getVersionedQuery(`MATCH (n:${nodeType.type}) RETURN n ORDER BY n.name, n.title`, version);
+    const query = `MATCH (n:${nodeType.type}) RETURN n ORDER BY n.name, n.title`;
     const result = await session.run(query);
     
     if (result.records.length === 0) {
@@ -2312,35 +2247,25 @@ app.post('/api/admin/import', express.text({ limit: '10mb' }), async (req, res) 
     });
   }
   
-  const session = driver.session();
+  const dbName = getDatabaseName(versionName);
   
   try {
-    // Check if version already exists
-    const versionCheckQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") RETURN count(n) as count`;
-    const versionResult = await session.run(versionCheckQuery);
-    const existingCount = versionResult.records[0].get('count').toNumber();
-    
-    if (existingCount > 0) {
+    // Check if database already exists
+    const databases = await listDatabases();
+    if (databases.find(db => db.name === dbName)) {
       return res.status(400).json({ error: `Version "${versionName}" already exists. Please choose a different name.` });
     }
     
-    // Add version suffix to all CREATE/MERGE/MATCH statements
-    const versionedScript = cypherScript
-      .split('\n')
-      .map(line => {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('CREATE') || trimmed.startsWith('MERGE') || trimmed.startsWith('MATCH')) {
-          // Add version suffix to node labels, but not relationship types
-          // This regex matches node labels (after parenthesis) but not relationship types (inside brackets)
-          return line.replace(/\(([^)]*):([A-Za-z]+)([^)]*)\)/g, `($1:$2_${versionName}$3)`);
-        }
-        return line;
-      })
-      .join('\n');
+    // Create new database for this version
+    await createDatabase(dbName);
+    console.log(`Created database ${dbName} for version ${versionName}`);
     
-    // Split script into individual statements and execute them
-    // First, remove comments and empty lines, then split by semicolons
-    const cleanedScript = versionedScript
+    // Get session for the new database
+    const session = getVersionSession(versionName);
+    
+    // Execute the script directly without any label modifications
+    // Split script into individual statements
+    const cleanedScript = cypherScript
       .split('\n')
       .filter(line => {
         const trimmed = line.trim();
@@ -2353,21 +2278,37 @@ app.post('/api/admin/import', express.text({ limit: '10mb' }), async (req, res) 
       .map(stmt => stmt.trim())
       .filter(stmt => stmt); // Remove empty statements
 
-    console.log(`Executing ${statements.length} statements for version ${versionName}`);
+    console.log(`Executing ${statements.length} statements in database ${dbName}`);
     
     let executedStatements = 0;
+    let totalNodesCreated = 0;
+    let totalRelationshipsCreated = 0;
+    
     for (const statement of statements) {
       if (statement) {
         try {
           const result = await session.run(statement);
           executedStatements++;
-          console.log(`Statement ${executedStatements}: ${statement.substring(0, 100)}... (${result.summary?.counters?.updates() || 0} operations)`);
+          
+          // Collect statistics from transaction summary
+          const counters = result.summary.counters;
+          if (counters && counters._stats) {
+            const nodesCreated = counters._stats.nodesCreated || 0;
+            const relationshipsCreated = counters._stats.relationshipsCreated || 0;
+            totalNodesCreated += nodesCreated;
+            totalRelationshipsCreated += relationshipsCreated;
+            console.log(`Statement ${executedStatements}: ${statement.substring(0, 100)}... (${counters.updates() || 0} operations: +${nodesCreated} nodes, +${relationshipsCreated} rels)`);
+          } else {
+            console.log(`Statement ${executedStatements}: ${statement.substring(0, 100)}... (no counter info)`);
+          }
         } catch (statementError) {
-          // Clean up any partial import
+          // Clean up - drop the database on error
+          await session.close();
           try {
-            await session.run(`MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") DETACH DELETE n`);
+            await dropDatabase(dbName);
+            console.log(`Dropped database ${dbName} after import failure`);
           } catch (cleanupError) {
-            console.error('Failed to clean up partial import:', cleanupError);
+            console.error('Failed to clean up database after import failure:', cleanupError);
           }
           
           throw new Error(`Statement ${executedStatements + 1} failed: ${statementError.message}\nFailed statement: ${statement.substring(0, 200)}${statement.length > 200 ? '...' : ''}`);
@@ -2375,45 +2316,39 @@ app.post('/api/admin/import', express.text({ limit: '10mb' }), async (req, res) 
       }
     }
     
-    // Get import statistics
-    const statsQuery = `
-      MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}")
-      OPTIONAL MATCH (n)-[r]->(m) WHERE any(label in labels(m) WHERE label ENDS WITH "_${versionName}")
-      RETURN 
-        count(DISTINCT n) as nodeCount,
-        count(DISTINCT r) as relCount
-    `;
-    const statsResult = await session.run(statsQuery);
-    const stats = statsResult.records[0];
+    await session.close();
+    
+    console.log(`Import completed: ${totalNodesCreated} nodes, ${totalRelationshipsCreated} relationships created`);
     
     res.json({
       success: true,
-      message: `Graph imported successfully as version "${versionName}"`,
+      message: `Graph imported successfully as version "${versionName}" in database "${dbName}"`,
       versionName,
+      database: dbName,
       validationResult: validation,
       stats: {
-        nodesCreated: stats.get('nodeCount').toNumber(),
-        relationshipsCreated: stats.get('relCount').toNumber()
+        nodesCreated: totalNodesCreated,
+        relationshipsCreated: totalRelationshipsCreated
       }
     });
     
   } catch (error) {
-    // Clean up any partial import
+    // Clean up - drop the database on error
     try {
-      await session.run(`MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") DETACH DELETE n`);
+      await dropDatabase(dbName);
+      console.log(`Dropped database ${dbName} after import failure`);
     } catch (cleanupError) {
-      console.error('Failed to clean up partial import:', cleanupError);
+      console.error('Failed to clean up database after import failure:', cleanupError);
     }
     
     res.status(500).json({ 
       error: 'Failed to import graph', 
       details: error.message,
       versionName,
+      database: dbName,
       hasValidationErrors: !!validation && !validation.valid,
       validationErrors: validation?.errors || []
     });
-  } finally {
-    await session.close();
   }
 });
 

@@ -55,8 +55,7 @@ const App: React.FC = () => {
   const [isBuilderMode, setIsBuilderMode] = useState(false);
   const [builderAuthenticated, setBuilderAuthenticated] = useState(false);
   const [builderActiveSection, setBuilderActiveSection] = useState('overview');
-  const [showTablesSubsections, setShowTablesSubsections] = useState(false);
-  const [activeTableSection, setActiveTableSection] = useState('industries');
+  const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [builderStats, setBuilderStats] = useState<any>(null);
   const [builderNodes, setBuilderNodes] = useState<any[]>([]);
   const [builderLoading, setBuilderLoading] = useState(false);
@@ -70,7 +69,7 @@ const App: React.FC = () => {
   const [editingNode, setEditingNode] = useState<any>(null);
   
   // Graph visualization state
-  const [viewMode, setViewMode] = useState<'table' | 'graph'>('table');
+  const [viewMode, setViewMode] = useState<'graph'>('graph');
   const [graphData, setGraphData] = useState<{ nodes: any[], edges: any[] }>({ nodes: [], edges: [] });
   const [graphLoading, setGraphLoading] = useState(false);
   const [focusedGraphNode, setFocusedGraphNode] = useState<string | null>(null);
@@ -728,12 +727,15 @@ const App: React.FC = () => {
       if (response.ok) {
         setImportResult({
           success: true,
-          message: `✅ Import successful!\n\nVersion: ${result.versionName}\nNodes: ${result.stats?.nodeCount || 0}\nRelationships: ${result.stats?.relationshipCount || 0}`,
+          message: `✅ Import successful!\n\nVersion: ${result.versionName}\nNodes: ${result.stats?.nodesCreated || 0}\nRelationships: ${result.stats?.relationshipsCreated || 0}`,
           versionName: result.versionName
         });
         
         // Refresh available versions
         await fetchAvailableVersions();
+        
+        // Switch to the newly imported version
+        setCurrentGraphVersion(result.versionName);
         
         // Clear form
         setImportFile(null);
@@ -919,7 +921,9 @@ const App: React.FC = () => {
         if (selectedDepartment) params.append('department', selectedDepartment);
       }
       
-      const response = await fetch(`/api/admin/graph/${nodeType}?${params.toString()}`);
+      // For 'all' node type, fetch comprehensive graph data
+      const endpoint = nodeType === 'all' ? 'industries' : nodeType;
+      const response = await fetch(`/api/admin/graph/${endpoint}?${params.toString()}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -1122,25 +1126,57 @@ const App: React.FC = () => {
 
   // Reload graph data when filters change
   useEffect(() => {
-    if (isBuilderMode && builderAuthenticated && viewMode === 'graph' && builderActiveSection) {
-      const nodeTypeMap: { [key: string]: string } = {
-        'industries': 'industries',
-        'sectors': 'sectors', 
-        'departments': 'departments',
-        'painpoints': 'painpoints',
-        'projects': 'projects',
-        'blueprints': 'blueprints',
-        'roles': 'roles',
-        'modules': 'modules',
-        'submodules': 'submodules'
-      };
-      
-      const nodeType = nodeTypeMap[builderActiveSection];
-      if (nodeType) {
-        fetchGraphData(nodeType);
+    if (isBuilderMode && builderAuthenticated && builderActiveSection) {
+      // Handle graph section - show all data
+      if (builderActiveSection === 'graph') {
+        // If a specific node type was selected from overview, use it
+        if (selectedNodeType) {
+          const nodeTypeMap: { [key: string]: string } = {
+            'industries': 'industries',
+            'sectors': 'sectors', 
+            'departments': 'departments',
+            'painpoints': 'painpoints',
+            'projects': 'projects',
+            'blueprints': 'blueprints',
+            'roles': 'roles',
+            'modules': 'modules',
+            'submodules': 'submodules'
+          };
+          
+          const nodeType = nodeTypeMap[selectedNodeType];
+          if (nodeType) {
+            fetchGraphData(nodeType);
+          }
+        } else {
+          // Default to showing all when no specific type is selected
+          fetchGraphData('all');
+        }
+      } else {
+        // Clear selected node type when not in graph section
+        if (selectedNodeType) {
+          setSelectedNodeType(null);
+        }
+        
+        // Handle specific node type sections
+        const nodeTypeMap: { [key: string]: string } = {
+          'industries': 'industries',
+          'sectors': 'sectors', 
+          'departments': 'departments',
+          'painpoints': 'painpoints',
+          'projects': 'projects',
+          'blueprints': 'blueprints',
+          'roles': 'roles',
+          'modules': 'modules',
+          'submodules': 'submodules'
+        };
+        
+        const nodeType = nodeTypeMap[builderActiveSection];
+        if (nodeType) {
+          fetchGraphData(nodeType);
+        }
       }
     }
-  }, [selectedIndustries, selectedSector, selectedDepartment, isBuilderMode, builderAuthenticated, viewMode, builderActiveSection, fetchGraphData]);
+  }, [selectedIndustries, selectedSector, selectedDepartment, isBuilderMode, builderAuthenticated, viewMode, builderActiveSection, selectedNodeType, fetchGraphData]);
 
   // Refresh data when version changes
   useEffect(() => {
@@ -1162,32 +1198,13 @@ const App: React.FC = () => {
   };
 
   // Handle overview card click to navigate to graph view
-  const handleOverviewCardClick = async (nodeType: string) => {
-    // Switch to graph section
+  const handleOverviewCardClick = (nodeType: string) => {
+    // Store the selected node type and switch to graph section
+    setSelectedNodeType(nodeType);
     setBuilderActiveSection('graph');
-    setShowTablesSubsections(false);
-    
-    // Set view mode to graph
-    if (viewMode !== 'graph') {
-      setViewMode('graph');
-    }
     
     // Reset filters
     resetFilters();
-    
-    // Fetch graph data for the specific node type
-    const nodeTypeMap: { [key: string]: string } = {
-      'industries': 'industries',
-      'sectors': 'sectors',
-      'departments': 'departments',
-      'painpoints': 'painpoints',
-      'projects': 'projects'
-    };
-    
-    const graphNodeType = nodeTypeMap[nodeType];
-    if (graphNodeType) {
-      await fetchGraphData(graphNodeType);
-    }
   };
 
   const navigateToStep = (stepNumber: number) => {
@@ -1563,7 +1580,6 @@ const App: React.FC = () => {
                 className={`builder-nav-item ${builderActiveSection === 'overview' ? 'active' : ''}`}
                 onClick={() => {
                   setBuilderActiveSection('overview');
-                  setShowTablesSubsections(false);
                 }}
               >
                 📊 Overview
@@ -1573,86 +1589,12 @@ const App: React.FC = () => {
                 className={`builder-nav-item ${builderActiveSection === 'graph' ? 'active' : ''}`}
                 onClick={() => {
                   setBuilderActiveSection('graph');
-                  setShowTablesSubsections(false);
-                  if (viewMode === 'table') setViewMode('graph');
                 }}
               >
                 🕸️ Graph
               </button>
               
-              <button 
-                className={`builder-nav-item ${builderActiveSection === 'tables' ? 'active' : ''}`}
-                onClick={() => {
-                  setBuilderActiveSection('tables');
-                  setShowTablesSubsections(true);
-                  if (viewMode === 'graph') setViewMode('table');
-                  // Load default table section
-                  resetFilters();
-                  fetchBuilderNodes(activeTableSection === 'industries' ? 'industry' : 
-                                 activeTableSection === 'sectors' ? 'sector' :
-                                 activeTableSection === 'departments' ? 'department' :
-                                 activeTableSection === 'painpoints' ? 'painpoint' :
-                                 activeTableSection === 'projects' ? 'project' : 'industry', currentGraphVersion);
-                }}
-              >
-                📋 Tables
-              </button>
               
-              {/* Table Subsections - Only show when Tables is active */}
-              {showTablesSubsections && builderActiveSection === 'tables' && (
-                <div className="builder-table-subsections">
-                  <button 
-                    className={`builder-nav-subitem ${activeTableSection === 'industries' ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveTableSection('industries');
-                      resetFilters();
-                      fetchBuilderNodes('industry', currentGraphVersion);
-                    }}
-                  >
-                    🏢 Industries
-                  </button>
-                  <button 
-                    className={`builder-nav-subitem ${activeTableSection === 'sectors' ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveTableSection('sectors');
-                      resetFilters();
-                      fetchBuilderNodes('sector', currentGraphVersion);
-                    }}
-                  >
-                    🏛️ Sectors
-                  </button>
-                  <button 
-                    className={`builder-nav-subitem ${activeTableSection === 'departments' ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveTableSection('departments');
-                      resetFilters();
-                      fetchBuilderNodes('department', currentGraphVersion);
-                    }}
-                  >
-                    🏢 Departments
-                  </button>
-                  <button 
-                    className={`builder-nav-subitem ${activeTableSection === 'painpoints' ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveTableSection('painpoints');
-                      resetFilters();
-                      fetchBuilderNodes('painpoint', currentGraphVersion);
-                    }}
-                  >
-                    ⚠️ Pain Points
-                  </button>
-                  <button 
-                    className={`builder-nav-subitem ${activeTableSection === 'projects' ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveTableSection('projects');
-                      resetFilters();
-                      fetchBuilderNodes('project', currentGraphVersion);
-                    }}
-                  >
-                    🚀 Projects
-                  </button>
-                </div>
-              )}
             </div>
             
             {/* Version Management in Side Panel */}
@@ -1835,163 +1777,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Tables Section */}
-            {builderActiveSection === 'tables' && !builderLoading && (
-              <div className="builder-node-management">
-                <div className="builder-section-header">
-                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    {/* Graph Filters */}
-                    {viewMode === 'graph' && (
-                      <div className="graph-filters">
-                        {activeTableSection === 'sectors' && (
-                          <div className="industry-checkboxes">
-                            <label>Industries:</label>
-                            {availableIndustries.map(industry => (
-                              <label key={industry} className="checkbox-label">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedIndustries.includes(industry)}
-                                  onChange={() => handleIndustryToggle(industry)}
-                                />
-                                {industry}
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                        
-                        {activeTableSection === 'painpoints' && (
-                          <div className="painpoint-filters">
-                            <div className="industry-checkboxes">
-                              <label>Industries:</label>
-                              {availableIndustries.map(industry => (
-                                <label key={industry} className="checkbox-label">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedIndustries.includes(industry)}
-                                    onChange={() => handleIndustryToggle(industry)}
-                                  />
-                                  {industry}
-                                </label>
-                              ))}
-                            </div>
-                            
-                            <select 
-                              value={selectedSector} 
-                              onChange={(e) => setSelectedSector(e.target.value)}
-                              className="filter-select"
-                              disabled={selectedIndustries.length === 0}
-                            >
-                              <option value="">All Sectors</option>
-                              {availableSectors.map(sector => (
-                                <option key={sector} value={sector}>{sector}</option>
-                              ))}
-                            </select>
-                            
-                            <select 
-                              value={selectedDepartment} 
-                              onChange={(e) => setSelectedDepartment(e.target.value)}
-                              className="filter-select"
-                            >
-                              <option value="">All Departments</option>
-                              {availableDepartments.map(dept => (
-                                <option key={dept} value={dept}>{dept}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Table View */}
-                {viewMode === 'table' && (
-                  <div className="builder-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>
-                            {activeTableSection === 'industries' ? 'Industry' :
-                             activeTableSection === 'sectors' ? 'Sector' :
-                             activeTableSection === 'departments' ? 'Department' :
-                             activeTableSection === 'painpoints' ? 'Pain Point' :
-                             activeTableSection === 'projects' ? 'Project' : 'Name'}
-                          </th>
-                          {activeTableSection === 'painpoints' && <th>Impact</th>}
-                          {activeTableSection === 'sectors' && <th>Industries</th>}
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {builderNodes.map((node) => (
-                          <tr key={node.id}>
-                            <td>{node.properties.name || node.properties.title}</td>
-                            {activeTableSection === 'painpoints' && (
-                              <td>{node.properties.impact || 'N/A'}</td>
-                            )}
-                            {activeTableSection === 'sectors' && (
-                              <td>{node.industries?.join(', ') || 'N/A'}</td>
-                            )}
-                            <td>
-                              <button 
-                                className="builder-btn-small edit"
-                                onClick={() => handleEditNode(node)}
-                              >
-                                ✏️ Edit
-                              </button>
-                              <button 
-                                className="builder-btn-small delete"
-                                onClick={() => handleDeleteNode(node.id)}
-                              >
-                                🗑️ Delete
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {/* Add New Row */}
-                        <tr className="add-new-row">
-                          <td colSpan={activeTableSection === 'painpoints' || activeTableSection === 'sectors' ? 3 : 2}>
-                            <button 
-                              className="builder-add-new-btn"
-                              onClick={() => handleAddNewNode(activeTableSection.slice(0, -1))}
-                            >
-                              ➕ Add New {activeTableSection === 'industries' ? 'Industry' :
-                                        activeTableSection === 'sectors' ? 'Sector' :
-                                        activeTableSection === 'departments' ? 'Department' :
-                                        activeTableSection === 'painpoints' ? 'Pain Point' :
-                                        activeTableSection === 'projects' ? 'Project' : 'Item'}
-                            </button>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                
-                {/* Graph View */}
-                {viewMode === 'graph' && (
-                  <div className="graph-view-container">
-                    {graphLoading ? (
-                      <div className="builder-loading">
-                        <div className="spinner"></div>
-                        <p>Loading graph visualization...</p>
-                      </div>
-                    ) : (
-                      <GraphViz
-                        nodes={graphData.nodes}
-                        edges={graphData.edges}
-                        nodeType={builderActiveSection}
-                        onNodeSelect={handleGraphNodeSelect}
-                        onNodeDoubleClick={handleGraphNodeEdit}
-                        onNavigateToNode={handleNavigateToNode}
-                        focusedNode={focusedGraphNode}
-                        height="500px"
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Relationships Section */}
             {builderActiveSection === 'relationships' && !builderLoading && (
@@ -2881,7 +2666,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   
-                  {(activeTableSection === 'painpoints') && (
+                  {(builderActiveSection === 'painpoints') && (
                     <div className="form-group">
                       <label className="form-label">Impact Description</label>
                       <textarea

@@ -42,12 +42,12 @@
 
 .builder-toggle.active {
   background: rgba(255, 255, 255, 0.9);
-  color: #e74c3c;
-  border-color: #e74c3c;
+  color: #2980b9;
+  border-color: #2980b9;
 }
 
 .app-header.builder-mode {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  background: linear-gradient(135deg, #2980b9 0%, #1f5582 100%);
 }
 
 .app-header h1 {
