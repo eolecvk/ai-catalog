@@ -65,8 +65,19 @@ const App: React.FC = () => {
   // Builder modals and forms
   const [showBuilderNodeModal, setShowBuilderNodeModal] = useState(false);
   const [showBuilderEditModal, setShowBuilderEditModal] = useState(false);
+  const [showSmartUpdateModal, setShowSmartUpdateModal] = useState(false);
   const [builderNodeForm, setBuilderNodeForm] = useState<any>({});
   const [editingNode, setEditingNode] = useState<any>(null);
+  
+  // Smart Update feature state
+  const [smartUpdateInput, setSmartUpdateInput] = useState('');
+  const [generatedCypher, setGeneratedCypher] = useState('');
+  const [smartUpdateLoading, setSmartUpdateLoading] = useState(false);
+  const [smartUpdateStep, setSmartUpdateStep] = useState<'input' | 'preview' | 'apply'>('input');
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [conversationHistory, setConversationHistory] = useState<any[]>([]);
+  const [currentIteration, setCurrentIteration] = useState(0);
+  const [feedbackInput, setFeedbackInput] = useState('');
   
   // Graph visualization state
   const [viewMode, setViewMode] = useState<'graph'>('graph');
@@ -154,13 +165,16 @@ const App: React.FC = () => {
           setShowPainPointModal(false);
         } else if (showProjectModal) {
           setShowProjectModal(false);
+        } else if (showSmartUpdateModal) {
+          setShowSmartUpdateModal(false);
+          resetSmartUpdate();
         }
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showPainPointSuggestions, showPainPointModal, showProjectModal]);
+  }, [showPainPointSuggestions, showPainPointModal, showProjectModal, showSmartUpdateModal]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -895,6 +909,159 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching versions:', error);
+    }
+  };
+
+  // Smart Update API functions
+  const generateCypherQuery = async (naturalLanguage: string) => {
+    setSmartUpdateLoading(true);
+    try {
+      const response = await fetch('/api/smart-update/generate-cypher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          naturalLanguageUpdate: naturalLanguage,
+          version: currentGraphVersion,
+          conversationHistory: conversationHistory
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate Cypher query');
+      }
+      
+      const data = await response.json();
+      setGeneratedCypher(data.cypherQuery);
+      setSmartUpdateStep('preview');
+      setCurrentIteration(prev => prev + 1);
+      return data.cypherQuery;
+    } catch (error) {
+      console.error('Error generating Cypher:', error);
+      alert(error instanceof Error ? error.message : 'Failed to generate Cypher query');
+    } finally {
+      setSmartUpdateLoading(false);
+    }
+  };
+
+  const generatePreview = async (cypherQuery: string) => {
+    setSmartUpdateLoading(true);
+    try {
+      const response = await fetch('/api/smart-update/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cypherQuery,
+          version: currentGraphVersion
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate preview');
+      }
+      
+      const data = await response.json();
+      setPreviewData(data);
+      return data;
+    } catch (error) {
+      console.error('Error generating preview:', error);
+      alert(error instanceof Error ? error.message : 'Failed to generate preview');
+    } finally {
+      setSmartUpdateLoading(false);
+    }
+  };
+
+  const applySmartUpdate = async (cypherQuery: string, versionName: string) => {
+    setSmartUpdateLoading(true);
+    try {
+      const response = await fetch('/api/smart-update/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cypherQuery,
+          version: currentGraphVersion,
+          newVersionName: versionName
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to apply update');
+      }
+      
+      const data = await response.json();
+      
+      // Refresh available versions and switch to new version
+      await fetchAvailableVersions();
+      setCurrentGraphVersion(data.newVersion);
+      
+      // Reset smart update state
+      setSmartUpdateInput('');
+      setGeneratedCypher('');
+      setPreviewData(null);
+      setSmartUpdateStep('input');
+      setShowSmartUpdateModal(false);
+      
+      // Refresh graph data
+      if (builderActiveSection !== 'overview') {
+        await fetchGraphData(builderActiveSection);
+      }
+      
+      alert(`Update applied successfully! New version: ${data.newVersion}`);
+      return data;
+    } catch (error) {
+      console.error('Error applying smart update:', error);
+      alert(error instanceof Error ? error.message : 'Failed to apply update');
+    } finally {
+      setSmartUpdateLoading(false);
+    }
+  };
+
+  const resetSmartUpdate = () => {
+    setSmartUpdateInput('');
+    setGeneratedCypher('');
+    setPreviewData(null);
+    setSmartUpdateStep('input');
+    setSmartUpdateLoading(false);
+    setConversationHistory([]);
+    setCurrentIteration(0);
+    setFeedbackInput('');
+  };
+
+  const refineSmartUpdate = async (feedback: string) => {
+    setSmartUpdateLoading(true);
+    try {
+      const response = await fetch('/api/smart-update/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originalRequest: smartUpdateInput,
+          currentCypher: generatedCypher,
+          feedback: feedback,
+          conversationHistory: conversationHistory,
+          version: currentGraphVersion
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to refine Cypher query');
+      }
+      
+      const data = await response.json();
+      setGeneratedCypher(data.refinedCypher);
+      setConversationHistory(data.conversationHistory);
+      setCurrentIteration(prev => prev + 1);
+      setFeedbackInput('');
+      setPreviewData(null); // Reset preview to show updated query
+      
+      return data.refinedCypher;
+    } catch (error) {
+      console.error('Error refining Cypher:', error);
+      alert(error instanceof Error ? error.message : 'Failed to refine Cypher query');
+    } finally {
+      setSmartUpdateLoading(false);
     }
   };
 
@@ -1676,6 +1843,17 @@ const App: React.FC = () => {
                     title="Export Graph"
                   >
                     {exportLoading ? '⏳' : '📤'} Export
+                  </button>
+                  
+                  <button 
+                    className="version-btn-sidebar smart-update"
+                    onClick={() => {
+                      setShowSmartUpdateModal(true);
+                      resetSmartUpdate();
+                    }}
+                    title="Smart Update with AI - Describe changes in natural language"
+                  >
+                    🧠 Smart Update
                   </button>
                 </div>
               </div>
@@ -2922,6 +3100,212 @@ const App: React.FC = () => {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Smart Update Modal */}
+      {showSmartUpdateModal && (
+        <div className="modal-backdrop" onClick={() => {
+          setShowSmartUpdateModal(false);
+          resetSmartUpdate();
+        }}>
+          <div className="modal-content smart-update-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🧠 Smart Update with AI</h2>
+              <button className="modal-close" onClick={() => {
+                setShowSmartUpdateModal(false);
+                resetSmartUpdate();
+              }}>×</button>
+            </div>
+
+            <div className="smart-update-content">
+              {/* Step 1: Natural Language Input */}
+              {smartUpdateStep === 'input' && (
+                <div className="smart-update-step">
+                  <h3>Describe Your Graph Update</h3>
+                  <p>Use natural language to describe what you want to change in the graph. The AI will generate a Cypher query for you.</p>
+                  
+                  <div className="smart-update-examples">
+                    <h4>Examples:</h4>
+                    <ul>
+                      <li>"Update the Banking industry name to 'Digital Banking'"</li>
+                      <li>"Connect Risk Management department to Fraud Detection pain point"</li>
+                      <li>"Change the impact of Manual Process pain point to include cost savings"</li>
+                      <li>"Add a relationship between Retail Banking sector and Customer Service department"</li>
+                    </ul>
+                  </div>
+                  
+                  <textarea
+                    value={smartUpdateInput}
+                    onChange={(e) => setSmartUpdateInput(e.target.value)}
+                    placeholder="Describe the update you want to make..."
+                    rows={4}
+                    className="smart-update-input"
+                  />
+                  
+                  <div className="smart-update-actions">
+                    <button 
+                      className="modal-btn modal-btn-secondary" 
+                      onClick={() => {
+                        setShowSmartUpdateModal(false);
+                        resetSmartUpdate();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      className="modal-btn modal-btn-primary" 
+                      onClick={() => generateCypherQuery(smartUpdateInput)}
+                      disabled={!smartUpdateInput.trim() || smartUpdateLoading}
+                    >
+                      {smartUpdateLoading ? '🧠 Generating...' : '🚀 Generate Query'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Preview */}
+              {smartUpdateStep === 'preview' && (
+                <div className="smart-update-step">
+                  <h3>Preview Your Update</h3>
+                  
+                  <div className="generated-cypher">
+                    <h4>Generated Cypher Query (Iteration {currentIteration}):</h4>
+                    <pre className="cypher-code">{generatedCypher}</pre>
+                  </div>
+
+                  {/* Iterative Feedback Section */}
+                  <div className="feedback-section">
+                    <h4>💬 Provide Feedback (Optional)</h4>
+                    <p>Not satisfied with the query? Describe what you'd like to change:</p>
+                    <textarea
+                      value={feedbackInput}
+                      onChange={(e) => setFeedbackInput(e.target.value)}
+                      placeholder="e.g., 'Add a WHERE clause to limit this to only active sectors' or 'Also create the pain point if it doesn't exist'"
+                      rows={3}
+                      className="feedback-input"
+                    />
+                    <button 
+                      className="modal-btn modal-btn-secondary refine-btn" 
+                      onClick={() => refineSmartUpdate(feedbackInput)}
+                      disabled={smartUpdateLoading || !feedbackInput.trim()}
+                    >
+                      {smartUpdateLoading ? '🔄 Refining...' : '✨ Refine Query'}
+                    </button>
+                  </div>
+
+                  {/* Conversation History */}
+                  {conversationHistory.length > 0 && (
+                    <div className="conversation-history">
+                      <h4>📝 Conversation History:</h4>
+                      <div className="history-items">
+                        {conversationHistory.map((item, index) => (
+                          <div key={index} className="history-item">
+                            <div className="history-feedback">💭 Feedback {index + 1}: "{item.feedback}"</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="preview-actions">
+                    <button 
+                      className="modal-btn modal-btn-secondary" 
+                      onClick={() => generatePreview(generatedCypher)}
+                      disabled={smartUpdateLoading}
+                    >
+                      {smartUpdateLoading ? '⏳ Loading Preview...' : '👁️ Generate Preview'}
+                    </button>
+                  </div>
+                  
+                  {previewData && (
+                    <div className="update-preview">
+                      <h4>Preview Results:</h4>
+                      <div className="preview-summary">
+                        <p><strong>Before:</strong> {previewData.beforeState.nodes.length} nodes affected</p>
+                        {currentGraphVersion === 'base' ? (
+                          <div className="base-version-notice">
+                            <p><strong>📋 Base Version Notice:</strong> You're currently viewing the read-only base version.</p>
+                            <p><strong>Action:</strong> Changes will be applied to a new version to preserve the base data.</p>
+                          </div>
+                        ) : (
+                          <p><strong>After:</strong> Changes will be applied to create a new version</p>
+                        )}
+                        {previewData.afterState.changes && (
+                          <ul>
+                            {previewData.afterState.changes.map((change: string, i: number) => (
+                              <li key={i}>{change}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      
+                      <div className="version-input">
+                        <label>
+                          {currentGraphVersion === 'base' 
+                            ? 'New Version Name (Required):' 
+                            : 'New Version Name:'}
+                        </label>
+                        <input 
+                          type="text" 
+                          placeholder={currentGraphVersion === 'base' 
+                            ? 'Enter name for new version (e.g., smart-update-2024-08-31)' 
+                            : 'e.g., banking-update, risk-connections'}
+                          className="version-name-input"
+                          id="newVersionNameInput"
+                          defaultValue={currentGraphVersion === 'base' 
+                            ? `smart-update-${new Date().toISOString().slice(0, 10)}` 
+                            : ''}
+                        />
+                        {currentGraphVersion === 'base' && (
+                          <small className="version-help-text">
+                            💡 A new version will be created to safely apply your changes without modifying the base data.
+                          </small>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="smart-update-actions">
+                    <button 
+                      className="modal-btn modal-btn-secondary" 
+                      onClick={() => setSmartUpdateStep('input')}
+                    >
+                      ← Back to Edit
+                    </button>
+                    {previewData && (
+                      <>
+                        <button 
+                          className="modal-btn modal-btn-secondary" 
+                          onClick={() => {
+                            setShowSmartUpdateModal(false);
+                            resetSmartUpdate();
+                          }}
+                        >
+                          Reject Update
+                        </button>
+                        <button 
+                          className="modal-btn modal-btn-primary" 
+                          onClick={() => {
+                            const versionInput = document.getElementById('newVersionNameInput') as HTMLInputElement;
+                            const versionName = versionInput?.value.trim();
+                            if (versionName) {
+                              applySmartUpdate(generatedCypher, versionName);
+                            } else {
+                              alert('Please enter a version name');
+                            }
+                          }}
+                          disabled={smartUpdateLoading}
+                        >
+                          {smartUpdateLoading ? '⏳ Applying...' : '✅ Accept & Apply'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

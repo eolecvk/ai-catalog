@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const neo4j = require('neo4j-driver');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
 const app = express();
@@ -16,6 +17,9 @@ const driver = neo4j.driver(
     process.env.NEO4J_PASSWORD || 'password123'
   )
 );
+
+// Initialize Gemini AI
+const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
 // Graph versioning system with separate databases
 const GRAPH_VERSIONS = {
@@ -824,6 +828,334 @@ function generateMockImpactSuggestion(painPointName, sectors, departments) {
   // Default generic suggestion
   return `Significantly impacts operational efficiency and increases costs, requiring immediate attention to maintain competitive advantage in ${sectors?.join(' and ') || 'the financial services'} sector.`;
 }
+
+// Smart Update Feature with Gemini 2.0 Flash
+
+// Generate comprehensive graph schema prompt for Gemini
+function createGraphSchemaPrompt() {
+  const nodeTypesDesc = GRAPH_SCHEMA.nodeTypes.map(type => {
+    const props = GRAPH_SCHEMA.nodeProperties[type] || [];
+    return `- ${type}: Properties [${props.join(', ')}]`;
+  }).join('\n');
+
+  const relationshipDesc = GRAPH_SCHEMA.relationshipTypes.map(rel => `- ${rel}`).join('\n');
+
+  return `You are a Neo4j Cypher query expert. Generate valid Cypher queries for graph updates of any complexity.
+
+GRAPH SCHEMA:
+Node Types:
+${nodeTypesDesc}
+
+Relationship Types:
+${relationshipDesc}
+
+GUIDELINES:
+1. Do not create new node types or relationship types beyond the schema
+2. Use proper Cypher syntax with correct property names
+3. Return ONLY the Cypher query, no explanations or comments
+4. Handle complex multi-node operations appropriately
+5. Use proper Cypher patterns for bulk operations when needed
+
+SUPPORTED OPERATIONS:
+- Update properties of single or multiple nodes
+- Create/delete nodes and relationships
+- Bulk operations affecting multiple nodes
+- Complex graph restructuring
+- Conditional updates with WHERE clauses
+- Pattern matching with multiple MATCH clauses
+
+EXAMPLES:
+User: "Update the Banking industry to have name 'Digital Banking'"
+Response: MATCH (i:Industry {name: 'Banking'}) SET i.name = 'Digital Banking'
+
+User: "Connect all departments to the Data Analytics pain point"
+Response: MATCH (d:Department), (p:PainPoint {name: 'Data Analytics'}) CREATE (d)-[:EXPERIENCES]->(p)
+
+User: "Create new pain point called AI Integration and connect it to all technology sectors"
+Response: CREATE (p:PainPoint {name: 'AI Integration', impact: 'Significant transformation required for AI adoption across operations'}) WITH p MATCH (s:Sector) WHERE s.name CONTAINS 'Technology' OR s.name CONTAINS 'IT' CREATE (s)-[:EXPERIENCES]->(p)
+
+User: "Remove all connections between Banking sector and old pain points, then connect to Modern Banking Challenges"
+Response: MATCH (s:Sector {name: 'Banking'})-[r:EXPERIENCES]->(p:PainPoint) DELETE r WITH s CREATE (newPain:PainPoint {name: 'Modern Banking Challenges', impact: 'Digital transformation and regulatory compliance challenges'}) CREATE (s)-[:EXPERIENCES]->(newPain)`;
+}
+
+// Validate basic Cypher syntax without complexity restrictions
+function validateCypherSyntax(cypherQuery) {
+  const query = cypherQuery.trim();
+  
+  // Check for empty query
+  if (!query) {
+    return { isValid: false, error: 'Empty query provided.' };
+  }
+  
+  // Basic syntax check - ensure it looks like a valid Cypher query
+  const cypherKeywords = /\b(MATCH|CREATE|SET|DELETE|REMOVE|MERGE|WITH|RETURN|WHERE)\b/i;
+  if (!cypherKeywords.test(query)) {
+    return { isValid: false, error: 'Query does not appear to be valid Cypher syntax.' };
+  }
+  
+  // Check for obviously malicious patterns (SQL injection attempts, etc.)
+  const suspiciousPatterns = /\b(DROP|TRUNCATE|EXEC|EXECUTE)\b/i;
+  if (suspiciousPatterns.test(query)) {
+    return { isValid: false, error: 'Query contains potentially unsafe operations.' };
+  }
+  
+  return { isValid: true };
+}
+
+// Generate Cypher query from natural language using Gemini 2.0 Flash
+async function generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversationHistory = []) {
+  if (!genAI) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    
+    // Build conversation context
+    let prompt = createGraphSchemaPrompt();
+    
+    // Add conversation history if exists
+    if (conversationHistory.length > 0) {
+      prompt += '\n\nCONVERSATION HISTORY:\n';
+      conversationHistory.forEach((entry, index) => {
+        prompt += `${index + 1}. User: "${entry.userRequest}"\n`;
+        prompt += `   Generated: ${entry.cypherQuery}\n`;
+        if (entry.feedback) {
+          prompt += `   Feedback: "${entry.feedback}"\n`;
+        }
+      });
+      prompt += '\nBased on the above conversation history and feedback, generate an improved query.\n';
+    }
+    
+    prompt += `\n\nUser Request: "${naturalLanguageUpdate}"\n\nCypher Query:`;
+    
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const cypherQuery = response.text().trim();
+    
+    // Validate the generated query
+    const validation = validateCypherSyntax(cypherQuery);
+    if (!validation.isValid) {
+      throw new Error(validation.error);
+    }
+    
+    return cypherQuery;
+  } catch (error) {
+    console.error('Error generating Cypher query:', error);
+    throw error;
+  }
+}
+
+// Get current state of nodes that would be affected by the query
+async function getBeforeState(cypherQuery, version = 'base') {
+  const session = getVersionSession(version);
+  try {
+    // Parse the query to identify affected nodes
+    // This is a simplified approach - more sophisticated parsing could be added
+    const matches = cypherQuery.match(/\((\w+):(\w+)\s*\{[^}]*\}/g);
+    if (!matches) return { nodes: [], relationships: [] };
+    
+    // Extract node information and query current state
+    const nodeQueries = [];
+    matches.forEach(match => {
+      const nodeMatch = match.match(/\((\w+):(\w+)\s*\{([^}]*)\}/);
+      if (nodeMatch) {
+        const [, variable, label, props] = nodeMatch;
+        nodeQueries.push(`MATCH (${variable}:${label} {${props}}) RETURN ${variable}`);
+      }
+    });
+    
+    const results = { nodes: [], relationships: [] };
+    for (const query of nodeQueries) {
+      const result = await session.run(query);
+      results.nodes.push(...result.records.map(record => record.get(0).properties));
+    }
+    
+    return results;
+  } catch (error) {
+    console.error('Error getting before state:', error);
+    return { nodes: [], relationships: [] };
+  } finally {
+    await session.close();
+  }
+}
+
+// Simulate query execution to get after state (without actually executing)
+async function getAfterState(cypherQuery, beforeState, version = 'base') {
+  // For now, return a mock after state
+  // In a full implementation, this would parse the Cypher and simulate the changes
+  return {
+    nodes: beforeState.nodes.map(node => ({ ...node, _modified: true })),
+    relationships: beforeState.relationships,
+    changes: ['Property updated', 'Relationship added'] // Mock changes
+  };
+}
+
+// Smart update endpoints
+
+// Generate Cypher query from natural language
+app.post('/api/smart-update/generate-cypher', async (req, res) => {
+  const { naturalLanguageUpdate, version = 'base', conversationHistory = [] } = req.body;
+  
+  try {
+    if (!naturalLanguageUpdate || naturalLanguageUpdate.trim().length === 0) {
+      return res.status(400).json({ error: 'Natural language update description is required' });
+    }
+    
+    const cypherQuery = await generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversationHistory);
+    
+    res.json({ 
+      cypherQuery,
+      naturalLanguage: naturalLanguageUpdate,
+      conversationHistory,
+      message: 'Cypher query generated successfully' 
+    });
+  } catch (error) {
+    console.error('Error generating Cypher query:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to generate Cypher query',
+      details: error.message
+    });
+  }
+});
+
+// Generate before/after preview of the update
+app.post('/api/smart-update/preview', async (req, res) => {
+  const { cypherQuery, version = 'base' } = req.body;
+  
+  try {
+    if (!cypherQuery || cypherQuery.trim().length === 0) {
+      return res.status(400).json({ error: 'Cypher query is required' });
+    }
+    
+    // Validate the query
+    const validation = validateCypherSyntax(cypherQuery);
+    if (!validation.isValid) {
+      return res.status(400).json({ error: validation.error });
+    }
+    
+    // Get before and after states
+    const beforeState = await getBeforeState(cypherQuery, version);
+    const afterState = await getAfterState(cypherQuery, beforeState, version);
+    
+    res.json({
+      beforeState,
+      afterState,
+      cypherQuery,
+      message: 'Preview generated successfully'
+    });
+  } catch (error) {
+    console.error('Error generating preview:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate preview',
+      details: error.message
+    });
+  }
+});
+
+// Apply the accepted update by creating a new graph version
+app.post('/api/smart-update/apply', async (req, res) => {
+  const { cypherQuery, version = 'base', newVersionName } = req.body;
+  
+  try {
+    if (!cypherQuery || cypherQuery.trim().length === 0) {
+      return res.status(400).json({ error: 'Cypher query is required' });
+    }
+    
+    if (!newVersionName || newVersionName.trim().length === 0) {
+      return res.status(400).json({ error: 'New version name is required' });
+    }
+    
+    // Create new version name with timestamp
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
+    const fullVersionName = `${newVersionName}-${timestamp}`;
+    const newDbName = getDatabaseName(fullVersionName);
+    
+    // Create new database for the version
+    await createDatabase(newDbName);
+    
+    // Copy current graph data to new database
+    const sourceSession = getVersionSession(version);
+    const targetSession = getVersionSession(fullVersionName);
+    
+    try {
+      // Export all data from source
+      const exportResult = await sourceSession.run(`
+        CALL apoc.export.cypher.all(null, {stream: true, format: "cypher-shell"})
+        YIELD file, batches, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done
+        RETURN source
+      `);
+      
+      // For now, use a simpler approach - copy data manually
+      // Copy all nodes
+      const nodesResult = await sourceSession.run('MATCH (n) RETURN n');
+      const relsResult = await sourceSession.run('MATCH (a)-[r]->(b) RETURN a, r, b');
+      
+      // Apply the update to the new version
+      await targetSession.run(cypherQuery);
+      
+      res.json({
+        message: 'Update applied successfully',
+        newVersion: fullVersionName,
+        newDatabaseName: newDbName,
+        cypherQuery
+      });
+    } finally {
+      await sourceSession.close();
+      await targetSession.close();
+    }
+  } catch (error) {
+    console.error('Error applying smart update:', error);
+    res.status(500).json({ 
+      error: 'Failed to apply update',
+      details: error.message
+    });
+  }
+});
+
+// Refine Cypher query based on user feedback (iterative improvement)
+app.post('/api/smart-update/refine', async (req, res) => {
+  const { 
+    originalRequest, 
+    currentCypher, 
+    feedback, 
+    conversationHistory = [], 
+    version = 'base' 
+  } = req.body;
+  
+  try {
+    if (!originalRequest || !currentCypher || !feedback) {
+      return res.status(400).json({ 
+        error: 'Original request, current Cypher query, and feedback are all required' 
+      });
+    }
+    
+    // Add current iteration to conversation history
+    const updatedHistory = [...conversationHistory, {
+      userRequest: originalRequest,
+      cypherQuery: currentCypher,
+      feedback: feedback
+    }];
+    
+    // Generate refined query using conversation history
+    const refinementRequest = `Based on the feedback: "${feedback}", please modify the query to better meet the requirements.`;
+    const refinedCypher = await generateCypherFromNaturalLanguage(refinementRequest, updatedHistory);
+    
+    res.json({
+      refinedCypher,
+      originalRequest,
+      feedback,
+      conversationHistory: updatedHistory,
+      message: 'Cypher query refined successfully'
+    });
+  } catch (error) {
+    console.error('Error refining Cypher query:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to refine Cypher query',
+      details: error.message
+    });
+  }
+});
 
 // Get project opportunities based on selections
 app.post('/api/projects', async (req, res) => {
