@@ -10,7 +10,6 @@ const App: React.FC = () => {
   const [painPoints, setPainPoints] = useState<PainPoint[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
-  const [sectorsLoading, setSectorsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [businessContextSubstep, setBusinessContextSubstep] = useState<'industries' | 'sectors'>('industries');
   const [currentSectorPage, setCurrentSectorPage] = useState(0);
@@ -57,7 +56,6 @@ const App: React.FC = () => {
   const [builderActiveSection, setBuilderActiveSection] = useState('overview');
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [builderStats, setBuilderStats] = useState<any>(null);
-  const [builderNodes, setBuilderNodes] = useState<any[]>([]);
   const [builderLoading, setBuilderLoading] = useState(false);
   const [currentGraphVersion, setCurrentGraphVersion] = useState('base');
   const [availableVersions, setAvailableVersions] = useState<string[]>(['base']);
@@ -80,7 +78,7 @@ const App: React.FC = () => {
   const [feedbackInput, setFeedbackInput] = useState('');
   
   // Graph visualization state
-  const [viewMode, setViewMode] = useState<'graph'>('graph');
+  const [viewMode] = useState<'graph'>('graph');
   const [graphData, setGraphData] = useState<{ nodes: any[], edges: any[] }>({ nodes: [], edges: [] });
   const [graphLoading, setGraphLoading] = useState(false);
   const [focusedGraphNode, setFocusedGraphNode] = useState<string | null>(null);
