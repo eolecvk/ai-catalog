@@ -902,8 +902,148 @@ function validateCypherSyntax(cypherQuery) {
   return { isValid: true };
 }
 
+// Graph data querying functions for AI context
+async function getGraphContext(version = 'base', contextType = 'summary') {
+  const session = getVersionSession(version);
+  try {
+    const context = {};
+    
+    if (contextType === 'summary' || contextType === 'full') {
+      // Get counts of all node types
+      for (const nodeType of GRAPH_SCHEMA.nodeTypes) {
+        const result = await session.run(`MATCH (n:${nodeType}) RETURN count(n) as count`);
+        context[`${nodeType}_count`] = result.records[0]?.get('count')?.toNumber() || 0;
+      }
+      
+      // Get sample node names for each type (up to 5)
+      for (const nodeType of GRAPH_SCHEMA.nodeTypes) {
+        const result = await session.run(`MATCH (n:${nodeType}) RETURN n.name as name LIMIT 5`);
+        context[`${nodeType}_samples`] = result.records.map(r => r.get('name')).filter(n => n);
+      }
+      
+      // Get relationship counts
+      for (const relType of GRAPH_SCHEMA.relationshipTypes) {
+        const result = await session.run(`MATCH ()-[r:${relType}]->() RETURN count(r) as count`);
+        context[`${relType}_count`] = result.records[0]?.get('count')?.toNumber() || 0;
+      }
+    }
+    
+    if (contextType === 'full') {
+      // Get more detailed information for complex queries
+      const detailsResult = await session.run(`
+        MATCH (n)-[r]->(m) 
+        RETURN labels(n)[0] as source_type, n.name as source_name, 
+               type(r) as relationship, labels(m)[0] as target_type, m.name as target_name 
+        LIMIT 20
+      `);
+      
+      context.relationships_sample = detailsResult.records.map(record => ({
+        source_type: record.get('source_type'),
+        source_name: record.get('source_name'),
+        relationship: record.get('relationship'),
+        target_type: record.get('target_type'),
+        target_name: record.get('target_name')
+      }));
+    }
+    
+    return context;
+  } catch (error) {
+    console.error('Error getting graph context:', error);
+    return {};
+  } finally {
+    await session.close();
+  }
+}
+
+async function querySpecificNodes(version = 'base', nodeType, searchTerm) {
+  const session = getVersionSession(version);
+  try {
+    // Search for nodes containing the search term
+    const result = await session.run(
+      `MATCH (n:${nodeType}) 
+       WHERE toLower(n.name) CONTAINS toLower($searchTerm) 
+       RETURN n.name as name LIMIT 10`,
+      { searchTerm }
+    );
+    
+    return result.records.map(record => record.get('name'));
+  } catch (error) {
+    console.error('Error querying specific nodes:', error);
+    return [];
+  } finally {
+    await session.close();
+  }
+}
+
+async function getNodeConnections(version = 'base', nodeType, nodeName) {
+  const session = getVersionSession(version);
+  try {
+    const result = await session.run(
+      `MATCH (n:${nodeType} {name: $nodeName})-[r]-(connected) 
+       RETURN type(r) as relationship, labels(connected)[0] as connected_type, 
+              connected.name as connected_name, 
+              CASE WHEN startNode(r) = n THEN 'outgoing' ELSE 'incoming' END as direction
+       LIMIT 20`,
+      { nodeName }
+    );
+    
+    return result.records.map(record => ({
+      relationship: record.get('relationship'),
+      connected_type: record.get('connected_type'),
+      connected_name: record.get('connected_name'),
+      direction: record.get('direction')
+    }));
+  } catch (error) {
+    console.error('Error getting node connections:', error);
+    return [];
+  } finally {
+    await session.close();
+  }
+}
+
+// Analyze user request to determine what additional context is needed
+async function analyzeRequestForContext(naturalLanguageUpdate, version = 'base') {
+  const additionalContext = {};
+  const lowerRequest = naturalLanguageUpdate.toLowerCase();
+  
+  // Extract potential node names mentioned in the request
+  const mentionedNodes = [];
+  const words = naturalLanguageUpdate.split(/\s+/);
+  
+  // Look for specific node references
+  for (const word of words) {
+    const cleanWord = word.replace(/[^a-zA-Z0-9\s]/g, '');
+    if (cleanWord.length > 2) { // Ignore very short words
+      for (const nodeType of GRAPH_SCHEMA.nodeTypes) {
+        const matches = await querySpecificNodes(version, nodeType, cleanWord);
+        if (matches.length > 0) {
+          mentionedNodes.push({ nodeType, matches, searchTerm: cleanWord });
+        }
+      }
+    }
+  }
+  
+  additionalContext.mentionedNodes = mentionedNodes;
+  
+  // Determine if we need detailed relationship information
+  if (lowerRequest.includes('connect') || lowerRequest.includes('relationship') || 
+      lowerRequest.includes('related') || lowerRequest.includes('linked')) {
+    additionalContext.needsRelationshipDetails = true;
+  }
+  
+  // Check if request involves specific types
+  for (const nodeType of GRAPH_SCHEMA.nodeTypes) {
+    if (lowerRequest.includes(nodeType.toLowerCase())) {
+      additionalContext.involvedTypes = additionalContext.involvedTypes || [];
+      additionalContext.involvedTypes.push(nodeType);
+    }
+  }
+  
+  return additionalContext;
+}
+
 // Generate Cypher query from natural language using Gemini 2.0 Flash
-async function generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversationHistory = []) {
+async function generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversationHistory = [], version = 'base') {
   if (!genAI) {
     throw new Error('Gemini API key not configured');
   }
@@ -911,8 +1051,43 @@ async function generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversa
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
     
+    // Analyze request to understand what context is needed
+    const requestContext = await analyzeRequestForContext(naturalLanguageUpdate, version);
+    
+    // Get current graph context to inform the AI
+    const graphContext = await getGraphContext(version, 
+      requestContext.needsRelationshipDetails ? 'full' : 'summary');
+    
     // Build conversation context
     let prompt = createGraphSchemaPrompt();
+    
+    // Add current graph data context
+    prompt += '\n\nCURRENT GRAPH DATA:\n';
+    Object.entries(graphContext).forEach(([key, value]) => {
+      if (key.includes('_count')) {
+        const nodeType = key.replace('_count', '');
+        prompt += `- ${nodeType} nodes: ${value}\n`;
+      } else if (key.includes('_samples') && Array.isArray(value) && value.length > 0) {
+        const nodeType = key.replace('_samples', '');
+        prompt += `- Existing ${nodeType} names: ${value.join(', ')}\n`;
+      }
+    });
+    
+    // Add specific node information if nodes were mentioned in request
+    if (requestContext.mentionedNodes && requestContext.mentionedNodes.length > 0) {
+      prompt += '\n\nRELEVANT EXISTING NODES:\n';
+      for (const nodeInfo of requestContext.mentionedNodes) {
+        prompt += `- Found ${nodeInfo.nodeType} nodes matching "${nodeInfo.searchTerm}": ${nodeInfo.matches.join(', ')}\n`;
+      }
+    }
+    
+    // Add relationship samples if needed
+    if (graphContext.relationships_sample) {
+      prompt += '\n\nEXISTING RELATIONSHIPS (sample):\n';
+      graphContext.relationships_sample.slice(0, 10).forEach(rel => {
+        prompt += `- ${rel.source_name} (${rel.source_type}) --${rel.relationship}--> ${rel.target_name} (${rel.target_type})\n`;
+      });
+    }
     
     // Add conversation history if exists
     if (conversationHistory.length > 0) {
@@ -927,7 +1102,7 @@ async function generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversa
       prompt += '\nBased on the above conversation history and feedback, generate an improved query.\n';
     }
     
-    prompt += `\n\nUser Request: "${naturalLanguageUpdate}"\n\nCypher Query:`;
+    prompt += `\n\nIMPORTANT: Use the CURRENT GRAPH DATA above to write accurate queries. Reference actual existing node names when possible, or use appropriate WHERE clauses to find nodes.\n\nUser Request: "${naturalLanguageUpdate}"\n\nCypher Query:`;
     
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -1002,7 +1177,7 @@ app.post('/api/smart-update/generate-cypher', async (req, res) => {
       return res.status(400).json({ error: 'Natural language update description is required' });
     }
     
-    const cypherQuery = await generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversationHistory);
+    const cypherQuery = await generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversationHistory, version);
     
     res.json({ 
       cypherQuery,
@@ -1139,7 +1314,7 @@ app.post('/api/smart-update/refine', async (req, res) => {
     
     // Generate refined query using conversation history
     const refinementRequest = `Based on the feedback: "${feedback}", please modify the query to better meet the requirements.`;
-    const refinedCypher = await generateCypherFromNaturalLanguage(refinementRequest, updatedHistory);
+    const refinedCypher = await generateCypherFromNaturalLanguage(refinementRequest, updatedHistory, version);
     
     res.json({
       refinedCypher,
