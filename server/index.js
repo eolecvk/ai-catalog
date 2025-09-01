@@ -1854,15 +1854,51 @@ function createFallbackQuery(originalQuery, context) {
 // Helper function to execute Cypher query and format results
 async function executeCypherQuery(cypherQuery, version = 'base') {
   const session = getVersionSession(version);
-  
+  const dbName = getDatabaseName(version);
   try {
     const result = await session.run(cypherQuery);
     const nodes = [];
     const edges = [];
     const nodeIds = new Set();
     const edgeIds = new Set();
-
+    
     result.records.forEach(record => {
+      
+      // For queries that return primitive values, create synthetic nodes
+      let hasPrimitiveValues = false;
+      const primitiveValues = {};
+      
+      record.keys.forEach(key => {
+        const value = record.get(key);
+        // Check if this is a primitive value (not a Neo4j object)
+        if (value !== null && (typeof value !== 'object' || !value.labels)) {
+          hasPrimitiveValues = true;
+          primitiveValues[key] = value;
+        }
+      });
+      
+      // If we have primitive values and no actual nodes/relationships, create a synthetic node
+      if (hasPrimitiveValues) {
+        const hasRealNodes = record.keys.some(key => {
+          const value = record.get(key);
+          return value && typeof value === 'object' && (value.labels || value.type || value.segments);
+        });
+        
+        if (!hasRealNodes) {
+          // Create a synthetic node from the primitive values
+          const syntheticNodeId = `synthetic_${nodes.length}`;
+          if (!nodeIds.has(syntheticNodeId)) {
+            nodeIds.add(syntheticNodeId);
+            nodes.push({
+              id: syntheticNodeId,
+              label: primitiveValues.name || primitiveValues['i.name'] || primitiveValues[Object.keys(primitiveValues)[0]] || 'Result',
+              group: 'QueryResult',
+              properties: primitiveValues
+            });
+          }
+        }
+      }
+      
       // Process each field in the record
       record.keys.forEach(key => {
         const value = record.get(key);
