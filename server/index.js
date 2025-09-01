@@ -1482,9 +1482,9 @@ async function generateReasoningAndInterpretations(query, context, graphSchema) 
   - User asks about relationships - ALWAYS first check what nodes exist
   
   Example intermediate queries you should suggest:
-  - "MATCH (i:Industry) WHERE toLower(i.name) CONTAINS toLower('retail') RETURN i.name LIMIT 5" - to find retail industries
-  - "MATCH (s:Sector) WHERE toLower(s.name) CONTAINS toLower('retail') RETURN s.name LIMIT 5" - to find retail sectors
-  - "MATCH (d:Department) WHERE toLower(d.name) CONTAINS toLower('retail') RETURN d.name LIMIT 5" - to find retail departments
+  - "MATCH (i:Industry) WHERE toLower(i.name) CONTAINS toLower('retail') RETURN i LIMIT 5" - to find retail industries
+  - "MATCH (s:Sector) WHERE toLower(s.name) CONTAINS toLower('retail') RETURN s LIMIT 5" - to find retail sectors
+  - "MATCH (d:Department) WHERE toLower(d.name) CONTAINS toLower('retail') RETURN d LIMIT 5" - to find retail departments
   
   ALWAYS use toLower() for case-insensitive matching in intermediate queries.
 
@@ -1548,6 +1548,17 @@ async function generateFinalQuery(query, context, graphSchema, reasoning, interm
   6. For UNION queries use consistent variable names and alias them:
      Example: MATCH (n:NodeType1) RETURN n.name AS name UNION MATCH (m:NodeType2) RETURN m.name AS name
 
+  CRITICAL FOR GRAPH VISUALIZATION:
+  7. ALWAYS return full node objects, not primitive values
+  8. Use "RETURN n" instead of "RETURN n.name AS name" for single node type queries
+  9. For multiple node types use: "RETURN n AS node, labels(n)[0] AS type"
+  10. ALWAYS use case-insensitive matching for node names: WHERE toLower(n.name) = toLower('NodeName')
+  11. Examples of CORRECT queries:
+      - "MATCH (n:Industry) RETURN n LIMIT 50" (returns full Industry nodes)
+      - "MATCH (n:Sector) RETURN n LIMIT 50" (returns full Sector nodes)  
+      - "MATCH (n:Industry) WHERE toLower(n.name) = toLower('Banking') RETURN n LIMIT 50" (case-insensitive)
+      - "MATCH (n:Industry) RETURN n LIMIT 25 UNION MATCH (m:Sector) RETURN m LIMIT 25" (multiple types)
+
   Generate a syntactically correct Cypher query and respond in JSON format.
   
   IMPORTANT: Return ONLY valid JSON, no additional text or explanations.
@@ -1596,25 +1607,33 @@ function summarizeQueryResult(result) {
 function validateCypherQuery(cypherQuery) {
   const errors = [];
   
-  // Check for common syntax errors
+  // Extract just the RETURN clause content for more precise validation
+  const returnMatch = cypherQuery.match(/RETURN\s+(.+?)(?:\s+(?:LIMIT|ORDER|UNION|$))/i);
+  const returnClause = returnMatch ? returnMatch[1].trim() : '';
+
+  // Check for common syntax errors only in the RETURN clause
   const problematicPatterns = [
     {
-      pattern: /RETURN.*-\[.*\]->/,
-      error: "Cannot use relationship patterns in RETURN clause. Use variables defined in MATCH instead."
+      pattern: /-\[.*?\]->/,
+      error: "Cannot use relationship patterns in RETURN clause. Use variables defined in MATCH instead.",
+      checkInReturn: true
     },
     {
-      pattern: /RETURN.*\{\.\*,.*\}/,
-      error: "Cannot mix .* with specific properties in map projections."
+      pattern: /\{\.\*,.*\}/,
+      error: "Cannot mix .* with specific properties in map projections.",
+      checkInReturn: true
     },
     {
-      pattern: /RETURN.*\[r[0-9]*:/,
-      error: "Cannot define relationship variables in RETURN clause. Define them in MATCH instead."
+      pattern: /\[r[0-9]*:/,
+      error: "Cannot define relationship variables in RETURN clause. Define them in MATCH instead.",
+      checkInReturn: true
     }
   ];
 
   // Check each pattern
-  for (const { pattern, error } of problematicPatterns) {
-    if (pattern.test(cypherQuery)) {
+  for (const { pattern, error, checkInReturn } of problematicPatterns) {
+    const textToCheck = checkInReturn ? returnClause : cypherQuery;
+    if (pattern.test(textToCheck)) {
       errors.push(error);
     }
   }
@@ -1628,10 +1647,8 @@ function validateCypherQuery(cypherQuery) {
     errors.push("Query must include a RETURN clause.");
   }
 
-  // Check for undefined variables in RETURN
-  const returnMatch = cypherQuery.match(/RETURN\s+(.+?)(?:\s+LIMIT|\s+ORDER|\s*$)/i);
-  if (returnMatch) {
-    const returnClause = returnMatch[1];
+  // Check for undefined variables in RETURN (using the already extracted returnClause)
+  if (returnClause) {
     const matchClause = cypherQuery.split(/\s+RETURN\s+/i)[0];
     
     // Extract variable names from RETURN (simplified check)

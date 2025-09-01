@@ -58,20 +58,16 @@ const GraphViz: React.FC<GraphVizProps> = ({
     setChatQueryResults(queryResult.graphData);
     setShowingChatResults(true);
     
-    // Update the graph data if callback is provided
-    if (onGraphDataUpdate) {
-      onGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
-    }
+    // Note: We don't call onGraphDataUpdate here because GraphViz handles
+    // chat results internally via chatQueryResults state to avoid conflicts
   };
 
   const handleReturnToOriginalView = () => {
     setChatQueryResults(null);
     setShowingChatResults(false);
     
-    // Return to original graph data
-    if (onGraphDataUpdate) {
-      onGraphDataUpdate(nodes, edges);
-    }
+    // Note: We don't call onGraphDataUpdate here because GraphViz handles
+    // the return to original data internally via getCurrentGraphData()
   };
 
   // Get the current graph data (either original or chat results)
