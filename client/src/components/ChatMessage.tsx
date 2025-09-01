@@ -44,26 +44,35 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   };
 
   const renderReasoningInfo = () => {
-    if (!message.queryResult?.reasoning) return null;
+    if (!message.queryResult?.reasoning && !message.queryResult?.detailedExplanation) return null;
 
-    const { interpretations, chosenInterpretation, intermediateQueries } = message.queryResult.reasoning;
+    const { interpretations, chosenInterpretation, intermediateQueries } = message.queryResult.reasoning || {};
 
     return (
       <div className="reasoning-info">
         <details className="reasoning-details">
           <summary>🧠 Reasoning Process</summary>
           <div className="reasoning-content">
-            <div className="interpretations">
-              <h4>Possible Interpretations:</h4>
-              <ul>
-                {interpretations.map((interpretation, index) => (
-                  <li key={index} className={interpretation === chosenInterpretation ? 'chosen' : ''}>
-                    {interpretation}
-                    {interpretation === chosenInterpretation && ' ✓'}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {message.queryResult.detailedExplanation && (
+              <div className="detailed-explanation">
+                <h4>Detailed Explanation:</h4>
+                <p>{message.queryResult.detailedExplanation}</p>
+              </div>
+            )}
+            
+            {interpretations && (
+              <div className="interpretations">
+                <h4>Possible Interpretations:</h4>
+                <ul>
+                  {interpretations.map((interpretation, index) => (
+                    <li key={index} className={interpretation === chosenInterpretation ? 'chosen' : ''}>
+                      {interpretation}
+                      {interpretation === chosenInterpretation && ' ✓'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             
             {intermediateQueries && intermediateQueries.length > 0 && (
               <div className="intermediate-queries">

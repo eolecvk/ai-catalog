@@ -1302,15 +1302,19 @@ app.post('/api/chat/query', async (req, res) => {
     
     const executionTime = Date.now() - startTime;
     
+    // Generate concise answer based on the query results
+    const conciseAnswer = generateConciseAnswer(query, graphData);
+    
     res.json({
       success: true,
-      message: finalExplanation || 'Here are the results from your query:',
+      message: conciseAnswer,
       queryResult: {
         cypherQuery: finalCypher,
         graphData,
         summary: generateResultSummary(graphData),
         executionTime,
-        reasoning: cypherResult.reasoning
+        reasoning: cypherResult.reasoning,
+        detailedExplanation: finalExplanation
       }
     });
 
@@ -1964,6 +1968,58 @@ function generateResultSummary(graphData) {
   return `Found ${nodeCount} node${nodeCount !== 1 ? 's' : ''} (${nodeTypesList}) ${
     edgeCount > 0 ? `with ${edgeCount} relationship${edgeCount !== 1 ? 's' : ''}` : ''
   }.`;
+}
+
+// Helper function to generate concise answer
+function generateConciseAnswer(query, graphData) {
+  const nodeCount = graphData.nodes.length;
+  
+  if (nodeCount === 0) {
+    return "No results found.";
+  }
+  
+  // Generate a concise answer based on the query type and results
+  const queryLower = query.toLowerCase();
+  const nodeTypes = [...new Set(graphData.nodes.map(n => n.group))];
+  
+  // For project-related queries
+  if (queryLower.includes('project')) {
+    const projectCount = graphData.nodes.filter(n => n.group === 'ProjectOpportunity').length;
+    if (projectCount > 0) {
+      return `Found ${projectCount} project${projectCount !== 1 ? 's' : ''}.`;
+    }
+  }
+  
+  // For industry/sector queries
+  if (queryLower.includes('industry') || queryLower.includes('sector')) {
+    if (nodeTypes.includes('Industry')) {
+      const industryCount = graphData.nodes.filter(n => n.group === 'Industry').length;
+      return `Found ${industryCount} industr${industryCount !== 1 ? 'ies' : 'y'}.`;
+    }
+    if (nodeTypes.includes('Sector')) {
+      const sectorCount = graphData.nodes.filter(n => n.group === 'Sector').length;
+      return `Found ${sectorCount} sector${sectorCount !== 1 ? 's' : ''}.`;
+    }
+  }
+  
+  // For pain point queries
+  if (queryLower.includes('pain point')) {
+    const painPointCount = graphData.nodes.filter(n => n.group === 'PainPoint').length;
+    if (painPointCount > 0) {
+      return `Found ${painPointCount} pain point${painPointCount !== 1 ? 's' : ''}.`;
+    }
+  }
+  
+  // Generic response based on primary node type
+  if (nodeTypes.length > 0) {
+    const primaryType = nodeTypes[0];
+    const primaryCount = graphData.nodes.filter(n => n.group === primaryType).length;
+    const typeName = primaryType.replace(/([A-Z])/g, ' $1').trim().toLowerCase();
+    return `Found ${primaryCount} ${typeName}${primaryCount !== 1 ? 's' : ''}.`;
+  }
+  
+  // Fallback
+  return `Found ${nodeCount} result${nodeCount !== 1 ? 's' : ''}.`;
 }
 
 // Smart update endpoints

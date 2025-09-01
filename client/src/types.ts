@@ -94,6 +94,7 @@ export interface ChatQueryResult {
       result: string;
     }[];
   };
+  detailedExplanation?: string;
 }
 
 export interface GraphNode {
