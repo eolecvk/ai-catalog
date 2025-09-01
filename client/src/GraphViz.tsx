@@ -1,25 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-
-interface GraphNode {
-  id: string;
-  label: string;
-  group: string;
-  properties: any;
-  x?: number;
-  y?: number;
-  vx?: number;
-  vy?: number;
-  fx?: number; // fixed x position
-  fy?: number; // fixed y position
-}
-
-interface GraphEdge {
-  id: string;
-  from: string;
-  to: string;
-  label?: string;
-  type?: string;
-}
+import ChatInterface from './components/ChatInterface';
+import { GraphNode, GraphEdge, ChatQueryResult } from './types';
 
 interface GraphVizProps {
   nodes: GraphNode[];
@@ -30,6 +11,9 @@ interface GraphVizProps {
   onNavigateToNode?: (nodeId: string) => void;
   height?: string;
   focusedNode?: string | null;
+  enableChat?: boolean;
+  graphVersion?: string;
+  onGraphDataUpdate?: (nodes: GraphNode[], edges: GraphEdge[]) => void;
 }
 
 const GraphViz: React.FC<GraphVizProps> = ({ 
@@ -40,7 +24,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
   onNodeDoubleClick,
   onNavigateToNode,
   height = '700px',
-  focusedNode = null
+  focusedNode = null,
+  enableChat = true,
+  graphVersion = 'base',
+  onGraphDataUpdate
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -56,8 +43,44 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [editingNodeName, setEditingNodeName] = useState<boolean>(false);
   const [editedNodeName, setEditedNodeName] = useState<string>('');
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState<boolean>(false);
+  const [chatQueryResults, setChatQueryResults] = useState<{ nodes: GraphNode[], edges: GraphEdge[] } | null>(null);
+  const [showingChatResults, setShowingChatResults] = useState<boolean>(false);
   const animationRef = useRef<number>();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Chat functionality
+  const handleChatToggle = () => {
+    setChatOpen(!chatOpen);
+  };
+
+  const handleApplyQueryResult = (queryResult: ChatQueryResult) => {
+    setChatQueryResults(queryResult.graphData);
+    setShowingChatResults(true);
+    
+    // Update the graph data if callback is provided
+    if (onGraphDataUpdate) {
+      onGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
+    }
+  };
+
+  const handleReturnToOriginalView = () => {
+    setChatQueryResults(null);
+    setShowingChatResults(false);
+    
+    // Return to original graph data
+    if (onGraphDataUpdate) {
+      onGraphDataUpdate(nodes, edges);
+    }
+  };
+
+  // Get the current graph data (either original or chat results)
+  const getCurrentGraphData = () => {
+    if (showingChatResults && chatQueryResults) {
+      return chatQueryResults;
+    }
+    return { nodes, edges };
+  };
 
   // Sync focused node from prop
   useEffect(() => {
@@ -209,6 +232,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const runSimulation = useCallback(() => {
     if (simulationNodes.length === 0) return;
 
+    const currentData = getCurrentGraphData();
     const alpha = 0.01;
     const repelForce = 2000; // Increased repulsion
     const linkForce = 0.03;
@@ -216,7 +240,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const hierarchyForce = 0.008; // Force for vertical hierarchy
 
     const newNodes = simulationNodes.map(node => ({ ...node }));
-    const components = findConnectedComponents(newNodes, edges);
+    const components = findConnectedComponents(newNodes, currentData.edges);
 
     // Update component count state
     const numComponents = components.length;
@@ -334,7 +358,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     }
 
     // Link force (attracts connected nodes)
-    edges.forEach(edge => {
+    currentData.edges.forEach(edge => {
       const source = newNodes.find(n => n.id === edge.from);
       const target = newNodes.find(n => n.id === edge.to);
       
@@ -377,14 +401,15 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
 
     setSimulationNodes(newNodes);
-  }, [simulationNodes, edges, width, heightNum, findConnectedComponents]);
+  }, [simulationNodes, width, heightNum, findConnectedComponents, showingChatResults, chatQueryResults, nodes, edges]);
 
   // Initialize node positions with better spacing and hierarchy
   useEffect(() => {
-    if (nodes.length === 0) return;
+    const currentData = getCurrentGraphData();
+    if (currentData.nodes.length === 0) return;
 
     // Find connected components for initial positioning
-    const components = findConnectedComponents(nodes, edges);
+    const components = findConnectedComponents(currentData.nodes, currentData.edges);
     const allInitialNodes: GraphNode[] = [];
     
     components.forEach((component, componentIndex) => {
@@ -441,7 +466,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
     
     // Handle isolated nodes (not in any component)
-    nodes.forEach((node, i) => {
+    currentData.nodes.forEach((node, i) => {
       if (!allInitialNodes.find(n => n.id === node.id)) {
         allInitialNodes.push({
           ...node,
@@ -454,7 +479,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
     
     setSimulationNodes(allInitialNodes);
-  }, [nodes, edges, width, heightNum, findConnectedComponents]);
+  }, [nodes, edges, width, heightNum, findConnectedComponents, showingChatResults, chatQueryResults]);
 
   // Toggle side panel visibility
   const toggleSidePanel = () => {
@@ -575,8 +600,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   // Get direct connections for a node
   const getDirectConnections = useCallback((nodeId: string): Set<string> => {
+    const currentData = getCurrentGraphData();
     const connections = new Set<string>();
-    edges.forEach(edge => {
+    currentData.edges.forEach(edge => {
       if (edge.from === nodeId) {
         connections.add(edge.to);
       }
@@ -585,7 +611,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
       }
     });
     return connections;
-  }, [edges]);
+  }, [showingChatResults, chatQueryResults, nodes, edges]);
 
   // Determine if a node should be faded
   const shouldFadeNode = useCallback((nodeId: string): boolean => {
@@ -772,7 +798,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
           
           {/* Edges */}
           <g className="edges">
-            {edges.map(edge => {
+            {getCurrentGraphData().edges.map(edge => {
               const source = simulationNodes.find(n => n.id === edge.from);
               const target = simulationNodes.find(n => n.id === edge.to);
               
@@ -1177,6 +1203,33 @@ const GraphViz: React.FC<GraphVizProps> = ({
           )}
         </div>
       </div>
+
+      {/* Chat Interface */}
+      {enableChat && (
+        <ChatInterface
+          isOpen={chatOpen}
+          onToggle={handleChatToggle}
+          onApplyQueryResult={handleApplyQueryResult}
+          graphContext={{
+            currentNodeType: nodeType,
+            selectedNodes: selectedNode ? [selectedNode] : [],
+            graphVersion: graphVersion
+          }}
+        />
+      )}
+
+      {/* Return to Original View Button */}
+      {showingChatResults && (
+        <div className="graph-view-controls">
+          <button
+            className="return-to-original-btn"
+            onClick={handleReturnToOriginalView}
+            title="Return to original graph view"
+          >
+            ← Return to Original View
+          </button>
+        </div>
+      )}
       
       <div className="graph-instructions">
         <p>
@@ -1185,6 +1238,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
           Click connections in side panel to navigate • Toggle side panel with ▶/◀ button • 
           Subgraphs auto-arranged in grid layout • Auto-zoom adjusts for complex graphs • 
           Visual hierarchy: Industries (top) → Sectors/Departments → Pain Points → Projects (bottom)
+          {enableChat && ' • Use the chat interface to explore graph data with natural language queries'}
         </p>
       </div>
     </div>

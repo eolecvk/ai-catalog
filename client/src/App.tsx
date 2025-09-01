@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm } from './types';
+import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge } from './types';
 import GraphViz from './GraphViz';
 import './App.css';
 
 const App: React.FC = () => {
   const [industries, setIndustries] = useState<Industry[]>([]);
   const [sectors, setSectors] = useState<{[key: string]: Sector[]}>({});
+  const [sectorsLoading, setSectorsLoading] = useState<boolean>(false);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [painPoints, setPainPoints] = useState<PainPoint[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -57,6 +58,7 @@ const App: React.FC = () => {
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [builderStats, setBuilderStats] = useState<any>(null);
   const [builderLoading, setBuilderLoading] = useState(false);
+  const [builderNodes, setBuilderNodes] = useState<any[]>([]);
   const [currentGraphVersion, setCurrentGraphVersion] = useState('base');
   const [availableVersions, setAvailableVersions] = useState<string[]>(['base']);
   
@@ -1183,6 +1185,11 @@ const App: React.FC = () => {
     }
   };
 
+  // Handle graph data updates from chat interface
+  const handleGraphDataUpdate = (nodes: GraphNode[], edges: GraphEdge[]) => {
+    setGraphData({ nodes, edges });
+  };
+
   // Load filter options
   const loadFilterOptions = async () => {
     try {
@@ -1948,6 +1955,9 @@ const App: React.FC = () => {
                     onNavigateToNode={handleNavigateToNode}
                     focusedNode={focusedGraphNode}
                     height="600px"
+                    enableChat={true}
+                    graphVersion={currentGraphVersion}
+                    onGraphDataUpdate={handleGraphDataUpdate}
                   />
                 )}
               </div>

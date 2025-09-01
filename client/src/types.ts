@@ -62,3 +62,85 @@ export interface NewProjectForm {
   requiredRoles: RequiredRole[];
   subModules: string[];
 }
+
+export interface ChatMessage {
+  id: string;
+  type: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+  queryResult?: ChatQueryResult;
+  isProcessing?: boolean;
+  clarificationRequest?: {
+    question: string;
+    options?: string[];
+    context?: any;
+  };
+}
+
+export interface ChatQueryResult {
+  cypherQuery: string;
+  graphData: {
+    nodes: GraphNode[];
+    edges: GraphEdge[];
+  };
+  summary: string;
+  executionTime?: number;
+  reasoning?: {
+    interpretations: string[];
+    chosenInterpretation: string;
+    intermediateQueries?: {
+      query: string;
+      purpose: string;
+      result: string;
+    }[];
+  };
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  group: string;
+  properties: any;
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+  fx?: number;
+  fy?: number;
+}
+
+export interface GraphEdge {
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
+  type?: string;
+}
+
+export interface ChatState {
+  isOpen: boolean;
+  messages: ChatMessage[];
+  isProcessing: boolean;
+  currentInput: string;
+}
+
+export interface ChatApiRequest {
+  query: string;
+  context?: {
+    currentNodeType?: string;
+    selectedNodes?: string[];
+    graphVersion?: string;
+  };
+}
+
+export interface ChatApiResponse {
+  success: boolean;
+  message: string;
+  queryResult?: ChatQueryResult;
+  error?: string;
+  needsClarification?: {
+    question: string;
+    options?: string[];
+    context?: any;
+  };
+}

@@ -1166,6 +1166,806 @@ async function getAfterState(cypherQuery, beforeState, version = 'base') {
   };
 }
 
+// Chat interface API endpoints
+
+// Process natural language query for graph exploration
+app.post('/api/chat/query', async (req, res) => {
+  const { query, context = {} } = req.body;
+  const startTime = Date.now();
+  
+  if (!query || query.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Query is required'
+    });
+  }
+
+  try {
+    // Generate Cypher query using LLM
+    const cypherResult = await generateCypherFromNaturalLanguage(query, context);
+    
+    if (!cypherResult.success) {
+      // Handle clarification requests
+      if (cypherResult.needsClarification) {
+        return res.json({
+          success: false,
+          needsClarification: cypherResult.needsClarification,
+          message: cypherResult.message
+        });
+      }
+      
+      return res.json({
+        success: false,
+        error: cypherResult.error,
+        message: 'I had trouble understanding your query. Could you try rephrasing it?'
+      });
+    }
+
+    // Validate the generated Cypher query
+    const validation = validateCypherQuery(cypherResult.cypherQuery);
+    let finalCypher = cypherResult.cypherQuery;
+    let finalExplanation = cypherResult.explanation;
+    
+    if (!validation.isValid) {
+      console.log('Generated Cypher has validation errors:', validation.errors);
+      console.log('Original query:', cypherResult.cypherQuery);
+      
+      // Use fallback query (now async)
+      const fallback = await createFallbackQuery(query, context);
+      finalCypher = fallback.cypherQuery;
+      finalExplanation = fallback.explanation;
+      
+      console.log('Using fallback query:', finalCypher);
+    }
+
+    // Execute the Cypher query with enhanced error handling
+    let graphData;
+    try {
+      graphData = await executeCypherQuery(finalCypher, context.graphVersion || 'base');
+    } catch (error) {
+      console.error('Cypher execution error:', error);
+      
+      // Check if it's a syntax error
+      if (error.code === 'Neo.ClientError.Statement.SyntaxError') {
+        // Try fallback query on syntax error
+        const fallback = await createFallbackQuery(query, context);
+        try {
+          graphData = await executeCypherQuery(fallback.cypherQuery, context.graphVersion || 'base');
+          finalCypher = fallback.cypherQuery;
+          finalExplanation = fallback.explanation + ' (Original query had syntax errors)';
+        } catch (fallbackError) {
+          console.error('Fallback query also failed:', fallbackError);
+          throw fallbackError;
+        }
+      } else {
+        throw error;
+      }
+    }
+    
+    // Check if query returned empty results and provide suggestions
+    if (graphData.nodes.length === 0) {
+      console.log('Query returned no results, checking for suggestions...');
+      
+      // Try to extract specific node names and provide suggestions
+      const queryLower = query.toLowerCase();
+      let suggestedMessage = finalExplanation;
+      
+      if (queryLower.includes('retail')) {
+        try {
+          // Check both Industry and Sector nodes for 'Retail'
+          const [industryRetailSuggestions, sectorRetailSuggestions] = await Promise.all([
+            findSimilarNodes('Retail', 'Industry', context.graphVersion || 'base'),
+            findSimilarNodes('Retail', 'Sector', context.graphVersion || 'base')
+          ]);
+          
+          if (industryRetailSuggestions.nodes.length > 0) {
+            suggestedMessage = `I couldn't find "Retail" as an industry. Did you mean one of these industries: ${industryRetailSuggestions.nodes.join(', ')}? ${finalExplanation}`;
+          } else if (sectorRetailSuggestions.nodes.length > 0) {
+            suggestedMessage = `I couldn't find "Retail" as an industry, but found these retail-related sectors: ${sectorRetailSuggestions.nodes.join(', ')}. ${finalExplanation}`;
+          } else {
+            // If no retail suggestions, get all available industries and sectors
+            const [allIndustries, allSectors] = await Promise.all([
+              findSimilarNodes('', 'Industry', context.graphVersion || 'base'),
+              findSimilarNodes('', 'Sector', context.graphVersion || 'base')
+            ]);
+            suggestedMessage = `I couldn't find "Retail" in the database. Available industries: ${allIndustries.nodes.slice(0, 3).join(', ')}. Available sectors: ${allSectors.nodes.slice(0, 3).join(', ')}. ${finalExplanation}`;
+          }
+        } catch (err) {
+          console.error('Error getting retail suggestions:', err);
+        }
+      }
+      
+      // Check for other common mismatches
+      const possibleNodeNames = query.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b/g);
+      if (possibleNodeNames && possibleNodeNames.length > 0) {
+        for (const nodeName of possibleNodeNames.slice(0, 2)) { // Check first 2 capitalized terms
+          if (nodeName.toLowerCase() !== 'retail') { // Skip if already checked
+            try {
+              // Try different node types
+              const nodeTypes = ['Industry', 'Sector', 'Department'];
+              for (const nodeType of nodeTypes) {
+                const suggestions = await findSimilarNodes(nodeName, nodeType, context.graphVersion || 'base');
+                if (!suggestions.exact && suggestions.nodes.length > 0) {
+                  suggestedMessage = `I couldn't find "${nodeName}" as ${nodeType.toLowerCase()}. Did you mean: ${suggestions.nodes.slice(0, 3).join(', ')}? ${finalExplanation}`;
+                  break;
+                }
+              }
+            } catch (err) {
+              console.error(`Error getting suggestions for ${nodeName}:`, err);
+            }
+          }
+        }
+      }
+      
+      finalExplanation = suggestedMessage;
+    }
+    
+    const executionTime = Date.now() - startTime;
+    
+    res.json({
+      success: true,
+      message: finalExplanation || 'Here are the results from your query:',
+      queryResult: {
+        cypherQuery: finalCypher,
+        graphData,
+        summary: generateResultSummary(graphData),
+        executionTime,
+        reasoning: cypherResult.reasoning
+      }
+    });
+
+  } catch (error) {
+    console.error('Chat query error:', error);
+    res.json({
+      success: false,
+      error: 'An error occurred while processing your query',
+      message: 'Sorry, there was a technical issue. Please try again or rephrase your question.'
+    });
+  }
+});
+
+// Enhanced helper function to generate Cypher with reasoning and intermediate queries
+async function generateCypherFromNaturalLanguage(query, context) {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    
+    if (!apiKey) {
+      return {
+        success: false,
+        error: 'Google Generative AI API key is not configured. Please set GEMINI_API_KEY or GOOGLE_API_KEY in your environment variables.'
+      };
+    }
+
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+
+    const graphSchema = `
+    Graph Schema:
+    - Nodes: Industry, Sector, Department, PainPoint, ProjectBlueprint, ProjectOpportunity, Role, Module, SubModule
+    - Relationships: 
+      * (Industry)-[:HAS_SECTOR]->(Sector)
+      * (Sector)-[:EXPERIENCES]->(PainPoint)
+      * (Department)-[:EXPERIENCES]->(PainPoint)
+      * (PainPoint)-[:ADDRESSED_BY]->(ProjectOpportunity)
+      * (ProjectOpportunity)-[:IMPLEMENTS]->(ProjectBlueprint)
+      * (ProjectBlueprint)-[:REQUIRES]->(Role)
+      * (ProjectBlueprint)-[:CONTAINS]->(Module)
+      * (Module)-[:CONTAINS]->(SubModule)
+    
+    Node Properties:
+    - All nodes have: name (string), label (string for display)
+    - PainPoint: impact (string)
+    - ProjectOpportunity: priority (string), budgetRange (string), duration (string)
+    - ProjectBlueprint: businessCase (string)
+    `;
+
+    // Step 1: Generate multiple interpretations
+    console.log('Generating reasoning for query:', query);
+    const reasoning = await generateReasoningAndInterpretations(model, query, context, graphSchema);
+    console.log('Reasoning result:', JSON.stringify(reasoning, null, 2));
+    
+    if (reasoning.needsClarification) {
+      return {
+        success: false,
+        needsClarification: reasoning.clarification,
+        message: reasoning.message || 'I need clarification to better understand your query.'
+      };
+    }
+
+    // Step 2: Run intermediate queries if needed
+    let intermediateQueries = [];
+    console.log('Intermediate queries to run:', reasoning.intermediateQueries);
+    if (reasoning.intermediateQueries && reasoning.intermediateQueries.length > 0) {
+      for (const intQuery of reasoning.intermediateQueries) {
+        try {
+          console.log(`Running intermediate query: ${intQuery.query}`);
+          const result = await executeCypherQuery(intQuery.query, context.graphVersion || 'base');
+          console.log(`Intermediate query result:`, result);
+          intermediateQueries.push({
+            query: intQuery.query,
+            purpose: intQuery.purpose,
+            result: summarizeQueryResult(result)
+          });
+        } catch (error) {
+          console.log(`Intermediate query failed: ${intQuery.query}`, error.message);
+          intermediateQueries.push({
+            query: intQuery.query,
+            purpose: intQuery.purpose,
+            result: `Query failed: ${error.message}`
+          });
+        }
+      }
+    } else {
+      console.log('No intermediate queries provided by reasoning step');
+    }
+
+    // Step 3: Generate final query with context from intermediate results
+    const finalQuery = await generateFinalQuery(model, query, context, graphSchema, reasoning, intermediateQueries);
+    
+    return {
+      success: true,
+      cypherQuery: finalQuery.cypherQuery,
+      explanation: finalQuery.explanation,
+      reasoning: {
+        interpretations: reasoning.interpretations,
+        chosenInterpretation: reasoning.chosenInterpretation,
+        intermediateQueries
+      }
+    };
+
+  } catch (error) {
+    console.error('Error in enhanced query generation:', error);
+    return {
+      success: false,
+      error: 'AI service is currently unavailable'
+    };
+  }
+}
+
+// Helper function to generate reasoning and multiple interpretations
+async function generateReasoningAndInterpretations(model, query, context, graphSchema) {
+  const contextInfo = context.currentNodeType ? `Currently viewing: ${context.currentNodeType} nodes` : '';
+  const selectedNodes = context.selectedNodes && context.selectedNodes.length > 0 
+    ? `Currently selected nodes: ${context.selectedNodes.join(', ')}` 
+    : '';
+
+  const reasoningPrompt = `
+  You are an expert graph query assistant. Your job is to understand user queries and reason about different possible interpretations.
+
+  ${graphSchema}
+  
+  Context: ${contextInfo} ${selectedNodes}
+
+  User Query: "${query}"
+
+  IMPORTANT: For a query like "What projects are available for retail?", you should:
+  1. Recognize that "retail" could refer to Industry or Sector nodes
+  2. Generate intermediate queries to search for retail-related nodes
+  3. Choose an interpretation based on what's found in the data
+  4. If both exist, ask for clarification
+
+  Please analyze this query and provide your reasoning in the following JSON format:
+  {
+    "interpretations": [
+      "First possible interpretation of what the user might want",
+      "Second possible interpretation",
+      "Third possible interpretation (if applicable)"
+    ],
+    "chosenInterpretation": "The most likely interpretation based on context and common usage",
+    "needsClarification": false,
+    "clarification": null,
+    "intermediateQueries": [
+      {
+        "query": "CYPHER query to explore the data first",
+        "purpose": "Why this intermediate query is needed"
+      }
+    ]
+  }
+
+  Guidelines for reasoning:
+  1. Consider ambiguous terms (e.g., "retail" could be Industry or Sector)
+  2. Think about what data exploration might be needed
+  3. If the query is genuinely ambiguous, set needsClarification to true and provide clarification options
+  4. ALWAYS suggest intermediate queries to explore available data when the user mentions specific entities
+  5. For project-related queries, remember the path: Industry -> Sector -> PainPoint -> ProjectOpportunity
+
+  CRITICAL: You MUST include intermediate queries for the following scenarios:
+  - User mentions ANY specific entity name (like "retail", "banking", "healthcare") - ALWAYS check if it exists as Industry, Sector, or Department
+  - User asks about projects for a specific industry/sector - ALWAYS first find the relevant nodes
+  - User asks about relationships - ALWAYS first check what nodes exist
+  
+  Example intermediate queries you should suggest:
+  - "MATCH (i:Industry) WHERE toLower(i.name) CONTAINS toLower('retail') RETURN i.name LIMIT 5" - to find retail industries
+  - "MATCH (s:Sector) WHERE toLower(s.name) CONTAINS toLower('retail') RETURN s.name LIMIT 5" - to find retail sectors
+  - "MATCH (d:Department) WHERE toLower(d.name) CONTAINS toLower('retail') RETURN d.name LIMIT 5" - to find retail departments
+  
+  ALWAYS use toLower() for case-insensitive matching in intermediate queries.
+
+  If clarification is needed, format it as:
+  {
+    "needsClarification": true,
+    "clarification": {
+      "question": "What specifically are you looking for?",
+      "options": ["Option 1", "Option 2", "Option 3"],
+      "context": "additional context if needed"
+    }
+  }
+  `;
+
+  const result = await model.generateContent(reasoningPrompt);
+  const response = await result.response;
+  const text = response.text();
+  
+  try {
+    let cleanText = text.trim();
+    if (cleanText.startsWith('```json')) {
+      cleanText = cleanText.slice(7);
+    }
+    if (cleanText.endsWith('```')) {
+      cleanText = cleanText.slice(0, -3);
+    }
+    
+    return JSON.parse(cleanText.trim());
+  } catch (parseError) {
+    console.error('Failed to parse reasoning response:', parseError);
+    // Return a basic interpretation if parsing fails
+    return {
+      interpretations: [`User wants to explore data related to: ${query}`],
+      chosenInterpretation: `User wants to explore data related to: ${query}`,
+      needsClarification: false,
+      intermediateQueries: []
+    };
+  }
+}
+
+// Helper function to generate the final query with context
+async function generateFinalQuery(model, query, context, graphSchema, reasoning, intermediateResults) {
+  const contextInfo = context.currentNodeType ? `Currently viewing: ${context.currentNodeType} nodes` : '';
+  const selectedNodes = context.selectedNodes && context.selectedNodes.length > 0 
+    ? `Currently selected nodes: ${context.selectedNodes.join(', ')}` 
+    : '';
+
+  let intermediateContext = '';
+  if (intermediateResults.length > 0) {
+    intermediateContext = '\nIntermediate Query Results:\n';
+    intermediateResults.forEach(result => {
+      intermediateContext += `- ${result.purpose}: ${result.result}\n`;
+    });
+  }
+
+  const finalPrompt = `
+  You are a Cypher query generator. Based on the reasoning and intermediate results, generate the final Cypher query.
+
+  ${graphSchema}
+
+  Context: ${contextInfo} ${selectedNodes}
+  
+  Original Query: "${query}"
+  Chosen Interpretation: "${reasoning.chosenInterpretation}"
+  ${intermediateContext}
+
+  CRITICAL CYPHER SYNTAX RULES:
+  1. MATCH clause: Define all nodes and relationships you need
+  2. RETURN clause: Only return variables defined in MATCH
+  3. Use LIMIT 50 for large result sets
+  4. For projects: Use path Industry -> Sector -> PainPoint -> ProjectOpportunity
+  5. UNION queries MUST have identical column names and types
+  6. For UNION queries use consistent variable names and alias them:
+     Example: MATCH (n:NodeType1) RETURN n.name AS name UNION MATCH (m:NodeType2) RETURN m.name AS name
+
+  Generate a syntactically correct Cypher query and respond in JSON format:
+  {
+    "success": true,
+    "cypherQuery": "YOUR_CYPHER_HERE",
+    "explanation": "Clear explanation of what the query does and why this interpretation was chosen"
+  }
+  `;
+
+  const result = await model.generateContent(finalPrompt);
+  const response = await result.response;
+  const text = response.text();
+  
+  try {
+    let cleanText = text.trim();
+    if (cleanText.startsWith('```json')) {
+      cleanText = cleanText.slice(7);
+    }
+    if (cleanText.endsWith('```')) {
+      cleanText = cleanText.slice(0, -3);
+    }
+    
+    return JSON.parse(cleanText.trim());
+  } catch (parseError) {
+    console.error('Failed to parse final query response:', parseError);
+    return {
+      success: false,
+      error: 'Failed to generate final query'
+    };
+  }
+}
+
+// Helper function to summarize query results for intermediate context
+function summarizeQueryResult(result) {
+  if (!result || !result.nodes) {
+    return 'No results found';
+  }
+  
+  const nodeCount = result.nodes.length;
+  const uniqueLabels = [...new Set(result.nodes.map(n => n.group))];
+  
+  if (nodeCount === 0) {
+    return 'No nodes found';
+  }
+  
+  if (nodeCount <= 5) {
+    const nodeNames = result.nodes.map(n => n.label).join(', ');
+    return `Found ${nodeCount} nodes: ${nodeNames}`;
+  }
+  
+  return `Found ${nodeCount} nodes of types: ${uniqueLabels.join(', ')}`;
+}
+
+// Helper function to validate Cypher query syntax
+function validateCypherQuery(cypherQuery) {
+  const errors = [];
+  
+  // Check for common syntax errors
+  const problematicPatterns = [
+    {
+      pattern: /RETURN.*-\[.*\]->/,
+      error: "Cannot use relationship patterns in RETURN clause. Use variables defined in MATCH instead."
+    },
+    {
+      pattern: /RETURN.*\{\.\*,.*\}/,
+      error: "Cannot mix .* with specific properties in map projections."
+    },
+    {
+      pattern: /RETURN.*\[r[0-9]*:/,
+      error: "Cannot define relationship variables in RETURN clause. Define them in MATCH instead."
+    }
+  ];
+
+  // Check each pattern
+  for (const { pattern, error } of problematicPatterns) {
+    if (pattern.test(cypherQuery)) {
+      errors.push(error);
+    }
+  }
+
+  // Basic structure validation
+  if (!cypherQuery.trim().toUpperCase().includes('MATCH')) {
+    errors.push("Query must include a MATCH clause.");
+  }
+
+  if (!cypherQuery.trim().toUpperCase().includes('RETURN')) {
+    errors.push("Query must include a RETURN clause.");
+  }
+
+  // Check for undefined variables in RETURN
+  const returnMatch = cypherQuery.match(/RETURN\s+(.+?)(?:\s+LIMIT|\s+ORDER|\s*$)/i);
+  if (returnMatch) {
+    const returnClause = returnMatch[1];
+    const matchClause = cypherQuery.split(/\s+RETURN\s+/i)[0];
+    
+    // Extract variable names from RETURN (simplified check)
+    const returnVars = returnClause.match(/\b[a-z]\b/gi) || [];
+    const matchVars = matchClause.match(/\([a-z]:/gi) || [];
+    const definedVars = matchVars.map(v => v.replace(/^\(/, '').replace(/:$/, ''));
+    
+    for (const returnVar of returnVars) {
+      if (!definedVars.includes(returnVar) && !['LIMIT', 'ORDER', 'BY'].includes(returnVar.toUpperCase())) {
+        // This is a simplified check - in practice, more sophisticated parsing would be needed
+      }
+    }
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+}
+
+// Helper function to find similar nodes when exact matches don't exist
+async function findSimilarNodes(searchTerm, nodeType, version = 'base') {
+  const session = getVersionSession(version);
+  
+  try {
+    // If searchTerm is empty, return all available nodes
+    if (!searchTerm || searchTerm.trim().length === 0) {
+      const allQuery = `MATCH (n:${nodeType}) RETURN n.name as name LIMIT 10`;
+      const allResult = await session.run(allQuery);
+      
+      return {
+        exact: false,
+        nodes: allResult.records.map(record => record.get('name')),
+        matchType: 'all_available'
+      };
+    }
+    
+    // First try exact match
+    const exactQuery = `MATCH (n:${nodeType}) WHERE n.name = $searchTerm RETURN n LIMIT 1`;
+    const exactResult = await session.run(exactQuery, { searchTerm });
+    
+    if (exactResult.records.length > 0) {
+      return { exact: true, nodes: [] }; // Exact match found, no suggestions needed
+    }
+    
+    // Try partial matches with CONTAINS
+    const partialQuery = `MATCH (n:${nodeType}) WHERE n.name CONTAINS $searchTerm RETURN n.name as name LIMIT 5`;
+    const partialResult = await session.run(partialQuery, { searchTerm });
+    
+    if (partialResult.records.length > 0) {
+      return {
+        exact: false,
+        nodes: partialResult.records.map(record => record.get('name')),
+        matchType: 'partial'
+      };
+    }
+    
+    // Try fuzzy matching (case-insensitive contains)
+    const fuzzyQuery = `MATCH (n:${nodeType}) WHERE toLower(n.name) CONTAINS toLower($searchTerm) RETURN n.name as name LIMIT 5`;
+    const fuzzyResult = await session.run(fuzzyQuery, { searchTerm });
+    
+    if (fuzzyResult.records.length > 0) {
+      return {
+        exact: false,
+        nodes: fuzzyResult.records.map(record => record.get('name')),
+        matchType: 'fuzzy'
+      };
+    }
+    
+    // Get all available nodes of this type for suggestions
+    const allQuery = `MATCH (n:${nodeType}) RETURN n.name as name LIMIT 10`;
+    const allResult = await session.run(allQuery);
+    
+    return {
+      exact: false,
+      nodes: allResult.records.map(record => record.get('name')),
+      matchType: 'all_available'
+    };
+    
+  } catch (error) {
+    console.error('Error finding similar nodes:', error);
+    return { exact: false, nodes: [], matchType: 'error' };
+  } finally {
+    await session.close();
+  }
+}
+
+// Helper function to create a more intelligent fallback query with suggestions
+async function createIntelligentFallback(originalQuery, context) {
+  const queryLower = originalQuery.toLowerCase();
+  
+  // Extract potential node names from the query
+  const extractNodeName = (query, keywords) => {
+    for (const keyword of keywords) {
+      const regex = new RegExp(`${keyword}\\s+(\\w+)`, 'i');
+      const match = query.match(regex);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
+  // Check for specific node types mentioned
+  if (queryLower.includes('industry') || queryLower.includes('industries')) {
+    const nodeName = extractNodeName(originalQuery, ['for', 'in', 'of']);
+    if (nodeName) {
+      const suggestions = await findSimilarNodes(nodeName, 'Industry', context.graphVersion);
+      if (!suggestions.exact && suggestions.nodes.length > 0) {
+        return {
+          cypherQuery: "MATCH (i:Industry) RETURN i LIMIT 50",
+          explanation: `I couldn't find an industry named "${nodeName}". Did you mean one of these: ${suggestions.nodes.join(', ')}? Here are all available industries:`,
+          suggestions: suggestions.nodes,
+          suggestedNodeType: 'Industry'
+        };
+      }
+    }
+    return {
+      cypherQuery: "MATCH (i:Industry) RETURN i LIMIT 50",
+      explanation: "Here are all available industries:"
+    };
+  }
+  
+  if (queryLower.includes('sector') || queryLower.includes('sectors')) {
+    const nodeName = extractNodeName(originalQuery, ['for', 'in', 'of']);
+    if (nodeName) {
+      const suggestions = await findSimilarNodes(nodeName, 'Sector', context.graphVersion);
+      if (!suggestions.exact && suggestions.nodes.length > 0) {
+        return {
+          cypherQuery: "MATCH (s:Sector) RETURN s LIMIT 50",
+          explanation: `I couldn't find a sector named "${nodeName}". Did you mean one of these: ${suggestions.nodes.join(', ')}? Here are all available sectors:`,
+          suggestions: suggestions.nodes,
+          suggestedNodeType: 'Sector'
+        };
+      }
+    }
+    return {
+      cypherQuery: "MATCH (s:Sector) RETURN s LIMIT 50", 
+      explanation: "Here are all available sectors:"
+    };
+  }
+  
+  if (queryLower.includes('project')) {
+    // Extract industry/sector name from project queries
+    const industryName = extractNodeName(originalQuery, ['for', 'in', 'available for']);
+    if (industryName) {
+      // Check if the industry exists
+      const suggestions = await findSimilarNodes(industryName, 'Industry', context.graphVersion);
+      if (!suggestions.exact && suggestions.nodes.length > 0) {
+        return {
+          cypherQuery: "MATCH (n:ProjectOpportunity) RETURN n AS node, 'ProjectOpportunity' AS type LIMIT 25 UNION MATCH (n:ProjectBlueprint) RETURN n AS node, 'ProjectBlueprint' AS type LIMIT 25",
+          explanation: `I couldn't find an industry named "${industryName}". Did you mean one of these: ${suggestions.nodes.join(', ')}? Here are all available projects:`,
+          suggestions: suggestions.nodes,
+          suggestedNodeType: 'Industry'
+        };
+      }
+      
+      // Also check sectors
+      const sectorSuggestions = await findSimilarNodes(industryName, 'Sector', context.graphVersion);
+      if (!sectorSuggestions.exact && sectorSuggestions.nodes.length > 0) {
+        return {
+          cypherQuery: "MATCH (n:ProjectOpportunity) RETURN n AS node, 'ProjectOpportunity' AS type LIMIT 25 UNION MATCH (n:ProjectBlueprint) RETURN n AS node, 'ProjectBlueprint' AS type LIMIT 25",
+          explanation: `I couldn't find "${industryName}" as an industry, but found similar sectors: ${sectorSuggestions.nodes.join(', ')}. Here are all available projects:`,
+          suggestions: sectorSuggestions.nodes,
+          suggestedNodeType: 'Sector'
+        };
+      }
+    }
+    
+    return {
+      cypherQuery: "MATCH (n:ProjectOpportunity) RETURN n AS node, 'ProjectOpportunity' AS type LIMIT 25 UNION MATCH (n:ProjectBlueprint) RETURN n AS node, 'ProjectBlueprint' AS type LIMIT 25",
+      explanation: "Here are all available projects:"
+    };
+  }
+  
+  if (queryLower.includes('pain') || queryLower.includes('problem')) {
+    return {
+      cypherQuery: "MATCH (p:PainPoint) RETURN p LIMIT 50",
+      explanation: "Here are all available pain points:"
+    };
+  }
+  
+  if (queryLower.includes('relationship') || queryLower.includes('connection') || queryLower.includes('connect')) {
+    return {
+      cypherQuery: "MATCH (n)-[r]-(m) RETURN n, r, m LIMIT 50",
+      explanation: "Here are sample relationships in the graph:"
+    };
+  }
+  
+  // Default fallback
+  return {
+    cypherQuery: "MATCH (n) RETURN n LIMIT 25",
+    explanation: "Here are some sample nodes from the graph:"
+  };
+}
+
+// Helper function to create a fallback simple query (legacy - keeping for backward compatibility)
+function createFallbackQuery(originalQuery, context) {
+  // This is now a simple wrapper around the more intelligent version
+  // We'll make it async-compatible by returning a Promise
+  return createIntelligentFallback(originalQuery, context);
+}
+
+// Helper function to execute Cypher query and format results
+async function executeCypherQuery(cypherQuery, version = 'base') {
+  const session = getVersionSession(version);
+  
+  try {
+    const result = await session.run(cypherQuery);
+    const nodes = [];
+    const edges = [];
+    const nodeIds = new Set();
+    const edgeIds = new Set();
+
+    result.records.forEach(record => {
+      // Process each field in the record
+      record.keys.forEach(key => {
+        const value = record.get(key);
+        
+        if (value && typeof value === 'object') {
+          // Handle Neo4j Node objects
+          if (value.labels && value.properties) {
+            const nodeId = value.identity ? value.identity.toString() : value.elementId;
+            if (!nodeIds.has(nodeId)) {
+              nodeIds.add(nodeId);
+              nodes.push({
+                id: nodeId,
+                label: value.properties.name || value.properties.label || 'Unnamed',
+                group: value.labels[0],
+                properties: value.properties
+              });
+            }
+          }
+          // Handle Neo4j Relationship objects  
+          else if (value.type && value.start && value.end) {
+            const edgeId = value.identity ? value.identity.toString() : value.elementId;
+            const relationshipId = `${value.start}-${value.type}-${value.end}`;
+            if (!edgeIds.has(relationshipId)) {
+              edgeIds.add(relationshipId);
+              edges.push({
+                id: edgeId,
+                from: value.start.toString(),
+                to: value.end.toString(),
+                label: value.type,
+                type: value.type
+              });
+            }
+          }
+          // Handle Path objects
+          else if (value.segments) {
+            value.segments.forEach(segment => {
+              // Add start node
+              const startNodeId = segment.start.identity.toString();
+              if (!nodeIds.has(startNodeId)) {
+                nodeIds.add(startNodeId);
+                nodes.push({
+                  id: startNodeId,
+                  label: segment.start.properties.name || segment.start.properties.label || 'Unnamed',
+                  group: segment.start.labels[0],
+                  properties: segment.start.properties
+                });
+              }
+              
+              // Add end node  
+              const endNodeId = segment.end.identity.toString();
+              if (!nodeIds.has(endNodeId)) {
+                nodeIds.add(endNodeId);
+                nodes.push({
+                  id: endNodeId,
+                  label: segment.end.properties.name || segment.end.properties.label || 'Unnamed', 
+                  group: segment.end.labels[0],
+                  properties: segment.end.properties
+                });
+              }
+              
+              // Add relationship
+              const relationshipId = `${segment.start.identity}-${segment.relationship.type}-${segment.end.identity}`;
+              if (!edgeIds.has(relationshipId)) {
+                edgeIds.add(relationshipId);
+                edges.push({
+                  id: segment.relationship.identity.toString(),
+                  from: segment.start.identity.toString(),
+                  to: segment.end.identity.toString(),
+                  label: segment.relationship.type,
+                  type: segment.relationship.type
+                });
+              }
+            });
+          }
+        }
+      });
+    });
+
+    return { nodes, edges };
+    
+  } catch (error) {
+    console.error('Cypher execution error:', error);
+    throw error;
+  } finally {
+    await session.close();
+  }
+}
+
+// Helper function to generate result summary
+function generateResultSummary(graphData) {
+  const nodeCount = graphData.nodes.length;
+  const edgeCount = graphData.edges.length;
+  
+  if (nodeCount === 0) {
+    return "No results found for your query.";
+  }
+  
+  const nodeTypes = [...new Set(graphData.nodes.map(n => n.group))];
+  const nodeTypesList = nodeTypes.length > 3 
+    ? nodeTypes.slice(0, 3).join(', ') + ` and ${nodeTypes.length - 3} other types`
+    : nodeTypes.join(', ');
+    
+  return `Found ${nodeCount} node${nodeCount !== 1 ? 's' : ''} (${nodeTypesList}) ${
+    edgeCount > 0 ? `with ${edgeCount} relationship${edgeCount !== 1 ? 's' : ''}` : ''
+  }.`;
+}
+
 // Smart update endpoints
 
 // Generate Cypher query from natural language
@@ -2214,19 +3014,25 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
         break;
         
       case 'Sector':
-        // Sectors: Show sectors connected to selected industries (require industry selection)
+        // Sectors: Show sectors connected to selected industries (or all if none selected)
+        let sectorQuery, sectorParams;
+        
         if (industries.length === 0) {
-          // Return empty result if no industries are selected
-          break;
+          // Return all sectors when no industries are selected
+          sectorQuery = `
+            MATCH (i:Industry)-[r:HAS_SECTOR]->(s:Sector) 
+            RETURN i, r, s
+          `;
+          sectorParams = {};
+        } else {
+          // Return sectors for selected industries
+          sectorQuery = `
+            MATCH (i:Industry)-[r:HAS_SECTOR]->(s:Sector) 
+            WHERE i.name IN $industries
+            RETURN i, r, s
+          `;
+          sectorParams = { industries };
         }
-        
-        const sectorQuery = `
-          MATCH (i:Industry)-[r:HAS_SECTOR]->(s:Sector) 
-          WHERE i.name IN $industries
-          RETURN i, r, s
-        `;
-        
-        const sectorParams = { industries };
         const sectorResult = await session.run(sectorQuery, sectorParams);
         
         sectorResult.records.forEach(record => {
