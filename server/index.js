@@ -4,6 +4,9 @@ const neo4j = require('neo4j-driver');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
+// Import LLMManager AFTER dotenv is loaded
+const llmManager = require('./llm/LLMManager');
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -19,7 +22,8 @@ const driver = neo4j.driver(
 );
 
 // Initialize Gemini AI
-const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
+// Legacy Gemini initialization (deprecated - now using LLM Manager)
+// const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
 // Graph versioning system with separate databases
 const GRAPH_VERSIONS = {
@@ -1042,14 +1046,15 @@ async function analyzeRequestForContext(naturalLanguageUpdate, version = 'base')
   return additionalContext;
 }
 
-// Generate Cypher query from natural language using Gemini 2.0 Flash
+// Legacy Generate Cypher query from natural language (DEPRECATED - use enhanced version below)
 async function generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversationHistory = [], version = 'base') {
-  if (!genAI) {
-    throw new Error('Gemini API key not configured');
+  // Updated to use LLM Manager instead of direct Gemini
+  if (!llmManager.hasConfiguredProviders()) {
+    throw new Error('No LLM providers configured');
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    // Use LLM Manager instead of direct Gemini access
     
     // Analyze request to understand what context is needed
     const requestContext = await analyzeRequestForContext(naturalLanguageUpdate, version);
@@ -1104,9 +1109,7 @@ async function generateCypherFromNaturalLanguage(naturalLanguageUpdate, conversa
     
     prompt += `\n\nIMPORTANT: Use the CURRENT GRAPH DATA above to write accurate queries. Reference actual existing node names when possible, or use appropriate WHERE clauses to find nodes.\n\nUser Request: "${naturalLanguageUpdate}"\n\nCypher Query:`;
     
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const cypherQuery = response.text().trim();
+    const cypherQuery = (await llmManager.generateText(prompt)).trim();
     
     // Validate the generated query
     const validation = validateCypherSyntax(cypherQuery);
@@ -1331,18 +1334,13 @@ app.post('/api/chat/query', async (req, res) => {
 // Enhanced helper function to generate Cypher with reasoning and intermediate queries
 async function generateCypherFromNaturalLanguage(query, context) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    
-    if (!apiKey) {
+    // Check if LLM manager has configured providers
+    if (!llmManager.hasConfiguredProviders()) {
       return {
         success: false,
-        error: 'Google Generative AI API key is not configured. Please set GEMINI_API_KEY or GOOGLE_API_KEY in your environment variables.'
+        error: 'No LLM providers configured. Please set API keys for at least one provider (GROQ_API_KEY or GEMINI_API_KEY).'
       };
     }
-
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
     const graphSchema = `
     Graph Schema:
@@ -1366,7 +1364,7 @@ async function generateCypherFromNaturalLanguage(query, context) {
 
     // Step 1: Generate multiple interpretations
     console.log('Generating reasoning for query:', query);
-    const reasoning = await generateReasoningAndInterpretations(model, query, context, graphSchema);
+    const reasoning = await generateReasoningAndInterpretations(query, context, graphSchema);
     console.log('Reasoning result:', JSON.stringify(reasoning, null, 2));
     
     if (reasoning.needsClarification) {
@@ -1405,7 +1403,7 @@ async function generateCypherFromNaturalLanguage(query, context) {
     }
 
     // Step 3: Generate final query with context from intermediate results
-    const finalQuery = await generateFinalQuery(model, query, context, graphSchema, reasoning, intermediateQueries);
+    const finalQuery = await generateFinalQuery(query, context, graphSchema, reasoning, intermediateQueries);
     
     return {
       success: true,
@@ -1428,7 +1426,7 @@ async function generateCypherFromNaturalLanguage(query, context) {
 }
 
 // Helper function to generate reasoning and multiple interpretations
-async function generateReasoningAndInterpretations(model, query, context, graphSchema) {
+async function generateReasoningAndInterpretations(query, context, graphSchema) {
   const contextInfo = context.currentNodeType ? `Currently viewing: ${context.currentNodeType} nodes` : '';
   const selectedNodes = context.selectedNodes && context.selectedNodes.length > 0 
     ? `Currently selected nodes: ${context.selectedNodes.join(', ')}` 
@@ -1449,7 +1447,11 @@ async function generateReasoningAndInterpretations(model, query, context, graphS
   3. Choose an interpretation based on what's found in the data
   4. If both exist, ask for clarification
 
-  Please analyze this query and provide your reasoning in the following JSON format:
+  Please analyze this query and provide your reasoning in the following JSON format.
+  
+  IMPORTANT: Return ONLY valid JSON, no additional text or explanations.
+  
+  JSON Format:
   {
     "interpretations": [
       "First possible interpretation of what the user might want",
@@ -1497,20 +1499,8 @@ async function generateReasoningAndInterpretations(model, query, context, graphS
   }
   `;
 
-  const result = await model.generateContent(reasoningPrompt);
-  const response = await result.response;
-  const text = response.text();
-  
   try {
-    let cleanText = text.trim();
-    if (cleanText.startsWith('```json')) {
-      cleanText = cleanText.slice(7);
-    }
-    if (cleanText.endsWith('```')) {
-      cleanText = cleanText.slice(0, -3);
-    }
-    
-    return JSON.parse(cleanText.trim());
+    return await llmManager.generateJSON(reasoningPrompt);
   } catch (parseError) {
     console.error('Failed to parse reasoning response:', parseError);
     // Return a basic interpretation if parsing fails
@@ -1524,7 +1514,7 @@ async function generateReasoningAndInterpretations(model, query, context, graphS
 }
 
 // Helper function to generate the final query with context
-async function generateFinalQuery(model, query, context, graphSchema, reasoning, intermediateResults) {
+async function generateFinalQuery(query, context, graphSchema, reasoning, intermediateResults) {
   const contextInfo = context.currentNodeType ? `Currently viewing: ${context.currentNodeType} nodes` : '';
   const selectedNodes = context.selectedNodes && context.selectedNodes.length > 0 
     ? `Currently selected nodes: ${context.selectedNodes.join(', ')}` 
@@ -1558,7 +1548,11 @@ async function generateFinalQuery(model, query, context, graphSchema, reasoning,
   6. For UNION queries use consistent variable names and alias them:
      Example: MATCH (n:NodeType1) RETURN n.name AS name UNION MATCH (m:NodeType2) RETURN m.name AS name
 
-  Generate a syntactically correct Cypher query and respond in JSON format:
+  Generate a syntactically correct Cypher query and respond in JSON format.
+  
+  IMPORTANT: Return ONLY valid JSON, no additional text or explanations.
+  
+  JSON Format:
   {
     "success": true,
     "cypherQuery": "YOUR_CYPHER_HERE",
@@ -1566,20 +1560,8 @@ async function generateFinalQuery(model, query, context, graphSchema, reasoning,
   }
   `;
 
-  const result = await model.generateContent(finalPrompt);
-  const response = await result.response;
-  const text = response.text();
-  
   try {
-    let cleanText = text.trim();
-    if (cleanText.startsWith('```json')) {
-      cleanText = cleanText.slice(7);
-    }
-    if (cleanText.endsWith('```')) {
-      cleanText = cleanText.slice(0, -3);
-    }
-    
-    return JSON.parse(cleanText.trim());
+    return await llmManager.generateJSON(finalPrompt);
   } catch (parseError) {
     console.error('Failed to parse final query response:', parseError);
     return {
