@@ -75,6 +75,7 @@ export interface ChatMessage {
     options?: string[];
     context?: any;
   };
+  exampleQuestions?: string[];
 }
 
 export interface ChatQueryResult {
@@ -132,6 +133,7 @@ export interface ChatApiRequest {
     selectedNodes?: string[];
     graphVersion?: string;
   };
+  conversationHistory?: ChatMessage[];
 }
 
 export interface ChatApiResponse {

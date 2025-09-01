@@ -6,12 +6,14 @@ interface ChatMessageProps {
   message: ChatMessageType;
   onApplyQueryResult?: (queryResult: ChatQueryResult) => void;
   onClarificationResponse?: (response: string) => void;
+  onExampleQuestionClick?: (question: string) => void;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = ({ 
   message, 
   onApplyQueryResult,
-  onClarificationResponse 
+  onClarificationResponse,
+  onExampleQuestionClick 
 }) => {
   const formatTimestamp = (timestamp: Date) => {
     return timestamp.toLocaleTimeString([], { 
@@ -39,6 +41,26 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             ))}
           </div>
         )}
+      </div>
+    );
+  };
+
+  const renderExampleQuestions = () => {
+    if (!message.exampleQuestions || message.exampleQuestions.length === 0) return null;
+
+    return (
+      <div className="example-questions">
+        <div className="example-questions-buttons">
+          {message.exampleQuestions.map((question, index) => (
+            <button
+              key={index}
+              className="example-question-btn"
+              onClick={() => onExampleQuestionClick?.(question)}
+            >
+              {question}
+            </button>
+          ))}
+        </div>
       </div>
     );
   };
@@ -110,6 +132,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
       <div className="chat-message-content">
         <p>{message.content}</p>
         {renderClarificationOptions()}
+        {renderExampleQuestions()}
         {message.queryResult && (
           <>
             {renderReasoningInfo()}

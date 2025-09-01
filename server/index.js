@@ -1173,7 +1173,7 @@ async function getAfterState(cypherQuery, beforeState, version = 'base') {
 
 // Process natural language query for graph exploration
 app.post('/api/chat/query', async (req, res) => {
-  const { query, context = {} } = req.body;
+  const { query, context = {}, conversationHistory = [] } = req.body;
   const startTime = Date.now();
   
   if (!query || query.trim().length === 0) {
@@ -1185,7 +1185,7 @@ app.post('/api/chat/query', async (req, res) => {
 
   try {
     // Generate Cypher query using LLM
-    const cypherResult = await generateCypherFromNaturalLanguage(query, context);
+    const cypherResult = await generateCypherFromNaturalLanguage(query, context, conversationHistory);
     
     if (!cypherResult.success) {
       // Handle clarification requests
@@ -1332,7 +1332,7 @@ app.post('/api/chat/query', async (req, res) => {
 });
 
 // Enhanced helper function to generate Cypher with reasoning and intermediate queries
-async function generateCypherFromNaturalLanguage(query, context) {
+async function generateCypherFromNaturalLanguage(query, context, conversationHistory = []) {
   try {
     // Check if LLM manager has configured providers
     if (!llmManager.hasConfiguredProviders()) {
@@ -1364,7 +1364,7 @@ async function generateCypherFromNaturalLanguage(query, context) {
 
     // Step 1: Generate multiple interpretations
     console.log('Generating reasoning for query:', query);
-    const reasoning = await generateReasoningAndInterpretations(query, context, graphSchema);
+    const reasoning = await generateReasoningAndInterpretations(query, context, graphSchema, conversationHistory);
     console.log('Reasoning result:', JSON.stringify(reasoning, null, 2));
     
     if (reasoning.needsClarification) {
@@ -1426,10 +1426,20 @@ async function generateCypherFromNaturalLanguage(query, context) {
 }
 
 // Helper function to generate reasoning and multiple interpretations
-async function generateReasoningAndInterpretations(query, context, graphSchema) {
+async function generateReasoningAndInterpretations(query, context, graphSchema, conversationHistory = []) {
   const contextInfo = context.currentNodeType ? `Currently viewing: ${context.currentNodeType} nodes` : '';
   const selectedNodes = context.selectedNodes && context.selectedNodes.length > 0 
     ? `Currently selected nodes: ${context.selectedNodes.join(', ')}` 
+    : '';
+
+  // Extract previous assistant questions from conversation history to avoid duplicates
+  const previousQuestions = conversationHistory
+    .filter(msg => msg.type === 'assistant' && msg.clarificationRequest)
+    .map(msg => msg.clarificationRequest.question)
+    .filter(Boolean);
+  
+  const conversationContext = previousQuestions.length > 0 
+    ? `Previous questions asked to avoid repetition: ${previousQuestions.join('; ')}`
     : '';
 
   const reasoningPrompt = `
@@ -1438,6 +1448,7 @@ async function generateReasoningAndInterpretations(query, context, graphSchema) 
   ${graphSchema}
   
   Context: ${contextInfo} ${selectedNodes}
+  ${conversationContext}
 
   User Query: "${query}"
 
@@ -1475,6 +1486,7 @@ async function generateReasoningAndInterpretations(query, context, graphSchema) 
   3. If the query is genuinely ambiguous, set needsClarification to true and provide clarification options
   4. ALWAYS suggest intermediate queries to explore available data when the user mentions specific entities
   5. For project-related queries, remember the path: Industry -> Sector -> PainPoint -> ProjectOpportunity
+  6. IMPORTANT: Do NOT ask clarification questions that have already been asked in previous conversation
 
   CRITICAL: You MUST include intermediate queries for the following scenarios:
   - User mentions ANY specific entity name (like "retail", "banking", "healthcare") - ALWAYS check if it exists as Industry, Sector, or Department
@@ -1545,8 +1557,8 @@ async function generateFinalQuery(query, context, graphSchema, reasoning, interm
   3. Use LIMIT 50 for large result sets
   4. For projects: Use path Industry -> Sector -> PainPoint -> ProjectOpportunity
   5. UNION queries MUST have identical column names and types
-  6. For UNION queries use consistent variable names and alias them:
-     Example: MATCH (n:NodeType1) RETURN n.name AS name UNION MATCH (m:NodeType2) RETURN m.name AS name
+  6. For UNION queries use consistent column names and return full node objects:
+     Example: MATCH (n:Industry) RETURN n AS node UNION MATCH (m:Sector) RETURN m AS node
 
   CRITICAL FOR GRAPH VISUALIZATION:
   7. ALWAYS return full node objects, not primitive values
@@ -1557,7 +1569,7 @@ async function generateFinalQuery(query, context, graphSchema, reasoning, interm
       - "MATCH (n:Industry) RETURN n LIMIT 50" (returns full Industry nodes)
       - "MATCH (n:Sector) RETURN n LIMIT 50" (returns full Sector nodes)  
       - "MATCH (n:Industry) WHERE toLower(n.name) = toLower('Banking') RETURN n LIMIT 50" (case-insensitive)
-      - "MATCH (n:Industry) RETURN n LIMIT 25 UNION MATCH (m:Sector) RETURN m LIMIT 25" (multiple types)
+      - "MATCH (n:Industry) RETURN n AS node LIMIT 25 UNION MATCH (m:Sector) RETURN m AS node LIMIT 25" (multiple types)
 
   Generate a syntactically correct Cypher query and respond in JSON format.
   

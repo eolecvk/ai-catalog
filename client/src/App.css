@@ -4164,6 +4164,36 @@ html, body {
   transform: translateY(-1px);
 }
 
+/* Example Questions */
+.example-questions {
+  margin: 1rem 0;
+}
+
+.example-questions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.example-question-btn {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  color: white;
+  border: none;
+  padding: 0.75rem 1rem;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(39, 174, 96, 0.2);
+}
+
+.example-question-btn:hover {
+  background: linear-gradient(135deg, #229954, #27ae60);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(39, 174, 96, 0.3);
+}
+
 /* Reasoning Information */
 .reasoning-info {
   margin: 1rem 0;

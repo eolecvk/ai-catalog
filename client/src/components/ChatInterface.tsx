@@ -47,6 +47,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     await sendMessage(response);
   };
 
+  const handleExampleQuestionClick = async (question: string) => {
+    await sendMessage(question);
+  };
+
   const sendMessage = async (query: string) => {
     if (!query.trim() || isProcessing) return;
 
@@ -72,7 +76,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       const requestBody: ChatApiRequest = {
         query,
-        context: graphContext
+        context: graphContext,
+        conversationHistory: messages
       };
 
       const response = await fetch('/api/chat/query', {
@@ -154,8 +159,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const welcomeMessage: ChatMessageType = {
         id: generateMessageId(),
         type: 'assistant',
-        content: 'Hi! I can help you explore your graph data. Try asking questions like:\n\n• "Show me all industries"\n• "Find pain points in banking"\n• "What projects are available for retail?"\n• "Show relationships between sectors and departments"',
-        timestamp: new Date()
+        content: 'Hi! I can help you explore your graph data. Try asking questions like:',
+        timestamp: new Date(),
+        exampleQuestions: [
+          'Show me all industries',
+          'Find pain points in banking',
+          'What projects are available for retail?',
+          'Show relationships between sectors and departments'
+        ]
       };
       setMessages([welcomeMessage]);
     }
@@ -202,6 +213,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 message={message} 
                 onApplyQueryResult={onApplyQueryResult}
                 onClarificationResponse={handleClarificationResponse}
+                onExampleQuestionClick={handleExampleQuestionClick}
               />
             ))}
             <div ref={messagesEndRef} />

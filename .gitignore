@@ -33,6 +33,7 @@ out/
 # ======================
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
