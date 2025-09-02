@@ -1345,8 +1345,8 @@ app.post('/api/chat/query', async (req, res) => {
     
     const executionTime = Date.now() - startTime;
     
-    // Generate concise answer based on the query results
-    const conciseAnswer = generateConciseAnswer(query, graphData);
+    // Generate natural language answer based on the query results
+    const conciseAnswer = await generateNaturalLanguageAnswer(query, graphData);
     
     // Find all relationships between the identified relevant nodes
     const enhancedGraphData = await findAllRelationshipsBetweenNodes(
@@ -2085,56 +2085,107 @@ function generateResultSummary(graphData) {
   }.`;
 }
 
-// Helper function to generate concise answer
-function generateConciseAnswer(query, graphData) {
+// Helper function to generate natural language answer using LLM
+async function generateNaturalLanguageAnswer(query, graphData) {
+  const nodeCount = graphData.nodes.length;
+  
+  // If no results, return a helpful response
+  if (nodeCount === 0) {
+    return "I don't have information about that in the graph. Try asking about industries, sectors, departments, pain points, or projects.";
+  }
+  
+  try {
+    // Prepare data for LLM analysis
+    const nodeTypes = [...new Set(graphData.nodes.map(n => n.group))];
+    const nodesByType = {};
+    
+    // Group nodes by type and limit to first 10 per type for context
+    nodeTypes.forEach(type => {
+      nodesByType[type] = graphData.nodes
+        .filter(n => n.group === type)
+        .slice(0, 10)
+        .map(n => n.label);
+    });
+    
+    // Create context for LLM
+    const dataContext = Object.entries(nodesByType)
+      .map(([type, nodes]) => `${type}: ${nodes.join(', ')}`)
+      .join('\n');
+    
+    const relationships = graphData.edges.length > 0 
+      ? `\nRelationships found: ${graphData.edges.length} connections between these nodes`
+      : '';
+    
+    // LLM prompt for generating natural language response
+    const prompt = `You are a helpful assistant analyzing graph database query results. Provide a concise, natural response to the user's question.
+
+User Question: "${query}"
+
+Query Results:
+${dataContext}${relationships}
+
+Instructions:
+- Give a direct, informative answer in 1-2 sentences
+- Use proper grammar and spelling (e.g., "industries" not "industrys")
+- Be conversational but precise
+- If the results fully answer the question, state what was found
+- If results are partial or unclear, acknowledge limitations
+- Don't just say "Found X nodes" - explain what they are
+
+Response:`;
+
+    // Get response from LLM
+    const llmResponse = await llmManager.generateResponse(prompt);
+    
+    if (llmResponse && llmResponse.trim()) {
+      return llmResponse.trim();
+    }
+    
+    // Fallback if LLM fails
+    return generateFallbackAnswer(query, graphData);
+    
+  } catch (error) {
+    console.error('Error generating natural language answer:', error);
+    return generateFallbackAnswer(query, graphData);
+  }
+}
+
+// Fallback function for when LLM is unavailable (fixed version of original)
+function generateFallbackAnswer(query, graphData) {
   const nodeCount = graphData.nodes.length;
   
   if (nodeCount === 0) {
     return "No results found.";
   }
   
-  // Generate a concise answer based on the query type and results
   const queryLower = query.toLowerCase();
   const nodeTypes = [...new Set(graphData.nodes.map(n => n.group))];
   
-  // For project-related queries
-  if (queryLower.includes('project')) {
-    const projectCount = graphData.nodes.filter(n => n.group === 'ProjectOpportunity').length;
-    if (projectCount > 0) {
-      return `Found ${projectCount} project${projectCount !== 1 ? 's' : ''}.`;
+  // For industry queries - fixed pluralization
+  if (queryLower.includes('industry') && nodeTypes.includes('Industry')) {
+    const industryCount = graphData.nodes.filter(n => n.group === 'Industry').length;
+    const industries = graphData.nodes
+      .filter(n => n.group === 'Industry')
+      .map(n => n.label)
+      .slice(0, 5);
+    
+    if (industryCount === 1) {
+      return `Found 1 industry: ${industries[0]}.`;
+    } else {
+      return `Found ${industryCount} industries: ${industries.join(', ')}.`;
     }
   }
   
-  // For industry/sector queries
-  if (queryLower.includes('industry') || queryLower.includes('sector')) {
-    if (nodeTypes.includes('Industry')) {
-      const industryCount = graphData.nodes.filter(n => n.group === 'Industry').length;
-      return `Found ${industryCount} industr${industryCount !== 1 ? 'ies' : 'y'}.`;
-    }
-    if (nodeTypes.includes('Sector')) {
-      const sectorCount = graphData.nodes.filter(n => n.group === 'Sector').length;
-      return `Found ${sectorCount} sector${sectorCount !== 1 ? 's' : ''}.`;
-    }
+  // For sector queries
+  if (queryLower.includes('sector') && nodeTypes.includes('Sector')) {
+    const sectorCount = graphData.nodes.filter(n => n.group === 'Sector').length;
+    return `Found ${sectorCount} sector${sectorCount !== 1 ? 's' : ''}.`;
   }
   
-  // For pain point queries
-  if (queryLower.includes('pain point')) {
-    const painPointCount = graphData.nodes.filter(n => n.group === 'PainPoint').length;
-    if (painPointCount > 0) {
-      return `Found ${painPointCount} pain point${painPointCount !== 1 ? 's' : ''}.`;
-    }
-  }
-  
-  // Generic response based on primary node type
-  if (nodeTypes.length > 0) {
-    const primaryType = nodeTypes[0];
-    const primaryCount = graphData.nodes.filter(n => n.group === primaryType).length;
-    const typeName = primaryType.replace(/([A-Z])/g, ' $1').trim().toLowerCase();
-    return `Found ${primaryCount} ${typeName}${primaryCount !== 1 ? 's' : ''}.`;
-  }
-  
-  // Fallback
-  return `Found ${nodeCount} result${nodeCount !== 1 ? 's' : ''}.`;
+  // Generic fallback
+  const primaryType = nodeTypes[0];
+  const primaryCount = graphData.nodes.filter(n => n.group === primaryType).length;
+  return `Found ${primaryCount} result${primaryCount !== 1 ? 's' : ''} of type ${primaryType}.`;
 }
 
 // Smart update endpoints

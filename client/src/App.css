@@ -3437,6 +3437,45 @@ html, body {
   box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
 }
 
+/* Graph Placeholder Styles */
+.builder-graph-placeholder {
+  background: #f8f9fa;
+  border: 2px dashed #dee2e6;
+  border-radius: 12px;
+  padding: 3rem;
+  text-align: center;
+  margin: 1rem 0;
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.graph-placeholder-content {
+  color: #6c757d;
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  opacity: 0.6;
+}
+
+.graph-placeholder-content h3 {
+  color: #495057;
+  margin: 0 0 1rem 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.graph-placeholder-content p {
+  color: #6c757d;
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  max-width: 400px;
+}
+
 .admin-add-new-btn:active {
   transform: translateY(0);
   box-shadow: 0 1px 4px rgba(40, 167, 69, 0.3);
@@ -3798,7 +3837,7 @@ html, body {
   gap: 8px;
 }
 
-.clear-chat-btn,
+.reset-chat-btn,
 .toggle-chat-btn {
   background: rgba(255, 255, 255, 0.2);
   border: none;
@@ -3810,12 +3849,12 @@ html, body {
   transition: background 0.2s ease;
 }
 
-.clear-chat-btn:hover,
+.reset-chat-btn:hover,
 .toggle-chat-btn:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 
-.clear-chat-btn:disabled {
+.reset-chat-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -4092,6 +4131,19 @@ html, body {
   color: #ccc;
 }
 
+.auto-applied-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .cypher-query {
   background: #2c3e50;
   color: #ecf0f1;
@@ -4157,6 +4209,34 @@ html, body {
   font-size: 10px;
   color: #666;
   font-style: italic;
+}
+
+/* Clickable node chips */
+.node-chip.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid;
+}
+
+.node-chip.clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.node-chip.clickable:active {
+  transform: translateY(0);
+}
+
+/* Found nodes section */
+.found-nodes {
+  margin: 8px 0;
+  padding: 8px 0;
+}
+
+.found-nodes .node-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* Graph View Controls */

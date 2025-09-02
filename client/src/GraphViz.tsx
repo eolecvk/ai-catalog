@@ -413,16 +413,24 @@ const GraphViz: React.FC<GraphVizProps> = ({
     setSimulationNodes(newNodes);
   }, [simulationNodes, width, heightNum, findConnectedComponents, showingChatResults, chatQueryResults, nodes, edges]);
 
-  // Initialize node positions with better spacing and hierarchy
+  // Initialize node positions with better spacing and hierarchy (smooth updates)
   useEffect(() => {
     const currentData = { nodes, edges };
     if (currentData.nodes.length === 0) return;
 
-    console.log('Reinitializing node positions with data:', currentData.nodes.length, 'nodes');
+    console.log('Updating node positions with data:', currentData.nodes.length, 'nodes');
+
+    // Create a map of existing positions to preserve them
+    const existingPositions = new Map<string, { x: number, y: number, vx: number, vy: number }>();
+    if (simulationNodes && simulationNodes.length > 0) {
+      simulationNodes.forEach(node => {
+        existingPositions.set(node.id, { x: node.x || 0, y: node.y || 0, vx: node.vx || 0, vy: node.vy || 0 });
+      });
+    }
 
     // Find connected components for initial positioning
     const components = findConnectedComponents(currentData.nodes, currentData.edges);
-    const allInitialNodes: GraphNode[] = [];
+    const allUpdatedNodes: GraphNode[] = [];
     
     components.forEach((component, componentIndex) => {
       // Calculate grid layout parameters (same as simulation)
@@ -446,51 +454,81 @@ const GraphViz: React.FC<GraphVizProps> = ({
       const baseY = numComponents === 1 ? heightNum / 2 : centerOffsetY + (row + 0.5) * (gridHeight / actualRows);
       
       component.forEach((node, nodeIndex) => {
-        let x = baseX + (Math.random() - 0.5) * 200;
-        let y = baseY + (Math.random() - 0.5) * 150;
+        // Use existing position if available, otherwise calculate new position
+        const existing = existingPositions.get(node.id);
         
-        // Apply initial hierarchy positioning
-        if (node.group === 'Industry') {
-          y = baseY - 120 + (Math.random() - 0.5) * 30;
-        } else if (node.group === 'Sector' || node.group === 'Department') {
-          y = baseY - 30 + (Math.random() - 0.5) * 30;
-        } else if (node.group === 'PainPoint') {
-          y = baseY + 80 + (Math.random() - 0.5) * 40;
-        } else if (node.group === 'ProjectOpportunity' || node.group === 'ProjectBlueprint') {
-          y = baseY + 150 + (Math.random() - 0.5) * 30;
+        let x, y, vx, vy;
+        if (existing) {
+          // Preserve existing position and velocity for smooth transitions
+          x = existing.x;
+          y = existing.y;
+          vx = existing.vx;
+          vy = existing.vy;
         } else {
-          y = baseY + 20 + (Math.random() - 0.5) * 30;
+          // Calculate new position only for new nodes
+          x = baseX + (Math.random() - 0.5) * 200;
+          y = baseY + (Math.random() - 0.5) * 150;
+          
+          // Apply initial hierarchy positioning
+          if (node.group === 'Industry') {
+            y = baseY - 120 + (Math.random() - 0.5) * 30;
+          } else if (node.group === 'Sector' || node.group === 'Department') {
+            y = baseY - 30 + (Math.random() - 0.5) * 30;
+          } else if (node.group === 'PainPoint') {
+            y = baseY + 80 + (Math.random() - 0.5) * 40;
+          } else if (node.group === 'ProjectOpportunity' || node.group === 'ProjectBlueprint') {
+            y = baseY + 150 + (Math.random() - 0.5) * 30;
+          } else {
+            y = baseY + 20 + (Math.random() - 0.5) * 30;
+          }
+          
+          // Ensure nodes stay in bounds
+          const radius = getNodeRadius(node.group);
+          x = Math.max(radius + 20, Math.min(width - radius - 20, x));
+          y = Math.max(radius + 20, Math.min(heightNum - radius - 20, y));
+          
+          vx = 0;
+          vy = 0;
         }
         
-        // Ensure nodes stay in bounds
-        const radius = getNodeRadius(node.group);
-        x = Math.max(radius + 20, Math.min(width - radius - 20, x));
-        y = Math.max(radius + 20, Math.min(heightNum - radius - 20, y));
-        
-        allInitialNodes.push({
+        allUpdatedNodes.push({
           ...node,
           x,
           y,
-          vx: 0,
-          vy: 0
+          vx,
+          vy
         });
       });
     });
     
     // Handle isolated nodes (not in any component)
     currentData.nodes.forEach((node, i) => {
-      if (!allInitialNodes.find(n => n.id === node.id)) {
-        allInitialNodes.push({
-          ...node,
-          x: Math.random() * (width - 100) + 50,
-          y: Math.random() * (heightNum - 100) + 50,
-          vx: 0,
-          vy: 0
-        });
+      if (!allUpdatedNodes.find(n => n.id === node.id)) {
+        const existing = existingPositions.get(node.id);
+        
+        if (existing) {
+          // Preserve existing position
+          allUpdatedNodes.push({
+            ...node,
+            x: existing.x,
+            y: existing.y,
+            vx: existing.vx,
+            vy: existing.vy
+          });
+        } else {
+          // New isolated node gets random position
+          allUpdatedNodes.push({
+            ...node,
+            x: Math.random() * (width - 100) + 50,
+            y: Math.random() * (heightNum - 100) + 50,
+            vx: 0,
+            vy: 0
+          });
+        }
       }
     });
     
-    setSimulationNodes(allInitialNodes);
+    setSimulationNodes(allUpdatedNodes);
   }, [nodes, edges, width, heightNum, findConnectedComponents, showingChatResults, chatQueryResults]);
 
   // Toggle side panel visibility

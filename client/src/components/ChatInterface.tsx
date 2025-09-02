@@ -4,6 +4,7 @@ import ChatMessage from './ChatMessage';
 
 interface ChatInterfaceProps {
   onApplyQueryResult?: (queryResult: ChatQueryResult) => void;
+  onNavigateToNode?: (nodeId: string) => void;
   graphContext?: {
     currentNodeType?: string;
     selectedNodes?: string[];
@@ -13,6 +14,7 @@ interface ChatInterfaceProps {
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   onApplyQueryResult,
+  onNavigateToNode,
   graphContext 
 }) => {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
@@ -96,6 +98,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         };
 
         setMessages(prev => prev.slice(0, -1).concat(assistantMessage));
+
+        // Automatically apply query result to graph if it has data
+        if (data.queryResult && data.queryResult.graphData && 
+            data.queryResult.graphData.nodes.length > 0 && onApplyQueryResult) {
+          console.log('Automatically applying query result to graph');
+          onApplyQueryResult(data.queryResult);
+        }
       } else {
         // Handle clarification requests
         if (data.needsClarification) {
@@ -146,25 +155,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const clearChat = () => {
-    setMessages([]);
+  const resetChat = () => {
+    const welcomeMessage: ChatMessageType = {
+      id: generateMessageId(),
+      type: 'assistant',
+      content: 'Hi! I can help you explore your graph data. Try asking questions like:',
+      timestamp: new Date(),
+      exampleQuestions: [
+        'Show me all industries',
+        'Find pain points in banking',
+        'What projects are available for retail?',
+        'Show relationships between sectors and departments'
+      ]
+    };
+    setMessages([welcomeMessage]);
   };
 
   const addWelcomeMessage = () => {
     if (messages.length === 0) {
-      const welcomeMessage: ChatMessageType = {
-        id: generateMessageId(),
-        type: 'assistant',
-        content: 'Hi! I can help you explore your graph data. Try asking questions like:',
-        timestamp: new Date(),
-        exampleQuestions: [
-          'Show me all industries',
-          'Find pain points in banking',
-          'What projects are available for retail?',
-          'Show relationships between sectors and departments'
-        ]
-      };
-      setMessages([welcomeMessage]);
+      resetChat();
     }
   };
 
@@ -183,12 +192,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         </div>
         <div className="chat-actions">
           <button 
-            className="clear-chat-btn"
-            onClick={clearChat}
-            disabled={messages.length === 0}
-            title="Clear conversation"
+            className="reset-chat-btn"
+            onClick={resetChat}
+            disabled={messages.length === 1 && !!messages[0]?.exampleQuestions}
+            title="Reset conversation"
           >
-            🗑️
+            🔄
           </button>
         </div>
       </div>
@@ -200,6 +209,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 key={message.id} 
                 message={message} 
                 onApplyQueryResult={onApplyQueryResult}
+                onNavigateToNode={onNavigateToNode}
                 onClarificationResponse={handleClarificationResponse}
                 onExampleQuestionClick={handleExampleQuestionClick}
               />

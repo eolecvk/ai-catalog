@@ -5,6 +5,7 @@ import QueryResult from './QueryResult';
 interface ChatMessageProps {
   message: ChatMessageType;
   onApplyQueryResult?: (queryResult: ChatQueryResult) => void;
+  onNavigateToNode?: (nodeId: string) => void;
   onClarificationResponse?: (response: string) => void;
   onExampleQuestionClick?: (question: string) => void;
 }
@@ -12,6 +13,7 @@ interface ChatMessageProps {
 const ChatMessage: React.FC<ChatMessageProps> = ({ 
   message, 
   onApplyQueryResult,
+  onNavigateToNode,
   onClarificationResponse,
   onExampleQuestionClick 
 }) => {
@@ -133,12 +135,37 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         <p>{message.content}</p>
         {renderClarificationOptions()}
         {renderExampleQuestions()}
+        
+        {/* Show clickable nodes right after LLM response */}
+        {message.queryResult && message.queryResult.graphData.nodes.length > 0 && (
+          <div className="found-nodes">
+            <div className="node-list">
+              {message.queryResult.graphData.nodes.slice(0, 10).map(node => (
+                <button
+                  key={node.id}
+                  className={`node-chip clickable ${node.group.toLowerCase()}`}
+                  onClick={() => onNavigateToNode?.(node.id)}
+                  title={`Click to focus on ${node.label}`}
+                >
+                  {node.label}
+                </button>
+              ))}
+              {message.queryResult.graphData.nodes.length > 10 && (
+                <span className="more-indicator">
+                  +{message.queryResult.graphData.nodes.length - 10} more
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+        
         {message.queryResult && (
           <>
             {renderReasoningInfo()}
             <QueryResult 
               queryResult={message.queryResult}
               onApplyToGraph={onApplyQueryResult}
+              onNavigateToNode={onNavigateToNode}
             />
           </>
         )}

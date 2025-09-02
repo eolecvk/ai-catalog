@@ -86,6 +86,9 @@ const App: React.FC = () => {
   // Assistant-driven graph updates
   const [isAssistantUpdatingGraph, setIsAssistantUpdatingGraph] = useState(false);
 
+  // Graph visibility control - only show when needed
+  const [shouldShowGraph, setShouldShowGraph] = useState(false);
+
   // Chat interface state (always open)
 
   // Load persisted state on app initialization
@@ -958,13 +961,7 @@ const App: React.FC = () => {
 
   // Handle node double-click in graph (center and show connections)
   const handleGraphNodeEdit = async (nodeId: string, nodeData: any) => {
-    // Prevent multiple calls if already loading
-    if (graphLoading) {
-      return;
-    }
-    
     console.log(`Double-clicked node: ${nodeId} (${nodeData.label})`);
-    setGraphLoading(true);
     
     try {
       // Fetch the node's direct connections from the API
@@ -975,10 +972,7 @@ const App: React.FC = () => {
         
         console.log(`API returned ${data.nodes.length} nodes and ${data.edges.length} edges for node ${nodeId}`);
         
-        // Add a small delay to ensure the loading screen is visible
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Center the clicked node and show only its direct connections
+        // Update graph data smoothly without loading state or delays
         setGraphData({
           nodes: data.nodes,
           edges: data.edges
@@ -996,8 +990,6 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Failed to fetch node connections:', error);
       alert('Failed to load node connections');
-    } finally {
-      setGraphLoading(false);
     }
   };
 
@@ -1032,6 +1024,9 @@ const App: React.FC = () => {
     // Automatically update the graph with the query results
     if (queryResult.graphData && queryResult.graphData.nodes && queryResult.graphData.edges) {
       console.log('Auto-updating graph with assistant results...');
+      
+      // Show the graph when assistant finds results
+      setShouldShowGraph(true);
       
       // Show visual feedback that the assistant is updating the graph
       setIsAssistantUpdatingGraph(true);
@@ -1228,6 +1223,9 @@ const App: React.FC = () => {
   const handleOverviewCardClick = (nodeType: string) => {
     // Store the selected node type and fetch graph data for that type
     setSelectedNodeType(nodeType);
+    
+    // Show the graph when node card is clicked
+    setShouldShowGraph(true);
     
     // Reset filters and fetch data for the specific node type
     resetFilters();
@@ -1703,6 +1701,7 @@ const App: React.FC = () => {
                 <div className="chat-window">
                   <ChatInterface
                     onApplyQueryResult={handleApplyQueryResult}
+                    onNavigateToNode={handleNavigateToNode}
                     graphContext={{
                       currentNodeType: selectedNodeType || 'all',
                       graphVersion: currentGraphVersion
@@ -1710,38 +1709,50 @@ const App: React.FC = () => {
                   />
                 </div>
                 
-                {/* Graph Visualization */}
-                <div className="builder-graph-section">
-                  {isAssistantUpdatingGraph && (
-                    <div className="assistant-update-indicator">
-                      <div className="assistant-update-message">
-                        <span className="assistant-icon">🤖</span>
-                        <span>Assistant is updating the graph based on your query...</span>
+                {/* Graph Visualization - Only shown when needed */}
+                {shouldShowGraph && (
+                  <div className="builder-graph-section">
+                    {isAssistantUpdatingGraph && (
+                      <div className="assistant-update-indicator">
+                        <div className="assistant-update-message">
+                          <span className="assistant-icon">🤖</span>
+                          <span>Assistant is updating the graph based on your query...</span>
+                        </div>
                       </div>
+                    )}
+                    {graphLoading ? (
+                      <div className="builder-loading">
+                        <div className="spinner"></div>
+                        <p>Loading graph visualization...</p>
+                      </div>
+                    ) : (
+                      <GraphViz
+                        nodes={graphData.nodes}
+                        edges={graphData.edges}
+                        nodeType="all"
+                        onNodeSelect={handleGraphNodeSelect}
+                        onNodeDoubleClick={handleGraphNodeEdit}
+                        onNavigateToNode={handleNavigateToNode}
+                        focusedNode={focusedGraphNode}
+                        height="600px"
+                        enableChat={true}
+                        graphVersion={currentGraphVersion}
+                        onGraphDataUpdate={handleGraphDataUpdate}
+                      />
+                    )}
+                  </div>
+                )}
+                
+                {/* Graph Placeholder - Shown when graph is hidden */}
+                {!shouldShowGraph && (
+                  <div className="builder-graph-placeholder">
+                    <div className="graph-placeholder-content">
+                      <div className="placeholder-icon">🎯</div>
+                      <h3>Graph Visualization</h3>
+                      <p>Click on a node type above or ask the assistant a question to visualize the graph</p>
                     </div>
-                  )}
-                  {graphLoading ? (
-                    <div className="builder-loading">
-                      <div className="spinner"></div>
-                      <p>Loading graph visualization...</p>
-                    </div>
-                  ) : (
-                    <GraphViz
-                      key={`graph-${graphData.nodes.length}-${graphData.edges.length}`}
-                      nodes={graphData.nodes}
-                      edges={graphData.edges}
-                      nodeType="all"
-                      onNodeSelect={handleGraphNodeSelect}
-                      onNodeDoubleClick={handleGraphNodeEdit}
-                      onNavigateToNode={handleNavigateToNode}
-                      focusedNode={focusedGraphNode}
-                      height="600px"
-                      enableChat={true}
-                      graphVersion={currentGraphVersion}
-                      onGraphDataUpdate={handleGraphDataUpdate}
-                    />
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             )}
 
