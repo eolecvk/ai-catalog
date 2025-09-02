@@ -76,6 +76,19 @@ export interface ChatMessage {
     context?: any;
   };
   exampleQuestions?: string[];
+  mutationConfirmation?: {
+    plan: MutationPlan;
+    onConfirm: () => void;
+    onCancel: () => void;
+  };
+}
+
+export interface MutationPlan {
+  explanation: string;
+  query: string;
+  params: Record<string, any>;
+  affectedNodes: string[];
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 export interface ChatQueryResult {
@@ -146,4 +159,6 @@ export interface ChatApiResponse {
     options?: string[];
     context?: any;
   };
+  needsConfirmation?: boolean;
+  mutationPlan?: MutationPlan;
 }

@@ -49,6 +49,56 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     await sendMessage(question);
   };
 
+  const handleMutationConfirm = async (mutationPlan: any) => {
+    try {
+      const response = await fetch('/api/chat/execute-mutation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ mutationPlan }),
+      });
+
+      const result = await response.json();
+
+      const resultMessage: ChatMessageType = {
+        id: generateMessageId(),
+        type: result.success ? 'assistant' : 'system',
+        content: result.message || (result.success ? 'Changes applied successfully!' : 'Failed to apply changes.'),
+        timestamp: new Date(),
+        queryResult: result.queryResult
+      };
+
+      setMessages(prev => [...prev, resultMessage]);
+
+      // If mutation was successful and has graph data, apply it
+      if (result.success && result.queryResult && result.queryResult.graphData && onApplyQueryResult) {
+        onApplyQueryResult(result.queryResult);
+      }
+    } catch (error) {
+      console.error('Mutation execution error:', error);
+      const errorMessage: ChatMessageType = {
+        id: generateMessageId(),
+        type: 'system',
+        content: 'Failed to execute changes. Please try again.',
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  const handleMutationCancel = () => {
+    const cancelMessage: ChatMessageType = {
+      id: generateMessageId(),
+      type: 'assistant',
+      content: 'Changes cancelled. No modifications were made to your graph.',
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, cancelMessage]);
+  };
+
   const sendMessage = async (query: string) => {
     if (!query.trim() || isProcessing) return;
 
@@ -106,8 +156,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           onApplyQueryResult(data.queryResult);
         }
       } else {
+        // Handle mutation confirmation requests
+        if (data.needsConfirmation && data.mutationPlan) {
+          const confirmationMessage: ChatMessageType = {
+            id: generateMessageId(),
+            type: 'assistant',
+            content: data.message,
+            timestamp: new Date(),
+            mutationConfirmation: {
+              plan: data.mutationPlan,
+              onConfirm: () => handleMutationConfirm(data.mutationPlan!),
+              onCancel: () => handleMutationCancel()
+            }
+          };
+
+          setMessages(prev => prev.slice(0, -1).concat(confirmationMessage));
+        }
         // Handle clarification requests
-        if (data.needsClarification) {
+        else if (data.needsClarification) {
           const clarificationMessage: ChatMessageType = {
             id: generateMessageId(),
             type: 'assistant',

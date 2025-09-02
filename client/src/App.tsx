@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
 import ChatInterface from './components/ChatInterface';
+import TabbedSidebar from './components/TabbedSidebar';
 import './App.css';
 
 const App: React.FC = () => {
@@ -88,6 +89,9 @@ const App: React.FC = () => {
 
   // Graph visibility control - only show when needed
   const [shouldShowGraph, setShouldShowGraph] = useState(false);
+
+  // Sample query state for welcome screen
+  const [sampleQuery, setSampleQuery] = useState('');
 
   // Chat interface state (always open)
 
@@ -1624,8 +1628,93 @@ const App: React.FC = () => {
 
       {isBuilderMode && builderAuthenticated ? (
         <>
-        {/* Builder Dashboard */}
-        <div className="builder-dashboard">
+        {/* Enhanced Two-Panel Layout */}
+        <div className="two-panel-layout">
+          {builderLoading ? (
+            <div className="builder-loading">
+              <div className="spinner"></div>
+              <p>Loading...</p>
+            </div>
+          ) : (
+            <>
+              {/* Primary Panel - Graph Visualization (Hero Element) */}
+              <div className="primary-panel">
+                {isAssistantUpdatingGraph && (
+                  <div className="assistant-update-indicator">
+                    <div className="assistant-update-message">
+                      <span className="assistant-icon">🤖</span>
+                      <span>The assistant is updating the graph visualization...</span>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="graph-hero-section">
+                  {shouldShowGraph || graphData.nodes.length > 0 ? (
+                    <GraphViz
+                      nodes={graphData.nodes}
+                      edges={graphData.edges}
+                      nodeType="all"
+                      onNodeSelect={handleGraphNodeSelect}
+                      onNodeDoubleClick={handleGraphNodeEdit}
+                      graphVersion={currentGraphVersion}
+                      focusedNode={focusedGraphNode}
+                    />
+                  ) : (
+                    <div className="graph-welcome">
+                      <div className="welcome-content">
+                        <div className="welcome-icon">🗺️</div>
+                        <h2>Graph Intelligence Assistant</h2>
+                        <p>Ask questions about your data using the Query panel to explore and visualize your graph.</p>
+                        <div className="sample-queries">
+                          <h3>Try asking:</h3>
+                          <div className="sample-query-buttons">
+                            <button onClick={() => console.log('Sample query clicked')}>
+                              "Show me all industries"
+                            </button>
+                            <button onClick={() => console.log('Sample query clicked')}>
+                              "Find pain points in banking"
+                            </button>
+                            <button onClick={() => console.log('Sample query clicked')}>
+                              "What projects are available?"
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Secondary Panel - Tabbed Sidebar */}
+              <div className="secondary-panel">
+                <TabbedSidebar
+                  onApplyQueryResult={handleApplyQueryResult}
+                  onNavigateToNode={(nodeId) => handleGraphNodeSelect(nodeId, null)}
+                  graphContext={{
+                    currentNodeType: selectedNodeType || undefined,
+                    selectedNodes: [],
+                    graphVersion: currentGraphVersion
+                  }}
+                  nodeStats={{
+                    industries: builderStats?.Industry || 0,
+                    sectors: builderStats?.Sector || 0,
+                    departments: builderStats?.Department || 0,
+                    painPoints: builderStats?.PainPoint || 0,
+                    projects: builderStats?.ProjectOpportunity || 0
+                  }}
+                  selectedNodeDetails={focusedGraphNode ? {
+                    type: focusedGraphNode.split(':')[0] || 'Unknown',
+                    label: focusedGraphNode.split(':')[1] || focusedGraphNode,
+                    properties: {},
+                    relationships: []
+                  } : null}
+                />
+              </div>
+            </>
+          )}
+        </div>
+        {/* Original Builder Dashboard (hidden) */}
+        <div className="builder-dashboard" style={{ display: 'none' }}>
           
           <div className="builder-content">
 

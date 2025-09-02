@@ -792,6 +792,37 @@ const GraphViz: React.FC<GraphVizProps> = ({
               <feDropShadow dx="2" dy="2" stdDeviation="3" floodOpacity="0.3"/>
             </filter>
             
+            {/* Connection shadow filter */}
+            <filter id="connectionShadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="1" dy="1" stdDeviation="2" floodOpacity="0.2"/>
+            </filter>
+            
+            {/* Connection gradients */}
+            <linearGradient id="connectionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#3498db" stopOpacity="0.8"/>
+              <stop offset="50%" stopColor="#2c3e50" stopOpacity="0.7"/>
+              <stop offset="100%" stopColor="#3498db" stopOpacity="0.8"/>
+            </linearGradient>
+            
+            <linearGradient id="focusedConnectionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#e74c3c" stopOpacity="0.9"/>
+              <stop offset="50%" stopColor="#c0392b" stopOpacity="0.8"/>
+              <stop offset="100%" stopColor="#e74c3c" stopOpacity="0.9"/>
+            </linearGradient>
+            
+            {/* Professional arrow markers - consistent sizes */}
+            <marker id="arrowhead" markerWidth="8" markerHeight="7" refX="7" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L0,7 L8,3.5 z" fill="url(#connectionGradient)" stroke="#2c3e50" strokeWidth="0.3"/>
+            </marker>
+            
+            <marker id="focusedArrowhead" markerWidth="8" markerHeight="7" refX="7" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L0,7 L8,3.5 z" fill="url(#focusedConnectionGradient)" stroke="#c0392b" strokeWidth="0.3"/>
+            </marker>
+            
+            <marker id="fadedArrowhead" markerWidth="8" markerHeight="7" refX="7" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L0,7 L8,3.5 z" fill="#bdc3c7" stroke="#95a5a6" strokeWidth="0.3"/>
+            </marker>
+            
             {/* Gradients for each node type */}
             <radialGradient id="industryGradient" cx="30%" cy="30%">
               <stop offset="0%" stopColor="#3498db"/>
@@ -871,27 +902,96 @@ const GraphViz: React.FC<GraphVizProps> = ({
               const targetX = target.x - (dx / distance) * targetRadius;
               const targetY = target.y - (dy / distance) * targetRadius;
 
+              // Determine connection styling based on focus state
+              const isFaded = shouldFadeEdge(edge);
+              const isFocused = focusedNodeId && (edge.from === focusedNodeId || edge.to === focusedNodeId);
+              
+              // Professional connection styling
+              const getConnectionStyle = () => {
+                if (isFaded) {
+                  return {
+                    stroke: '#bdc3c7',
+                    strokeWidth: '1.5',
+                    opacity: '0.15',
+                    markerEnd: 'url(#fadedArrowhead)'
+                  };
+                } else if (isFocused) {
+                  return {
+                    stroke: 'url(#focusedConnectionGradient)',
+                    strokeWidth: '3',
+                    opacity: '0.9',
+                    markerEnd: 'url(#focusedArrowhead)'
+                  };
+                } else {
+                  return {
+                    stroke: 'url(#connectionGradient)',
+                    strokeWidth: '2.5',
+                    opacity: '0.7',
+                    markerEnd: 'url(#arrowhead)'
+                  };
+                }
+              };
+              
+              const connectionStyle = getConnectionStyle();
+
               return (
                 <g key={edge.id}>
+                  {/* Connection shadow (subtle depth) */}
+                  <line
+                    x1={sourceX + 1}
+                    y1={sourceY + 1}
+                    x2={targetX + 1}
+                    y2={targetY + 1}
+                    stroke="rgba(0,0,0,0.1)"
+                    strokeWidth={connectionStyle.strokeWidth}
+                    opacity={connectionStyle.opacity}
+                    style={{
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                    }}
+                  />
+                  
+                  {/* Main connection line */}
                   <line
                     x1={sourceX}
                     y1={sourceY}
                     x2={targetX}
                     y2={targetY}
-                    stroke="#7f8c8d"
-                    strokeWidth="2"
-                    opacity={shouldFadeEdge(edge) ? "0.15" : "0.6"}
+                    stroke={connectionStyle.stroke}
+                    strokeWidth={connectionStyle.strokeWidth}
+                    opacity={connectionStyle.opacity}
+                    markerEnd={connectionStyle.markerEnd}
+                    strokeLinecap="round"
+                    filter={isFocused ? "url(#connectionShadow)" : "none"}
                     style={{
-                      transition: 'opacity 0.3s ease-in-out'
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      cursor: 'pointer'
                     }}
                   />
-                  {/* Arrow */}
-                  <polygon
-                    points={`${targetX},${targetY} ${targetX - 8 + 3 * Math.cos(Math.atan2(dy, dx) + 0.5)},${targetY - 8 + 3 * Math.sin(Math.atan2(dy, dx) + 0.5)} ${targetX - 8 + 3 * Math.cos(Math.atan2(dy, dx) - 0.5)},${targetY - 8 + 3 * Math.sin(Math.atan2(dy, dx) - 0.5)}`}
-                    fill="#7f8c8d"
-                    opacity={shouldFadeEdge(edge) ? "0.15" : "0.6"}
+                  
+                  {/* Interactive hover area (invisible but clickable) */}
+                  <line
+                    x1={sourceX}
+                    y1={sourceY}
+                    x2={targetX}
+                    y2={targetY}
+                    stroke="transparent"
+                    strokeWidth="8"
                     style={{
-                      transition: 'opacity 0.3s ease-in-out'
+                      cursor: 'pointer'
+                    }}
+                    onMouseEnter={(e) => {
+                      const mainLine = e.currentTarget.previousSibling as SVGLineElement;
+                      if (mainLine && !isFaded) {
+                        mainLine.style.strokeWidth = isFocused ? '3.5' : '3';
+                        mainLine.style.opacity = isFocused ? '1' : '0.8';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      const mainLine = e.currentTarget.previousSibling as SVGLineElement;
+                      if (mainLine && !isFaded) {
+                        mainLine.style.strokeWidth = connectionStyle.strokeWidth;
+                        mainLine.style.opacity = connectionStyle.opacity;
+                      }
                     }}
                   />
                 </g>

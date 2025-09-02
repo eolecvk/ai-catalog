@@ -47,6 +47,59 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     );
   };
 
+  const renderMutationConfirmation = () => {
+    if (!message.mutationConfirmation) return null;
+
+    const { plan, onConfirm, onCancel } = message.mutationConfirmation;
+    const riskColor = plan.riskLevel === 'HIGH' ? '#ef4444' : 
+                     plan.riskLevel === 'MEDIUM' ? '#f59e0b' : '#10b981';
+
+    return (
+      <div className="mutation-confirmation">
+        <div className="mutation-details">
+          <div className="mutation-header">
+            <h4>⚠️ Confirm Changes</h4>
+            <span className="risk-badge" style={{ backgroundColor: riskColor }}>
+              {plan.riskLevel} RISK
+            </span>
+          </div>
+          <p className="mutation-explanation">{plan.explanation}</p>
+          
+          <div className="cypher-preview">
+            <h5>Cypher Query:</h5>
+            <pre className="cypher-code">{plan.query}</pre>
+          </div>
+          
+          {plan.affectedNodes.length > 0 && (
+            <div className="affected-nodes">
+              <h5>Affected Node Types:</h5>
+              <div className="node-tags">
+                {plan.affectedNodes.map((nodeType, index) => (
+                  <span key={index} className="node-tag">{nodeType}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="mutation-actions">
+          <button 
+            className="execute-btn"
+            onClick={onConfirm}
+          >
+            ✅ Execute Changes
+          </button>
+          <button 
+            className="cancel-btn"
+            onClick={onCancel}
+          >
+            ❌ Cancel
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderExampleQuestions = () => {
     if (!message.exampleQuestions || message.exampleQuestions.length === 0) return null;
 
@@ -134,6 +187,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
       <div className="chat-message-content">
         <p>{message.content}</p>
         {renderClarificationOptions()}
+        {renderMutationConfirmation()}
         {renderExampleQuestions()}
         
         {/* Show clickable nodes right after LLM response */}

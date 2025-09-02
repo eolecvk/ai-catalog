@@ -7,6 +7,9 @@ require('dotenv').config();
 // Import LLMManager AFTER dotenv is loaded
 const llmManager = require('./llm/LLMManager');
 
+// Import ChatProcessor for enhanced chat functionality
+const ChatProcessor = require('./chat/ChatProcessor');
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -20,6 +23,9 @@ const driver = neo4j.driver(
     process.env.NEO4J_PASSWORD || 'password123'
   )
 );
+
+// Initialize enhanced chat processor
+const chatProcessor = new ChatProcessor(driver);
 
 // Initialize Gemini AI
 // Legacy Gemini initialization (deprecated - now using LLM Manager)
@@ -1224,6 +1230,42 @@ app.post('/api/chat/query', async (req, res) => {
   }
 
   try {
+    // Use enhanced ChatProcessor for intelligent three-stage processing
+    const result = await chatProcessor.processChat(query, conversationHistory, context);
+    
+    const endTime = Date.now();
+    console.log(`Chat query processed in ${endTime - startTime}ms`);
+
+    // Add execution time to result
+    if (result.queryResult) {
+      result.queryResult.executionTime = endTime - startTime;
+    }
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('Chat query error:', error);
+    res.json({
+      success: false,
+      error: 'An error occurred while processing your query',
+      message: 'Sorry, there was a technical issue. Please try again or rephrase your question.'
+    });
+  }
+});
+
+// Legacy endpoint preserved for backward compatibility 
+app.post('/api/chat/query-legacy', async (req, res) => {
+  const { query, context = {}, conversationHistory = [] } = req.body;
+  const startTime = Date.now();
+  
+  if (!query || query.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Query is required'
+    });
+  }
+
+  try {
     // Generate Cypher query using LLM
     const cypherResult = await generateCypherFromNaturalLanguage(query, context, conversationHistory);
     
@@ -1373,6 +1415,29 @@ app.post('/api/chat/query', async (req, res) => {
       success: false,
       error: 'An error occurred while processing your query',
       message: 'Sorry, there was a technical issue. Please try again or rephrase your question.'
+    });
+  }
+});
+
+// Add mutation confirmation endpoint for enhanced chat processor
+app.post('/api/chat/execute-mutation', async (req, res) => {
+  const { mutationPlan } = req.body;
+  
+  if (!mutationPlan || !mutationPlan.query) {
+    return res.status(400).json({
+      success: false,
+      error: 'Mutation plan is required'
+    });
+  }
+
+  try {
+    const result = await chatProcessor.executeMutation(mutationPlan);
+    res.json(result);
+  } catch (error) {
+    console.error('Mutation execution error:', error);
+    res.json({
+      success: false,
+      error: 'Failed to execute mutation. Please try again.'
     });
   }
 });
