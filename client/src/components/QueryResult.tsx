@@ -13,8 +13,15 @@ const QueryResult: React.FC<QueryResultProps> = ({
   const [showCypher, setShowCypher] = useState(false);
 
   const handleApplyToGraph = () => {
+    console.log('Visualize in Graph button clicked');
+    console.log('queryResult:', queryResult);
+    console.log('onApplyToGraph function:', onApplyToGraph);
+    
     if (onApplyToGraph) {
+      console.log('Calling onApplyToGraph with queryResult');
       onApplyToGraph(queryResult);
+    } else {
+      console.log('ERROR: onApplyToGraph is not defined!');
     }
   };
 

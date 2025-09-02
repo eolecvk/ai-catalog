@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge } from './types';
+import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
+import ChatInterface from './components/ChatInterface';
 import './App.css';
 
 const App: React.FC = () => {
@@ -51,9 +52,9 @@ const App: React.FC = () => {
     subModules: []
   });
 
-  // Builder mode state
-  const [isBuilderMode, setIsBuilderMode] = useState(false);
-  const [builderAuthenticated, setBuilderAuthenticated] = useState(false);
+  // Builder mode state (default to builder mode)
+  const [isBuilderMode, setIsBuilderMode] = useState(true);
+  const [builderAuthenticated, setBuilderAuthenticated] = useState(true);
   const [builderActiveSection, setBuilderActiveSection] = useState('overview');
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [builderStats, setBuilderStats] = useState<any>(null);
@@ -65,19 +66,8 @@ const App: React.FC = () => {
   // Builder modals and forms
   const [showBuilderNodeModal, setShowBuilderNodeModal] = useState(false);
   const [showBuilderEditModal, setShowBuilderEditModal] = useState(false);
-  const [showSmartUpdateModal, setShowSmartUpdateModal] = useState(false);
   const [builderNodeForm, setBuilderNodeForm] = useState<any>({});
   const [editingNode, setEditingNode] = useState<any>(null);
-  
-  // Smart Update feature state
-  const [smartUpdateInput, setSmartUpdateInput] = useState('');
-  const [generatedCypher, setGeneratedCypher] = useState('');
-  const [smartUpdateLoading, setSmartUpdateLoading] = useState(false);
-  const [smartUpdateStep, setSmartUpdateStep] = useState<'input' | 'preview' | 'apply'>('input');
-  const [previewData, setPreviewData] = useState<any>(null);
-  const [conversationHistory, setConversationHistory] = useState<any[]>([]);
-  const [currentIteration, setCurrentIteration] = useState(0);
-  const [feedbackInput, setFeedbackInput] = useState('');
   
   // Graph visualization state
   const [viewMode] = useState<'graph'>('graph');
@@ -92,6 +82,11 @@ const App: React.FC = () => {
   const [availableIndustries, setAvailableIndustries] = useState<string[]>([]);
   const [availableSectors, setAvailableSectors] = useState<string[]>([]);
   const [availableDepartments, setAvailableDepartments] = useState<string[]>([]);
+
+  // Assistant-driven graph updates
+  const [isAssistantUpdatingGraph, setIsAssistantUpdatingGraph] = useState(false);
+
+  // Chat interface state (always open)
 
   // Load persisted state on app initialization
   useEffect(() => {
@@ -165,16 +160,13 @@ const App: React.FC = () => {
           setShowPainPointModal(false);
         } else if (showProjectModal) {
           setShowProjectModal(false);
-        } else if (showSmartUpdateModal) {
-          setShowSmartUpdateModal(false);
-          resetSmartUpdate();
         }
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showPainPointSuggestions, showPainPointModal, showProjectModal, showSmartUpdateModal]);
+  }, [showPainPointSuggestions, showPainPointModal, showProjectModal]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -912,158 +904,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Smart Update API functions
-  const generateCypherQuery = async (naturalLanguage: string) => {
-    setSmartUpdateLoading(true);
-    try {
-      const response = await fetch('/api/smart-update/generate-cypher', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          naturalLanguageUpdate: naturalLanguage,
-          version: currentGraphVersion,
-          conversationHistory: conversationHistory
-        })
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to generate Cypher query');
-      }
-      
-      const data = await response.json();
-      setGeneratedCypher(data.cypherQuery);
-      setSmartUpdateStep('preview');
-      setCurrentIteration(prev => prev + 1);
-      return data.cypherQuery;
-    } catch (error) {
-      console.error('Error generating Cypher:', error);
-      alert(error instanceof Error ? error.message : 'Failed to generate Cypher query');
-    } finally {
-      setSmartUpdateLoading(false);
-    }
-  };
-
-  const generatePreview = async (cypherQuery: string) => {
-    setSmartUpdateLoading(true);
-    try {
-      const response = await fetch('/api/smart-update/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cypherQuery,
-          version: currentGraphVersion
-        })
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to generate preview');
-      }
-      
-      const data = await response.json();
-      setPreviewData(data);
-      return data;
-    } catch (error) {
-      console.error('Error generating preview:', error);
-      alert(error instanceof Error ? error.message : 'Failed to generate preview');
-    } finally {
-      setSmartUpdateLoading(false);
-    }
-  };
-
-  const applySmartUpdate = async (cypherQuery: string, versionName: string) => {
-    setSmartUpdateLoading(true);
-    try {
-      const response = await fetch('/api/smart-update/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cypherQuery,
-          version: currentGraphVersion,
-          newVersionName: versionName
-        })
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to apply update');
-      }
-      
-      const data = await response.json();
-      
-      // Refresh available versions and switch to new version
-      await fetchAvailableVersions();
-      setCurrentGraphVersion(data.newVersion);
-      
-      // Reset smart update state
-      setSmartUpdateInput('');
-      setGeneratedCypher('');
-      setPreviewData(null);
-      setSmartUpdateStep('input');
-      setShowSmartUpdateModal(false);
-      
-      // Refresh graph data
-      if (builderActiveSection !== 'overview') {
-        await fetchGraphData(builderActiveSection);
-      }
-      
-      alert(`Update applied successfully! New version: ${data.newVersion}`);
-      return data;
-    } catch (error) {
-      console.error('Error applying smart update:', error);
-      alert(error instanceof Error ? error.message : 'Failed to apply update');
-    } finally {
-      setSmartUpdateLoading(false);
-    }
-  };
-
-  const resetSmartUpdate = () => {
-    setSmartUpdateInput('');
-    setGeneratedCypher('');
-    setPreviewData(null);
-    setSmartUpdateStep('input');
-    setSmartUpdateLoading(false);
-    setConversationHistory([]);
-    setCurrentIteration(0);
-    setFeedbackInput('');
-  };
-
-  const refineSmartUpdate = async (feedback: string) => {
-    setSmartUpdateLoading(true);
-    try {
-      const response = await fetch('/api/smart-update/refine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          originalRequest: smartUpdateInput,
-          currentCypher: generatedCypher,
-          feedback: feedback,
-          conversationHistory: conversationHistory,
-          version: currentGraphVersion
-        })
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to refine Cypher query');
-      }
-      
-      const data = await response.json();
-      setGeneratedCypher(data.refinedCypher);
-      setConversationHistory(data.conversationHistory);
-      setCurrentIteration(prev => prev + 1);
-      setFeedbackInput('');
-      setPreviewData(null); // Reset preview to show updated query
-      
-      return data.refinedCypher;
-    } catch (error) {
-      console.error('Error refining Cypher:', error);
-      alert(error instanceof Error ? error.message : 'Failed to refine Cypher query');
-    } finally {
-      setSmartUpdateLoading(false);
-    }
-  };
 
   // Fetch graph data for visualization
   const fetchGraphData = useCallback(async (nodeType: string) => {
@@ -1185,9 +1025,44 @@ const App: React.FC = () => {
     }
   };
 
+  // Chat interface handlers
+  const handleApplyQueryResult = (queryResult: ChatQueryResult) => {
+    console.log('Applying query result:', queryResult);
+    
+    // Automatically update the graph with the query results
+    if (queryResult.graphData && queryResult.graphData.nodes && queryResult.graphData.edges) {
+      console.log('Auto-updating graph with assistant results...');
+      
+      // Show visual feedback that the assistant is updating the graph
+      setIsAssistantUpdatingGraph(true);
+      
+      // Update the graph data
+      handleGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
+      
+      // Brief delay for visual feedback, then clear the indicator
+      setTimeout(() => {
+        setIsAssistantUpdatingGraph(false);
+      }, 800);
+    }
+  };
+
   // Handle graph data updates from chat interface
   const handleGraphDataUpdate = (nodes: GraphNode[], edges: GraphEdge[]) => {
+    console.log('handleGraphDataUpdate called with:');
+    console.log('- Nodes count:', nodes.length);
+    console.log('- Edges count:', edges.length);
+    console.log('- Sample nodes:', nodes.slice(0, 3));
+    console.log('- Sample edges:', edges.slice(0, 3));
+    
+    console.log('BEFORE UPDATE - Current graph data:');
+    console.log('- Current nodes count:', graphData.nodes.length);
+    console.log('- Current edges count:', graphData.edges.length);
+    
+    console.log('Node IDs in query result:', nodes.map(n => n.id).slice(0, 10));
+    console.log('Current node IDs:', graphData.nodes.map(n => n.id).slice(0, 10));
+    
     setGraphData({ nodes, edges });
+    console.log('Graph data updated via setGraphData');
   };
 
   // Load filter options
@@ -1296,40 +1171,11 @@ const App: React.FC = () => {
     }
   }, [isBuilderMode, builderAuthenticated]);
 
-  // Reload graph data when filters change
+  // Load graph data when builder mode starts or when specific node type is selected
   useEffect(() => {
-    if (isBuilderMode && builderAuthenticated && builderActiveSection) {
-      // Handle graph section - show all data
-      if (builderActiveSection === 'graph') {
-        // If a specific node type was selected from overview, use it
-        if (selectedNodeType) {
-          const nodeTypeMap: { [key: string]: string } = {
-            'industries': 'industries',
-            'sectors': 'sectors', 
-            'departments': 'departments',
-            'painpoints': 'painpoints',
-            'projects': 'projects',
-            'blueprints': 'blueprints',
-            'roles': 'roles',
-            'modules': 'modules',
-            'submodules': 'submodules'
-          };
-          
-          const nodeType = nodeTypeMap[selectedNodeType];
-          if (nodeType) {
-            fetchGraphData(nodeType);
-          }
-        } else {
-          // Default to showing all when no specific type is selected
-          fetchGraphData('all');
-        }
-      } else {
-        // Clear selected node type when not in graph section
-        if (selectedNodeType) {
-          setSelectedNodeType(null);
-        }
-        
-        // Handle specific node type sections
+    if (isBuilderMode && builderAuthenticated) {
+      // If a specific node type was selected from overview, use it
+      if (selectedNodeType) {
         const nodeTypeMap: { [key: string]: string } = {
           'industries': 'industries',
           'sectors': 'sectors', 
@@ -1342,20 +1188,29 @@ const App: React.FC = () => {
           'submodules': 'submodules'
         };
         
-        const nodeType = nodeTypeMap[builderActiveSection];
+        const nodeType = nodeTypeMap[selectedNodeType];
         if (nodeType) {
           fetchGraphData(nodeType);
         }
+      } else {
+        // Default to showing all node types
+        fetchGraphData('all');
       }
     }
-  }, [selectedIndustries, selectedSector, selectedDepartment, isBuilderMode, builderAuthenticated, viewMode, builderActiveSection, selectedNodeType, fetchGraphData]);
+  }, [isBuilderMode, builderAuthenticated, selectedNodeType, fetchGraphData]);
 
   // Refresh data when version changes
   useEffect(() => {
-    if (isBuilderMode && builderAuthenticated && builderActiveSection === 'overview') {
+    if (isBuilderMode && builderAuthenticated) {
       fetchBuilderStats(currentGraphVersion);
+      // Also refresh graph data when version changes
+      if (selectedNodeType) {
+        fetchGraphData(selectedNodeType);
+      } else {
+        fetchGraphData('all');
+      }
     }
-  }, [currentGraphVersion]);
+  }, [currentGraphVersion, isBuilderMode, builderAuthenticated, selectedNodeType]);
 
   const resetSelections = () => {
     setSelections({ viewMode: '', industries: [], sectors: [], departments: [], painPoints: [] });
@@ -1371,12 +1226,12 @@ const App: React.FC = () => {
 
   // Handle overview card click to navigate to graph view
   const handleOverviewCardClick = (nodeType: string) => {
-    // Store the selected node type and switch to graph section
+    // Store the selected node type and fetch graph data for that type
     setSelectedNodeType(nodeType);
-    setBuilderActiveSection('graph');
     
-    // Reset filters
+    // Reset filters and fetch data for the specific node type
     resetFilters();
+    fetchGraphData(nodeType);
   };
 
   const navigateToStep = (stepNumber: number) => {
@@ -1731,52 +1586,15 @@ const App: React.FC = () => {
     <div className="app">
       <header className={`app-header ${isBuilderMode ? 'builder-mode' : ''}`}>
         <div className="header-content">
-          <h1>{isBuilderMode ? 'AI Catalog - BUILDER' : 'AI Project Catalog - EXPLORER'}</h1>
-          <button 
-            className={`builder-toggle ${isBuilderMode ? 'active' : ''}`}
-            onClick={handleBuilderToggle}
-            title={isBuilderMode ? 'Switch to Explorer Mode' : 'Switch to Builder Mode'}
-          >
-            {isBuilderMode ? '🔍 Explorer' : '🔧 Builder'}
-          </button>
-        </div>
-      </header>
-
-      {isBuilderMode && builderAuthenticated ? (
-        /* Builder Dashboard */
-        <div className="builder-dashboard">
-          <div className="builder-nav">
-            <div className="builder-nav-items">
-              {/* Main Sections */}
-              <button 
-                className={`builder-nav-item ${builderActiveSection === 'overview' ? 'active' : ''}`}
-                onClick={() => {
-                  setBuilderActiveSection('overview');
-                }}
-              >
-                📊 Overview
-              </button>
-              
-              <button 
-                className={`builder-nav-item ${builderActiveSection === 'graph' ? 'active' : ''}`}
-                onClick={() => {
-                  setBuilderActiveSection('graph');
-                }}
-              >
-                🕸️ Graph
-              </button>
-              
-              
-            </div>
-            
-            {/* Version Management in Side Panel */}
-            <div className="builder-version-sidebar">
-              <div className="version-info-sidebar">
-                <label>Version: </label>
+          <h1>{isBuilderMode ? 'AI Project Map' : 'AI Project Catalog - EXPLORER'}</h1>
+          <div className="header-controls">
+            {isBuilderMode && builderAuthenticated && (
+              <div className="version-controls">
+                <span className="version-label">Version:</span>
                 <select 
                   value={currentGraphVersion} 
                   onChange={(e) => setCurrentGraphVersion(e.target.value)}
-                  className="version-select-sidebar"
+                  className="version-select"
                 >
                   {availableVersions.map(version => (
                     <option key={version} value={version}>
@@ -1784,86 +1602,32 @@ const App: React.FC = () => {
                     </option>
                   ))}
                 </select>
-              </div>
-              
-              {/* Manage Versions Button */}
-              {availableVersions.length > 1 && (
-                <div className="manage-versions-button">
+                {availableVersions.length > 1 && (
                   <button 
-                    className="version-btn-sidebar manage-versions"
+                    className="version-manage-btn"
                     onClick={() => setShowManageVersionsModal(true)}
                     title="Manage all versions"
                   >
-                    🗂️ Manage Versions
-                  </button>
-                </div>
-              )}
-              
-              <div className="version-actions-sidebar">
-                {currentGraphVersion === 'base' && (
-                  <button 
-                    className="version-btn-sidebar create-draft" 
-                    onClick={createDraftVersion}
-                    disabled={builderLoading}
-                    title="Create Draft Version"
-                  >
-                    📝 Draft
+                    🗂️
                   </button>
                 )}
-                
-                {currentGraphVersion === 'admin_draft' && (
-                  <div className="draft-actions">
-                    <button 
-                      className="version-btn-sidebar reset" 
-                      onClick={resetToBase}
-                      disabled={builderLoading}
-                      title="Reset to Base"
-                    >
-                      🔄 Reset
-                    </button>
-                    <button 
-                      className="version-btn-sidebar promote" 
-                      onClick={() => alert('Promote to base feature coming soon!')}
-                      disabled={builderLoading}
-                      title="Promote to Base"
-                    >
-                      ⬆️ Promote
-                    </button>
-                  </div>
-                )}
-                
-                {/* Import/Export Actions */}
-                <div className="sidebar-import-export">
-                  <button 
-                    className="version-btn-sidebar import"
-                    onClick={() => setShowImportModal(true)}
-                    title="Import Data"
-                  >
-                    📥 Import
-                  </button>
-                  <button 
-                    className="version-btn-sidebar export"
-                    onClick={() => handleExportGraph()}
-                    disabled={exportLoading}
-                    title="Export Graph"
-                  >
-                    {exportLoading ? '⏳' : '📤'} Export
-                  </button>
-                  
-                  <button 
-                    className="version-btn-sidebar smart-update"
-                    onClick={() => {
-                      setShowSmartUpdateModal(true);
-                      resetSmartUpdate();
-                    }}
-                    title="Smart Update with AI - Describe changes in natural language"
-                  >
-                    🧠 Smart Update
-                  </button>
-                </div>
               </div>
-            </div>
+            )}
+            <button 
+              className={`builder-toggle ${isBuilderMode ? 'active' : ''}`}
+              onClick={handleBuilderToggle}
+              title={isBuilderMode ? 'Switch to Explorer Mode' : 'Switch to Builder Mode'}
+            >
+              {isBuilderMode ? '🔍 Explorer' : '🔧 Builder'}
+            </button>
           </div>
+        </div>
+      </header>
+
+      {isBuilderMode && builderAuthenticated ? (
+        <>
+        {/* Builder Dashboard */}
+        <div className="builder-dashboard">
           
           <div className="builder-content">
 
@@ -1875,7 +1639,7 @@ const App: React.FC = () => {
             )}
 
             {/* Overview Section */}
-            {builderActiveSection === 'overview' && !builderLoading && (
+            {!builderLoading && (
               <div className="builder-overview">
                 <div className="node-cards-grid">
                   <div 
@@ -1934,46 +1698,57 @@ const App: React.FC = () => {
                     <span className="node-label">Projects</span>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Graph Section */}
-            {builderActiveSection === 'graph' && !builderLoading && (
-              <div className="builder-graph-section">
-                {graphLoading ? (
-                  <div className="builder-loading">
-                    <div className="spinner"></div>
-                    <p>Loading graph visualization...</p>
-                  </div>
-                ) : (
-                  <GraphViz
-                    nodes={graphData.nodes}
-                    edges={graphData.edges}
-                    nodeType="all"
-                    onNodeSelect={handleGraphNodeSelect}
-                    onNodeDoubleClick={handleGraphNodeEdit}
-                    onNavigateToNode={handleNavigateToNode}
-                    focusedNode={focusedGraphNode}
-                    height="600px"
-                    enableChat={true}
-                    graphVersion={currentGraphVersion}
-                    onGraphDataUpdate={handleGraphDataUpdate}
+                
+                {/* AI Query Assistant */}
+                <div className="chat-window">
+                  <ChatInterface
+                    onApplyQueryResult={handleApplyQueryResult}
+                    graphContext={{
+                      currentNodeType: selectedNodeType || 'all',
+                      graphVersion: currentGraphVersion
+                    }}
                   />
-                )}
+                </div>
+                
+                {/* Graph Visualization */}
+                <div className="builder-graph-section">
+                  {isAssistantUpdatingGraph && (
+                    <div className="assistant-update-indicator">
+                      <div className="assistant-update-message">
+                        <span className="assistant-icon">🤖</span>
+                        <span>Assistant is updating the graph based on your query...</span>
+                      </div>
+                    </div>
+                  )}
+                  {graphLoading ? (
+                    <div className="builder-loading">
+                      <div className="spinner"></div>
+                      <p>Loading graph visualization...</p>
+                    </div>
+                  ) : (
+                    <GraphViz
+                      key={`graph-${graphData.nodes.length}-${graphData.edges.length}`}
+                      nodes={graphData.nodes}
+                      edges={graphData.edges}
+                      nodeType="all"
+                      onNodeSelect={handleGraphNodeSelect}
+                      onNodeDoubleClick={handleGraphNodeEdit}
+                      onNavigateToNode={handleNavigateToNode}
+                      focusedNode={focusedGraphNode}
+                      height="600px"
+                      enableChat={true}
+                      graphVersion={currentGraphVersion}
+                      onGraphDataUpdate={handleGraphDataUpdate}
+                    />
+                  )}
+                </div>
               </div>
             )}
 
 
-            {/* Relationships Section */}
-            {builderActiveSection === 'relationships' && !builderLoading && (
-              <div className="builder-relationships">
-                <h3>Graph Relationships</h3>
-                <p>Relationship management interface coming soon...</p>
-              </div>
-            )}
           </div>
         </div>
-
+        </>
       ) : (
         /* User Workflow */
         <>
@@ -3101,6 +2876,42 @@ const App: React.FC = () => {
               )}
               
               <div className="manage-versions-footer">
+                <div className="manage-versions-actions">
+                  {currentGraphVersion === 'base' && (
+                    <button 
+                      className="modal-btn modal-btn-primary"
+                      onClick={createDraftVersion}
+                      disabled={builderLoading}
+                      title="Create Draft Version"
+                    >
+                      📝 Create Draft
+                    </button>
+                  )}
+                  
+                  <button 
+                    className="modal-btn modal-btn-primary"
+                    onClick={() => {
+                      setShowManageVersionsModal(false);
+                      setShowImportModal(true);
+                    }}
+                    title="Import Graph Data"
+                  >
+                    📥 Import
+                  </button>
+                  
+                  <button 
+                    className="modal-btn modal-btn-primary"
+                    onClick={() => {
+                      setShowManageVersionsModal(false);
+                      handleExportGraph();
+                    }}
+                    disabled={exportLoading}
+                    title="Export Current Graph"
+                  >
+                    {exportLoading ? '⏳' : '📤'} Export
+                  </button>
+                </div>
+                
                 <button 
                   className="modal-btn modal-btn-secondary"
                   onClick={() => setShowManageVersionsModal(false)}
@@ -3113,211 +2924,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Smart Update Modal */}
-      {showSmartUpdateModal && (
-        <div className="modal-backdrop" onClick={() => {
-          setShowSmartUpdateModal(false);
-          resetSmartUpdate();
-        }}>
-          <div className="modal-content smart-update-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>🧠 Smart Update with AI</h2>
-              <button className="modal-close" onClick={() => {
-                setShowSmartUpdateModal(false);
-                resetSmartUpdate();
-              }}>×</button>
-            </div>
-
-            <div className="smart-update-content">
-              {/* Step 1: Natural Language Input */}
-              {smartUpdateStep === 'input' && (
-                <div className="smart-update-step">
-                  <h3>Describe Your Graph Update</h3>
-                  <p>Use natural language to describe what you want to change in the graph. The AI will generate a Cypher query for you.</p>
-                  
-                  <div className="smart-update-examples">
-                    <h4>Examples:</h4>
-                    <ul>
-                      <li>"Update the Banking industry name to 'Digital Banking'"</li>
-                      <li>"Connect Risk Management department to Fraud Detection pain point"</li>
-                      <li>"Change the impact of Manual Process pain point to include cost savings"</li>
-                      <li>"Add a relationship between Retail Banking sector and Customer Service department"</li>
-                    </ul>
-                  </div>
-                  
-                  <textarea
-                    value={smartUpdateInput}
-                    onChange={(e) => setSmartUpdateInput(e.target.value)}
-                    placeholder="Describe the update you want to make..."
-                    rows={4}
-                    className="smart-update-input"
-                  />
-                  
-                  <div className="smart-update-actions">
-                    <button 
-                      className="modal-btn modal-btn-secondary" 
-                      onClick={() => {
-                        setShowSmartUpdateModal(false);
-                        resetSmartUpdate();
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      className="modal-btn modal-btn-primary" 
-                      onClick={() => generateCypherQuery(smartUpdateInput)}
-                      disabled={!smartUpdateInput.trim() || smartUpdateLoading}
-                    >
-                      {smartUpdateLoading ? '🧠 Generating...' : '🚀 Generate Query'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 2: Preview */}
-              {smartUpdateStep === 'preview' && (
-                <div className="smart-update-step">
-                  <h3>Preview Your Update</h3>
-                  
-                  <div className="generated-cypher">
-                    <h4>Generated Cypher Query (Iteration {currentIteration}):</h4>
-                    <pre className="cypher-code">{generatedCypher}</pre>
-                  </div>
-
-                  {/* Iterative Feedback Section */}
-                  <div className="feedback-section">
-                    <h4>💬 Provide Feedback (Optional)</h4>
-                    <p>Not satisfied with the query? Describe what you'd like to change:</p>
-                    <textarea
-                      value={feedbackInput}
-                      onChange={(e) => setFeedbackInput(e.target.value)}
-                      placeholder="e.g., 'Add a WHERE clause to limit this to only active sectors' or 'Also create the pain point if it doesn't exist'"
-                      rows={3}
-                      className="feedback-input"
-                    />
-                    <button 
-                      className="modal-btn modal-btn-secondary refine-btn" 
-                      onClick={() => refineSmartUpdate(feedbackInput)}
-                      disabled={smartUpdateLoading || !feedbackInput.trim()}
-                    >
-                      {smartUpdateLoading ? '🔄 Refining...' : '✨ Refine Query'}
-                    </button>
-                  </div>
-
-                  {/* Conversation History */}
-                  {conversationHistory.length > 0 && (
-                    <div className="conversation-history">
-                      <h4>📝 Conversation History:</h4>
-                      <div className="history-items">
-                        {conversationHistory.map((item, index) => (
-                          <div key={index} className="history-item">
-                            <div className="history-feedback">💭 Feedback {index + 1}: "{item.feedback}"</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="preview-actions">
-                    <button 
-                      className="modal-btn modal-btn-secondary" 
-                      onClick={() => generatePreview(generatedCypher)}
-                      disabled={smartUpdateLoading}
-                    >
-                      {smartUpdateLoading ? '⏳ Loading Preview...' : '👁️ Generate Preview'}
-                    </button>
-                  </div>
-                  
-                  {previewData && (
-                    <div className="update-preview">
-                      <h4>Preview Results:</h4>
-                      <div className="preview-summary">
-                        <p><strong>Before:</strong> {previewData.beforeState.nodes.length} nodes affected</p>
-                        {currentGraphVersion === 'base' ? (
-                          <div className="base-version-notice">
-                            <p><strong>📋 Base Version Notice:</strong> You're currently viewing the read-only base version.</p>
-                            <p><strong>Action:</strong> Changes will be applied to a new version to preserve the base data.</p>
-                          </div>
-                        ) : (
-                          <p><strong>After:</strong> Changes will be applied to create a new version</p>
-                        )}
-                        {previewData.afterState.changes && (
-                          <ul>
-                            {previewData.afterState.changes.map((change: string, i: number) => (
-                              <li key={i}>{change}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                      
-                      <div className="version-input">
-                        <label>
-                          {currentGraphVersion === 'base' 
-                            ? 'New Version Name (Required):' 
-                            : 'New Version Name:'}
-                        </label>
-                        <input 
-                          type="text" 
-                          placeholder={currentGraphVersion === 'base' 
-                            ? 'Enter name for new version (e.g., smart-update-2024-08-31)' 
-                            : 'e.g., banking-update, risk-connections'}
-                          className="version-name-input"
-                          id="newVersionNameInput"
-                          defaultValue={currentGraphVersion === 'base' 
-                            ? `smart-update-${new Date().toISOString().slice(0, 10)}` 
-                            : ''}
-                        />
-                        {currentGraphVersion === 'base' && (
-                          <small className="version-help-text">
-                            💡 A new version will be created to safely apply your changes without modifying the base data.
-                          </small>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="smart-update-actions">
-                    <button 
-                      className="modal-btn modal-btn-secondary" 
-                      onClick={() => setSmartUpdateStep('input')}
-                    >
-                      ← Back to Edit
-                    </button>
-                    {previewData && (
-                      <>
-                        <button 
-                          className="modal-btn modal-btn-secondary" 
-                          onClick={() => {
-                            setShowSmartUpdateModal(false);
-                            resetSmartUpdate();
-                          }}
-                        >
-                          Reject Update
-                        </button>
-                        <button 
-                          className="modal-btn modal-btn-primary" 
-                          onClick={() => {
-                            const versionInput = document.getElementById('newVersionNameInput') as HTMLInputElement;
-                            const versionName = versionInput?.value.trim();
-                            if (versionName) {
-                              applySmartUpdate(generatedCypher, versionName);
-                            } else {
-                              alert('Please enter a version name');
-                            }
-                          }}
-                          disabled={smartUpdateLoading}
-                        >
-                          {smartUpdateLoading ? '⏳ Applying...' : '✅ Accept & Apply'}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

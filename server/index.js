@@ -1171,6 +1171,46 @@ async function getAfterState(cypherQuery, beforeState, version = 'base') {
 
 // Chat interface API endpoints
 
+// Helper function to find all relationships between identified relevant nodes
+async function findAllRelationshipsBetweenNodes(nodes, version = 'base') {
+  if (!nodes || nodes.length === 0) {
+    return { nodes, edges: [] };
+  }
+  
+  // Extract node IDs
+  const nodeIds = nodes.map(n => n.id);
+  
+  // Build Cypher query to find all relationships between these specific nodes
+  const cypherQuery = `
+    MATCH (n)-[r]-(m) 
+    WHERE id(n) IN [${nodeIds.join(',')}] 
+    AND id(m) IN [${nodeIds.join(',')}]
+    AND id(n) < id(m)
+    RETURN n, r, m
+  `;
+  
+  console.log(`Finding all relationships between ${nodes.length} identified nodes...`);
+  console.log('Query:', cypherQuery);
+  
+  try {
+    const result = await executeCypherQuery(cypherQuery, version);
+    
+    // Use the original nodes, but include all found relationships
+    const allEdges = result.edges || [];
+    
+    console.log(`Found ${allEdges.length} additional relationships between the identified nodes`);
+    
+    return {
+      nodes: nodes, // Keep original nodes
+      edges: allEdges // Add all relationships between them
+    };
+  } catch (error) {
+    console.error('Error finding relationships between nodes:', error);
+    // Return original data if query fails
+    return { nodes, edges: [] };
+  }
+}
+
 // Process natural language query for graph exploration
 app.post('/api/chat/query', async (req, res) => {
   const { query, context = {}, conversationHistory = [] } = req.body;
@@ -1308,13 +1348,19 @@ app.post('/api/chat/query', async (req, res) => {
     // Generate concise answer based on the query results
     const conciseAnswer = generateConciseAnswer(query, graphData);
     
+    // Find all relationships between the identified relevant nodes
+    const enhancedGraphData = await findAllRelationshipsBetweenNodes(
+      graphData.nodes, 
+      context.graphVersion || 'base'
+    );
+    
     res.json({
       success: true,
       message: conciseAnswer,
       queryResult: {
         cypherQuery: finalCypher,
-        graphData,
-        summary: generateResultSummary(graphData),
+        graphData: enhancedGraphData,
+        summary: generateResultSummary(enhancedGraphData),
         executionTime,
         reasoning: cypherResult.reasoning,
         detailedExplanation: finalExplanation
@@ -1378,6 +1424,7 @@ async function generateCypherFromNaturalLanguage(query, context, conversationHis
     // Step 2: Run intermediate queries if needed
     let intermediateQueries = [];
     console.log('Intermediate queries to run:', reasoning.intermediateQueries);
+    const intermediateResults = []; // Store full intermediate results for merging
     if (reasoning.intermediateQueries && reasoning.intermediateQueries.length > 0) {
       for (const intQuery of reasoning.intermediateQueries) {
         try {
@@ -1389,6 +1436,8 @@ async function generateCypherFromNaturalLanguage(query, context, conversationHis
             purpose: intQuery.purpose,
             result: summarizeQueryResult(result)
           });
+          // Store full result for merging
+          intermediateResults.push(result);
         } catch (error) {
           console.log(`Intermediate query failed: ${intQuery.query}`, error.message);
           intermediateQueries.push({
@@ -1401,6 +1450,9 @@ async function generateCypherFromNaturalLanguage(query, context, conversationHis
     } else {
       console.log('No intermediate queries provided by reasoning step');
     }
+
+    // Store intermediate results in context for later merging
+    context.intermediateResults = intermediateResults;
 
     // Step 3: Generate final query with context from intermediate results
     const finalQuery = await generateFinalQuery(query, context, graphSchema, reasoning, intermediateQueries);
@@ -1499,6 +1551,15 @@ async function generateReasoningAndInterpretations(query, context, graphSchema, 
   - "MATCH (d:Department) WHERE toLower(d.name) CONTAINS toLower('retail') RETURN d LIMIT 5" - to find retail departments
   
   ALWAYS use toLower() for case-insensitive matching in intermediate queries.
+  
+  CRITICAL FOR GRAPH VISUALIZATION: When your query involves relationships between nodes, you MUST:
+  1. Give each relationship a variable name (e.g., r1, r2, rel1, etc.)
+  2. ALWAYS include the relationship variables in the RETURN clause
+  3. Example: Instead of "MATCH (a)-[:REL]->(b) RETURN a, b"
+           Use: "MATCH (a)-[r:REL]->(b) RETURN a, r, b"
+           Or: "MATCH (s)-[r1:EXPERIENCES]->(p)<-[r2:EXPERIENCES]-(d) RETURN s, r1, p, r2, d"
+  
+  This is essential for the graph visualization to show the relationships between nodes.
 
   If clarification is needed, format it as:
   {
@@ -1565,11 +1626,18 @@ async function generateFinalQuery(query, context, graphSchema, reasoning, interm
   8. Use "RETURN n" instead of "RETURN n.name AS name" for single node type queries
   9. For multiple node types use: "RETURN n AS node, labels(n)[0] AS type"
   10. ALWAYS use case-insensitive matching for node names: WHERE toLower(n.name) = toLower('NodeName')
-  11. Examples of CORRECT queries:
+  11. RELATIONSHIP VISUALIZATION: When your query involves relationships between nodes, you MUST:
+      - Give each relationship a variable name (e.g., r, r1, r2, rel, etc.)
+      - ALWAYS include the relationship variables in the RETURN clause
+      - Example: Instead of "MATCH (a)-[:REL]->(b) RETURN a, b"
+                Use: "MATCH (a)-[r:REL]->(b) RETURN a, r, b"
+                Or: "MATCH (s)-[r1:EXPERIENCES]->(p)<-[r2:EXPERIENCES]-(d) RETURN s, r1, p, r2, d"
+  12. Examples of CORRECT queries:
       - "MATCH (n:Industry) RETURN n LIMIT 50" (returns full Industry nodes)
       - "MATCH (n:Sector) RETURN n LIMIT 50" (returns full Sector nodes)  
       - "MATCH (n:Industry) WHERE toLower(n.name) = toLower('Banking') RETURN n LIMIT 50" (case-insensitive)
       - "MATCH (n:Industry) RETURN n AS node LIMIT 25 UNION MATCH (m:Sector) RETURN m AS node LIMIT 25" (multiple types)
+      - "MATCH (s:Sector)-[r:EXPERIENCES]->(p:PainPoint) RETURN s, r, p LIMIT 20" (with relationships)
 
   Generate a syntactically correct Cypher query and respond in JSON format.
   

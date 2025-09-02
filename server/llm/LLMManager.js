@@ -137,9 +137,10 @@ class LLMManager {
         lastError = error;
         console.error(`[LLMManager] Provider ${this.currentProvider.name} failed:`, error.message);
 
-        // Check if it's a quota exceeded error
-        if (this.currentProvider.isQuotaExceeded(error)) {
-          console.log(`[LLMManager] Quota exceeded for ${this.currentProvider.name}, attempting fallback`);
+        // Check if it's a quota exceeded error or access denied error
+        if (this.currentProvider.isQuotaExceeded(error) || this.isAccessDeniedError(error)) {
+          const errorType = this.currentProvider.isQuotaExceeded(error) ? 'Quota exceeded' : 'Access denied';
+          console.log(`[LLMManager] ${errorType} for ${this.currentProvider.name}, attempting fallback`);
           
           if (!this.switchToNextProvider()) {
             throw new Error(`All providers exhausted. Last error from ${this.currentProvider?.name}: ${error.message}`);
@@ -149,7 +150,7 @@ class LLMManager {
           continue;
         }
         
-        // If it's not a quota error, don't try other providers
+        // If it's not a quota or access error, don't try other providers
         throw error;
       }
     }
@@ -193,6 +194,29 @@ class LLMManager {
    */
   hasConfiguredProviders() {
     return Array.from(this.providers.values()).some(provider => provider.isConfigured());
+  }
+
+  /**
+   * Check if an error indicates access denied (403) or authentication issues
+   * @param {Error} error - The error to check
+   * @returns {boolean} True if access denied
+   */
+  isAccessDeniedError(error) {
+    if (!error) return false;
+    
+    const message = error.message?.toLowerCase() || '';
+    const status = error.status || error.statusCode;
+    
+    // Access denied indicators
+    return (
+      status === 403 || // Forbidden
+      status === 401 || // Unauthorized
+      message.includes('access denied') ||
+      message.includes('forbidden') ||
+      message.includes('unauthorized') ||
+      message.includes('invalid api key') ||
+      message.includes('authentication failed')
+    );
   }
 }
 

@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import ChatInterface from './components/ChatInterface';
 import { GraphNode, GraphEdge, ChatQueryResult } from './types';
 
 interface GraphVizProps {
@@ -29,6 +28,16 @@ const GraphViz: React.FC<GraphVizProps> = ({
   graphVersion = 'base',
   onGraphDataUpdate
 }) => {
+  // Debug: Log when props change
+  useEffect(() => {
+    console.log('GraphViz props updated:');
+    console.log('- Nodes count:', nodes.length);
+    console.log('- Edges count:', edges.length);
+    if (nodes.length > 0) {
+      const nodeTypes = new Set(nodes.slice(0, 10).map(n => n.group));
+      console.log('- Sample node types:', Array.from(nodeTypes));
+    }
+  }, [nodes, edges]);
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedNodeData, setSelectedNodeData] = useState<GraphNode | null>(null);
@@ -43,23 +52,28 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [editingNodeName, setEditingNodeName] = useState<boolean>(false);
   const [editedNodeName, setEditedNodeName] = useState<string>('');
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState<boolean>(false);
   const [chatQueryResults, setChatQueryResults] = useState<{ nodes: GraphNode[], edges: GraphEdge[] } | null>(null);
   const [showingChatResults, setShowingChatResults] = useState<boolean>(false);
   const animationRef = useRef<number>();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Chat functionality
-  const handleChatToggle = () => {
-    setChatOpen(!chatOpen);
-  };
 
   const handleApplyQueryResult = (queryResult: ChatQueryResult) => {
-    setChatQueryResults(queryResult.graphData);
-    setShowingChatResults(true);
+    console.log('handleApplyQueryResult called with:', queryResult);
+    console.log('Graph data:', queryResult.graphData);
+    console.log('Nodes count:', queryResult.graphData.nodes.length);
+    console.log('Edges count:', queryResult.graphData.edges.length);
     
-    // Note: We don't call onGraphDataUpdate here because GraphViz handles
-    // chat results internally via chatQueryResults state to avoid conflicts
+    // Update the main catalog builder graph with query results
+    if (onGraphDataUpdate) {
+      console.log('Calling onGraphDataUpdate to update main catalog builder graph');
+      onGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
+    } else {
+      console.log('WARNING: onGraphDataUpdate not available, falling back to internal state');
+      setChatQueryResults(queryResult.graphData);
+      setShowingChatResults(true);
+    }
   };
 
   const handleReturnToOriginalView = () => {
@@ -228,7 +242,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const runSimulation = useCallback(() => {
     if (simulationNodes.length === 0) return;
 
-    const currentData = getCurrentGraphData();
+    const currentData = { nodes, edges };
     const alpha = 0.01;
     const repelForce = 2000; // Increased repulsion
     const linkForce = 0.03;
@@ -401,8 +415,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   // Initialize node positions with better spacing and hierarchy
   useEffect(() => {
-    const currentData = getCurrentGraphData();
+    const currentData = { nodes, edges };
     if (currentData.nodes.length === 0) return;
+
+    console.log('Reinitializing node positions with data:', currentData.nodes.length, 'nodes');
 
     // Find connected components for initial positioning
     const components = findConnectedComponents(currentData.nodes, currentData.edges);
@@ -596,7 +612,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   // Get direct connections for a node
   const getDirectConnections = useCallback((nodeId: string): Set<string> => {
-    const currentData = getCurrentGraphData();
+    const currentData = { nodes, edges };
     const connections = new Set<string>();
     currentData.edges.forEach(edge => {
       if (edge.from === nodeId) {
@@ -794,7 +810,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
           
           {/* Edges */}
           <g className="edges">
-            {getCurrentGraphData().edges.map(edge => {
+            {edges.map(edge => {
               const source = simulationNodes.find(n => n.id === edge.from);
               const target = simulationNodes.find(n => n.id === edge.to);
               
@@ -1200,19 +1216,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
         </div>
       </div>
 
-      {/* Chat Interface */}
-      {enableChat && (
-        <ChatInterface
-          isOpen={chatOpen}
-          onToggle={handleChatToggle}
-          onApplyQueryResult={handleApplyQueryResult}
-          graphContext={{
-            currentNodeType: nodeType,
-            selectedNodes: selectedNode ? [selectedNode] : [],
-            graphVersion: graphVersion
-          }}
-        />
-      )}
 
       {/* Return to Original View Button */}
       {showingChatResults && (

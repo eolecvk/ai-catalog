@@ -3,8 +3,6 @@ import { ChatMessage as ChatMessageType, ChatQueryResult, ChatApiRequest, ChatAp
 import ChatMessage from './ChatMessage';
 
 interface ChatInterfaceProps {
-  isOpen: boolean;
-  onToggle: () => void;
   onApplyQueryResult?: (queryResult: ChatQueryResult) => void;
   graphContext?: {
     currentNodeType?: string;
@@ -14,8 +12,6 @@ interface ChatInterfaceProps {
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  isOpen, 
-  onToggle, 
   onApplyQueryResult,
   graphContext 
 }) => {
@@ -34,10 +30,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   }, [messages]);
 
   useEffect(() => {
-    if (isOpen && inputRef.current) {
+    if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [isOpen]);
+  }, []);
 
   const generateMessageId = () => {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -173,13 +169,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   useEffect(() => {
-    if (isOpen && messages.length === 0) {
+    if (messages.length === 0) {
       addWelcomeMessage();
     }
-  }, [isOpen]);
+  }, []);
 
   return (
-    <div className={`chat-interface ${isOpen ? 'open' : 'closed'}`}>
+    <div className="chat-interface open">
       <div className="chat-header">
         <div className="chat-title">
           <span className="chat-icon">💬</span>
@@ -194,18 +190,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           >
             🗑️
           </button>
-          <button 
-            className="toggle-chat-btn"
-            onClick={onToggle}
-            title={isOpen ? 'Minimize chat' : 'Open chat'}
-          >
-            {isOpen ? '🔽' : '🔼'}
-          </button>
         </div>
       </div>
 
-      {isOpen && (
-        <div className="chat-body">
+      <div className="chat-body">
           <div className="chat-messages">
             {messages.map(message => (
               <ChatMessage 
@@ -241,19 +229,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </div>
           </form>
         </div>
-      )}
-
-      {!isOpen && (
-        <div className="chat-minimized">
-          <button 
-            className="chat-expand-btn"
-            onClick={onToggle}
-            title="Open graph query assistant"
-          >
-            💬 Ask AI
-          </button>
-        </div>
-      )}
     </div>
   );
 };
