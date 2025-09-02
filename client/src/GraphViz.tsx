@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GraphNode, GraphEdge, ChatQueryResult } from './types';
+import ChatInterface from './components/ChatInterface';
 
 interface GraphVizProps {
   nodes: GraphNode[];
@@ -54,6 +55,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [chatQueryResults, setChatQueryResults] = useState<{ nodes: GraphNode[], edges: GraphEdge[] } | null>(null);
   const [showingChatResults, setShowingChatResults] = useState<boolean>(false);
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState<boolean>(false);
   const animationRef = useRef<number>();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -110,7 +112,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {
     // Base dimensions that work well for most graphs
-    const baseWidth = sidePanelCollapsed ? 1200 : 800; // Adjust for panel visibility
+    const baseWidth = sidePanelCollapsed ? 1200 : 800; // Adjust for right panel visibility
     const baseHeight = parseInt(height) || 700;
     
     // Auto-zoom calculation: zoom out when there are many nodes
@@ -129,7 +131,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const heightNum = Math.min(1500, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
     
     return { width, heightNum, combinedScaleFactor };
-  }, [nodes.length, edges.length, height, sidePanelCollapsed]);
+  }, [nodes.length, edges.length, height, sidePanelCollapsed, leftPanelCollapsed]);
 
   const { width, heightNum, combinedScaleFactor } = getCanvasSize();
 
@@ -536,6 +538,11 @@ const GraphViz: React.FC<GraphVizProps> = ({
     setSidePanelCollapsed(!sidePanelCollapsed);
   };
 
+  // Toggle left panel visibility
+  const toggleLeftPanel = () => {
+    setLeftPanelCollapsed(!leftPanelCollapsed);
+  };
+
   // Animation loop
   useEffect(() => {
     const animate = () => {
@@ -724,8 +731,33 @@ const GraphViz: React.FC<GraphVizProps> = ({
   return (
     <div ref={containerRef} className="graph-viz-container">
 
-      {/* Main Content Area - Side by Side Layout */}
-      <div className="graph-main-content">
+      {/* Main Content Area - Three Panel Layout */}
+      <div className="graph-main-content three-panel-layout">
+        {/* Left Panel - Query Agent */}
+        <div className={`graph-left-panel ${leftPanelCollapsed ? 'collapsed' : ''}`}>
+          {!leftPanelCollapsed && (
+            <div className="left-panel-content">
+              <ChatInterface
+                onApplyQueryResult={handleApplyQueryResult}
+                onNavigateToNode={onNavigateToNode}
+                graphContext={{
+                  currentNodeType: nodeType,
+                  selectedNodes: selectedNode ? [selectedNode] : [],
+                  graphVersion
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Left Panel Toggle Button */}
+        <button 
+          className="left-panel-toggle-btn"
+          onClick={toggleLeftPanel}
+          title={leftPanelCollapsed ? "Show query panel" : "Hide query panel"}
+        >
+          {leftPanelCollapsed ? '▶' : '◀'}
+        </button>
         {/* Panel Toggle Button - Fixed Position */}
         <button 
           className="side-panel-toggle-btn-fixed"
@@ -735,9 +767,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
           {sidePanelCollapsed ? '◀' : '▶'}
         </button>
         
-        {/* Graph Canvas */}
+        {/* Graph Canvas - Center Panel */}
         <div 
-          className={`graph-canvas-container ${sidePanelCollapsed ? 'full-width' : ''}`}
+          className={`graph-canvas-container center-panel ${sidePanelCollapsed ? 'right-collapsed' : ''} ${leftPanelCollapsed ? 'left-collapsed' : ''}`}
         >
           <div 
             className={`graph-canvas-2d ${focusedNodeId ? 'focused' : ''}`}

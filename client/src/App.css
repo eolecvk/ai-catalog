@@ -2891,7 +2891,11 @@ html, body {
   min-height: 0;
   box-sizing: border-box;
   position: relative;
-  gap: 1rem; /* Add spacing between graph and side panel */
+  gap: 1rem; /* Add spacing between panels */
+}
+
+.graph-main-content.three-panel-layout {
+  align-items: stretch; /* Ensure all panels are same height */
 }
 
 .graph-canvas-container {
@@ -2904,6 +2908,18 @@ html, body {
   width: 0; /* Force flex child to respect container */
   box-sizing: border-box;
   height: 700px; /* Match side panel height exactly */
+}
+
+.graph-canvas-container.center-panel {
+  position: relative;
+}
+
+.graph-canvas-container.left-collapsed {
+  /* Add more space when left panel is collapsed */
+}
+
+.graph-canvas-container.right-collapsed {
+  margin-right: 0;
 }
 
 .graph-canvas-container.full-width {
@@ -2977,8 +2993,21 @@ html, body {
     height: 600px; /* Maintain fixed height */
   }
   
+  .graph-left-panel {
+    width: 350px;
+    height: 600px; /* Match graph visualization height */
+  }
+  
   .graph-canvas-container {
     height: 600px; /* Match side panel height at this breakpoint */
+  }
+  
+  .left-panel-toggle-btn {
+    left: calc(350px + 1rem);
+  }
+  
+  .graph-main-content.three-panel-layout .left-panel-toggle-btn {
+    left: calc(350px + 0.5rem);
   }
 }
 
@@ -2986,6 +3015,11 @@ html, body {
   .graph-side-panel {
     width: 320px;
     height: 550px; /* Maintain fixed height */
+  }
+  
+  .graph-left-panel {
+    width: 320px;
+    height: 550px; /* Match graph visualization height */
   }
   
   .graph-canvas-container {
@@ -2996,11 +3030,37 @@ html, body {
   .side-panel-content {
     padding: 0.75rem; /* Reduced for tablets */
   }
+  
+  .left-panel-toggle-btn {
+    left: calc(320px + 1rem);
+  }
+  
+  .graph-main-content.three-panel-layout .left-panel-toggle-btn {
+    left: calc(320px + 0.5rem);
+  }
 }
 
 @media (max-width: 768px) {
   .graph-main-content {
     flex-direction: column;
+  }
+  
+  .graph-main-content.three-panel-layout {
+    flex-direction: column;
+  }
+  
+  .graph-left-panel {
+    width: 100%;
+    height: 350px; /* Fixed height for mobile */
+    order: 0; /* Reset order for mobile stacking */
+    border-top: none;
+    border-bottom: 1px solid #dee2e6;
+    flex-shrink: 0;
+  }
+  
+  .graph-left-panel.collapsed {
+    height: 0;
+    border-bottom: none;
   }
   
   .graph-side-panel {
@@ -3009,6 +3069,15 @@ html, body {
     border-left: none;
     border-top: 1px solid #dee2e6;
     flex-shrink: 0; /* Prevent shrinking to maintain fixed height */
+  }
+  
+  .left-panel-toggle-btn {
+    position: static;
+    transform: none;
+    width: 100%;
+    height: 30px;
+    border-radius: 0;
+    margin: 0.5rem 0;
   }
   
   .graph-side-panel.collapsed {
@@ -3116,6 +3185,73 @@ html, body {
 .graph-side-panel.collapsed {
   width: 0;
   border-left: none;
+}
+
+/* Left Panel Styles */
+.graph-left-panel {
+  width: 400px;
+  height: 700px; /* Match graph visualization height */
+  flex-shrink: 0;
+  flex-grow: 0;
+  background: white;
+  border: 1px solid #bdc3c7;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s ease;
+  overflow: hidden;
+  box-sizing: border-box;
+  position: relative;
+  order: -1; /* Ensure it appears on the left */
+}
+
+.graph-left-panel.collapsed {
+  width: 0;
+  border: none;
+}
+
+.left-panel-content {
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.left-panel-toggle-btn {
+  position: absolute;
+  top: 50%;
+  left: calc(400px + 1rem); /* Position after left panel */
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  border: 1px solid #bdc3c7;
+  border-radius: 4px;
+  width: 24px;
+  height: 40px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  z-index: 1000;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.graph-main-content.three-panel-layout .left-panel-toggle-btn {
+  left: calc(400px + 0.5rem); /* Adjust position in three-panel layout */
+}
+
+.graph-left-panel.collapsed ~ .left-panel-toggle-btn {
+  left: 0.5rem; /* Position near left edge when panel is collapsed */
+}
+
+.left-panel-toggle-btn:hover {
+  background: white;
+  border-color: #2c3e50;
+  transform: translateY(-50%) scale(1.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
 }
 
 

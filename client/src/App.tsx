@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
 import ChatInterface from './components/ChatInterface';
-import TabbedSidebar from './components/TabbedSidebar';
 import './App.css';
 
 const App: React.FC = () => {
@@ -1685,31 +1684,6 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Secondary Panel - Tabbed Sidebar */}
-              <div className="secondary-panel">
-                <TabbedSidebar
-                  onApplyQueryResult={handleApplyQueryResult}
-                  onNavigateToNode={(nodeId) => handleGraphNodeSelect(nodeId, null)}
-                  graphContext={{
-                    currentNodeType: selectedNodeType || undefined,
-                    selectedNodes: [],
-                    graphVersion: currentGraphVersion
-                  }}
-                  nodeStats={{
-                    industries: builderStats?.Industry || 0,
-                    sectors: builderStats?.Sector || 0,
-                    departments: builderStats?.Department || 0,
-                    painPoints: builderStats?.PainPoint || 0,
-                    projects: builderStats?.ProjectOpportunity || 0
-                  }}
-                  selectedNodeDetails={focusedGraphNode ? {
-                    type: focusedGraphNode.split(':')[0] || 'Unknown',
-                    label: focusedGraphNode.split(':')[1] || focusedGraphNode,
-                    properties: {},
-                    relationships: []
-                  } : null}
-                />
-              </div>
             </>
           )}
         </div>
