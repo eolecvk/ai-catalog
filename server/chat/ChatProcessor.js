@@ -210,6 +210,11 @@ Intent Types:
         contextData.relatedData = await this.gatherCreativeContext(classification.entities, session);
       }
 
+      // Always explore connection paths for relationship queries
+      if (classification.type === 'QUERY' && classification.entities.length > 0) {
+        contextData.connectionPaths = await this.exploreConnectionPaths(classification.entities, session);
+      }
+
       return contextData;
     } finally {
       await session.close();
@@ -298,6 +303,198 @@ Intent Types:
     return contextData;
   }
 
+  async exploreConnectionPaths(entities, session) {
+    const connectionData = {
+      directConnections: {},
+      indirectConnections: {},
+      pathSummary: {}
+    };
+
+    try {
+      // For each entity, explore both direct and indirect connections
+      for (const entity of entities) {
+        // Check if entity is a node type (like "Sector") vs specific name (like "Banking")
+        const isNodeType = this.graphSchema.nodeLabels.includes(entity);
+        
+        let directQuery;
+        if (isNodeType) {
+          // Search for nodes by label
+          directQuery = `
+            MATCH (n:${entity})
+            OPTIONAL MATCH (n)-[r1]->(direct)
+            OPTIONAL MATCH (source)-[r2]->(n)
+            RETURN n, 
+                   collect(DISTINCT {node: direct, relationship: type(r1), direction: 'outgoing'}) as outgoing,
+                   collect(DISTINCT {node: source, relationship: type(r2), direction: 'incoming'}) as incoming
+            LIMIT 10
+          `;
+        } else {
+          // Search for nodes by name
+          directQuery = `
+            MATCH (n) 
+            WHERE toLower(n.name) CONTAINS toLower($entity) OR toLower(n.title) CONTAINS toLower($entity)
+            OPTIONAL MATCH (n)-[r1]->(direct)
+            OPTIONAL MATCH (source)-[r2]->(n)
+            RETURN n, 
+                   collect(DISTINCT {node: direct, relationship: type(r1), direction: 'outgoing'}) as outgoing,
+                   collect(DISTINCT {node: source, relationship: type(r2), direction: 'incoming'}) as incoming
+            LIMIT 5
+          `;
+        }
+
+        const directResult = await session.run(directQuery, { entity });
+        const directConnections = [];
+        
+        directResult.records.forEach(record => {
+          const node = record.get('n');
+          const outgoing = record.get('outgoing').filter(conn => conn.node !== null);
+          const incoming = record.get('incoming').filter(conn => conn.node !== null);
+          
+          if (outgoing.length > 0 || incoming.length > 0) {
+            directConnections.push({
+              centerNode: node.properties,
+              centerLabels: node.labels,
+              outgoing: outgoing,
+              incoming: incoming
+            });
+          }
+        });
+
+        connectionData.directConnections[entity] = directConnections;
+
+        // Find indirect connections (2-3 hops)
+        let indirectQuery;
+        if (isNodeType) {
+          indirectQuery = `
+            MATCH (n:${entity})
+            MATCH path = (n)-[*2..3]->(target)
+            WHERE NOT target = n
+            RETURN n as source, 
+                   target,
+                   length(path) as pathLength,
+                   [rel in relationships(path) | type(rel)] as relationshipTypes,
+                   [node in nodes(path)[1..-1] | {labels: labels(node), properties: node.properties}] as pathNodes
+            LIMIT 15
+          `;
+        } else {
+          indirectQuery = `
+            MATCH (n) 
+            WHERE toLower(n.name) CONTAINS toLower($entity) OR toLower(n.title) CONTAINS toLower($entity)
+            MATCH path = (n)-[*2..3]->(target)
+            WHERE NOT target = n
+            RETURN n as source, 
+                   target,
+                   length(path) as pathLength,
+                   [rel in relationships(path) | type(rel)] as relationshipTypes,
+                   [node in nodes(path)[1..-1] | {labels: labels(node), properties: node.properties}] as pathNodes
+            LIMIT 10
+          `;
+        }
+
+        const indirectResult = await session.run(indirectQuery, { entity });
+        const indirectConnections = [];
+
+        indirectResult.records.forEach(record => {
+          const pathLength = record.get('pathLength').toNumber();
+          const relationshipTypes = record.get('relationshipTypes');
+          const pathNodes = record.get('pathNodes');
+          const target = record.get('target');
+
+          indirectConnections.push({
+            pathLength: pathLength,
+            relationshipTypes: relationshipTypes,
+            pathNodes: pathNodes,
+            target: target.properties,
+            targetLabels: target.labels
+          });
+        });
+
+        connectionData.indirectConnections[entity] = indirectConnections;
+
+        // Create path summary for this entity
+        const totalDirect = directConnections.reduce((sum, conn) => 
+          sum + conn.outgoing.length + conn.incoming.length, 0);
+        const totalIndirect = indirectConnections.length;
+
+        connectionData.pathSummary[entity] = {
+          directConnections: totalDirect,
+          indirectConnections: totalIndirect,
+          hasConnections: totalDirect > 0 || totalIndirect > 0,
+          recommendPathExploration: totalDirect === 0 && totalIndirect > 0
+        };
+      }
+
+      // For multi-entity queries, also look for shared connections
+      if (entities.length > 1) {
+        const nodeTypes = entities.filter(e => this.graphSchema.nodeLabels.includes(e));
+        if (nodeTypes.length === 2) {
+          await this.exploreSharedConnections(nodeTypes, connectionData, session);
+        }
+      }
+
+      return connectionData;
+    } catch (error) {
+      console.error('Error exploring connection paths:', error);
+      return connectionData; // Return partial data even if there's an error
+    }
+  }
+
+  async exploreSharedConnections(nodeTypes, connectionData, session) {
+    try {
+      // Look for shared connections between two node types through intermediate nodes
+      const [type1, type2] = nodeTypes;
+      
+      // Find shared PainPoints between sectors and departments
+      const sharedPainPointsQuery = `
+        MATCH (a:${type1})-[:EXPERIENCES]->(pp:PainPoint)<-[:EXPERIENCES]-(b:${type2})
+        RETURN a, pp, b, 'EXPERIENCES' as sharedRelation
+        LIMIT 20
+        UNION
+        MATCH (a:${type1})-[:HAS_OPPORTUNITY]->(po:ProjectOpportunity)-[:TARGETS_DEPARTMENT]->(b:${type2})
+        RETURN a, po as pp, b, 'PROJECT_CONNECTION' as sharedRelation
+        LIMIT 20
+      `;
+      
+      const sharedResult = await session.run(sharedPainPointsQuery);
+      const sharedConnections = [];
+      
+      sharedResult.records.forEach(record => {
+        const nodeA = record.get('a');
+        const intermediate = record.get('pp');
+        const nodeB = record.get('b');
+        const relationType = record.get('sharedRelation');
+        
+        sharedConnections.push({
+          pathLength: 2,
+          relationshipTypes: [relationType],
+          pathNodes: [intermediate],
+          source: nodeA.properties,
+          target: nodeB.properties,
+          intermediate: intermediate.properties,
+          connectionType: 'shared'
+        });
+      });
+      
+      // Add shared connections to the connection data
+      if (sharedConnections.length > 0) {
+        const sharedSummary = {
+          sharedConnections: sharedConnections.length,
+          hasSharedConnections: true,
+          connectionTypes: [...new Set(sharedConnections.map(c => c.relationshipTypes[0]))]
+        };
+        
+        connectionData.sharedConnections = {
+          [type1 + '_' + type2]: sharedConnections
+        };
+        
+        connectionData.pathSummary.sharedConnections = sharedSummary;
+      }
+      
+    } catch (error) {
+      console.error('Error exploring shared connections:', error);
+    }
+  }
+
   async routeToProcessor(classification, contextData, query, conversationHistory, reasoningSteps = []) {
     switch (classification.type) {
       case 'QUERY':
@@ -383,13 +580,26 @@ Intent Types:
         }
       });
       
+      // Include connection strategy information in the response
+      let enhancedMessage = cypherQuery.explanation || 'Here are the results:';
+      if (cypherQuery.connectionStrategy) {
+        const strategyInfo = {
+          'direct': 'showing direct connections',
+          'indirect': 'showing indirect connections through intermediate nodes',
+          'both': 'showing both direct and indirect connections'
+        };
+        enhancedMessage += ` (${strategyInfo[cypherQuery.connectionStrategy] || 'exploring connections'})`;
+      }
+      
       return {
         success: true,
-        message: cypherQuery.explanation || 'Here are the results:',
+        message: enhancedMessage,
         queryResult: {
           type: 'query',
           graphData,
-          cypherQuery: cypherQuery.query // Make sure this is passed to frontend
+          cypherQuery: cypherQuery.query,
+          connectionPaths: contextData.connectionPaths,
+          connectionStrategy: cypherQuery.connectionStrategy
         }
       };
     } catch (error) {
@@ -543,8 +753,35 @@ Provide a clear, structured analysis with specific insights and comparisons.
   }
 
   async generateCypherQuery(query, entities, contextData, reasoningSteps = []) {
+    // Generate connection context summary
+    let connectionContext = '';
+    if (contextData.connectionPaths) {
+      connectionContext = '\n# Connection Analysis\n';
+      for (const [entity, summary] of Object.entries(contextData.connectionPaths.pathSummary)) {
+        if (entity === 'sharedConnections') {
+          connectionContext += `- Shared connections found: ${summary.sharedConnections} connections of types: ${summary.connectionTypes.join(', ')}\n`;
+          connectionContext += `  * Recommendation: Use shared connection patterns\n`;
+        } else {
+          connectionContext += `- ${entity}: ${summary.directConnections} direct, ${summary.indirectConnections} indirect connections\n`;
+          if (summary.recommendPathExploration) {
+            connectionContext += `  * Recommendation: Use indirect paths (${summary.indirectConnections} found)\n`;
+          }
+        }
+      }
+      
+      // Add shared connection details if available
+      if (contextData.connectionPaths.sharedConnections) {
+        connectionContext += '\n# Shared Connection Patterns:\n';
+        for (const [key, connections] of Object.entries(contextData.connectionPaths.sharedConnections)) {
+          connectionContext += `- ${key}: Found ${connections.length} shared connections\n`;
+          const sampleConnection = connections[0];
+          connectionContext += `  * Example: ${sampleConnection.source.name} -> ${sampleConnection.intermediate.name} <- ${sampleConnection.target.name}\n`;
+        }
+      }
+    }
+
     const prompt = `
-Generate a Cypher query for Neo4j based on the user request.
+Generate a Cypher query for Neo4j based on the user request and connection analysis.
 
 # Graph Schema
 ${this.graphSchema.relationships.join('\n')}
@@ -557,6 +794,20 @@ ${entities.join(', ')}
 
 # Available Context
 ${Object.keys(contextData.entities).join(', ')}
+${connectionContext}
+
+CRITICAL Cypher Syntax Rules:
+- relationships() function requires a Path, not a Node
+- Variable-length patterns: [:REL*1..3] not [:REL1|REL2*1..3] 
+- For paths: MATCH path = (a)-[*1..3]->(b) RETURN nodes(path), relationships(path)
+- For direct relationships: MATCH (a)-[r:REL]->(b) RETURN a, r, b
+- For shared connections: MATCH (a)-[:REL1]->(shared)<-[:REL2]-(b) RETURN a, shared, b
+
+Connection Strategy:
+- If direct connections exist, include them in results
+- If no direct connections but indirect ones exist, use variable-length relationships
+- For multi-entity queries, look for shared connections through intermediate nodes
+- NEVER use relationships(node) - only relationships(path)
 
 CRITICAL: Respond with ONLY pure JSON. No markdown, no backticks, no code blocks.
 
@@ -564,7 +815,8 @@ JSON format:
 {
   "query": "MATCH... RETURN...",
   "params": {},
-  "explanation": "brief explanation of what this query does"
+  "explanation": "brief explanation of what this query does and what connection types it explores",
+  "connectionStrategy": "direct|indirect|both"
 }
 
 Make queries efficient and return relevant graph structure for visualization.
@@ -666,31 +918,14 @@ JSON format:
         const value = record.get(key);
         
         if (value && typeof value === 'object') {
-          // Handle Neo4j nodes
-          if (value.identity !== undefined && value.labels) {
-            const nodeId = value.identity.toString();
-            if (!nodes.has(nodeId)) {
-              nodes.set(nodeId, {
-                id: nodeId,
-                label: value.properties.name || value.properties.title || 'Unnamed',
-                group: value.labels[0] || 'Unknown',
-                properties: value.properties
-              });
-            }
-          }
-          
-          // Handle Neo4j relationships
-          if (value.type && value.start && value.end) {
-            const edgeId = `${value.start}-${value.end}-${value.type}`;
-            if (!edges.has(edgeId)) {
-              edges.set(edgeId, {
-                id: edgeId,
-                from: value.start.toString(),
-                to: value.end.toString(),
-                label: value.type,
-                properties: value.properties || {}
-              });
-            }
+          // Handle arrays (from nodes(path) and relationships(path))
+          if (Array.isArray(value)) {
+            value.forEach(item => {
+              this.processGraphItem(item, nodes, edges);
+            });
+          } else {
+            // Handle single items (direct node/relationship returns)
+            this.processGraphItem(value, nodes, edges);
           }
         }
       });
@@ -700,6 +935,37 @@ JSON format:
       nodes: Array.from(nodes.values()),
       edges: Array.from(edges.values())
     };
+  }
+
+  processGraphItem(item, nodes, edges) {
+    if (!item || typeof item !== 'object') return;
+    
+    // Handle Neo4j nodes
+    if (item.identity !== undefined && item.labels) {
+      const nodeId = item.identity.toString();
+      if (!nodes.has(nodeId)) {
+        nodes.set(nodeId, {
+          id: nodeId,
+          label: item.properties.name || item.properties.title || 'Unnamed',
+          group: item.labels[0] || 'Unknown',
+          properties: item.properties
+        });
+      }
+    }
+    
+    // Handle Neo4j relationships
+    if (item.type && item.start && item.end) {
+      const edgeId = `${item.start}-${item.end}-${item.type}`;
+      if (!edges.has(edgeId)) {
+        edges.set(edgeId, {
+          id: edgeId,
+          from: item.start.toString(),
+          to: item.end.toString(),
+          label: item.type,
+          properties: item.properties || {}
+        });
+      }
+    }
   }
 
   // Method to execute confirmed mutations

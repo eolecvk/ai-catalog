@@ -1608,12 +1608,18 @@ async function generateReasoningAndInterpretations(query, context, graphSchema, 
   CRITICAL: You MUST include intermediate queries for the following scenarios:
   - User mentions ANY specific entity name (like "retail", "banking", "healthcare") - ALWAYS check if it exists as Industry, Sector, or Department
   - User asks about projects for a specific industry/sector - ALWAYS first find the relevant nodes
-  - User asks about relationships - ALWAYS first check what nodes exist
+  - User asks about relationships - ALWAYS first check what nodes exist AND explore connection paths
+  - User asks about connections between entities - ALWAYS check both direct and indirect paths
   
   Example intermediate queries you should suggest:
   - "MATCH (i:Industry) WHERE toLower(i.name) CONTAINS toLower('retail') RETURN i LIMIT 5" - to find retail industries
   - "MATCH (s:Sector) WHERE toLower(s.name) CONTAINS toLower('retail') RETURN s LIMIT 5" - to find retail sectors
   - "MATCH (d:Department) WHERE toLower(d.name) CONTAINS toLower('retail') RETURN d LIMIT 5" - to find retail departments
+  
+  CRITICAL FOR CONNECTION QUERIES: Always explore both direct and indirect connections:
+  - "MATCH (n) WHERE toLower(n.name) CONTAINS toLower('banking') OPTIONAL MATCH (n)-[r1]->(direct) RETURN n, count(r1) as directConnections" - check direct connections
+  - "MATCH (n) WHERE toLower(n.name) CONTAINS toLower('banking') MATCH path = (n)-[*2..3]->(indirect) RETURN n, count(path) as indirectConnections" - check indirect connections
+  - "MATCH (a) WHERE toLower(a.name) CONTAINS toLower('banking') MATCH (b:ProjectOpportunity) MATCH path = shortestPath((a)-[*..4]->(b)) RETURN length(path) as pathLength, count(path) as pathCount" - find shortest paths to projects
   
   ALWAYS use toLower() for case-insensitive matching in intermediate queries.
   
@@ -2132,7 +2138,7 @@ async function executeCypherQuery(cypherQuery, version = 'base') {
 }
 
 // Helper function to generate result summary
-function generateResultSummary(graphData) {
+function generateResultSummary(graphData, connectionPaths) {
   const nodeCount = graphData.nodes.length;
   const edgeCount = graphData.edges.length;
   
@@ -2144,10 +2150,33 @@ function generateResultSummary(graphData) {
   const nodeTypesList = nodeTypes.length > 3 
     ? nodeTypes.slice(0, 3).join(', ') + ` and ${nodeTypes.length - 3} other types`
     : nodeTypes.join(', ');
-    
-  return `Found ${nodeCount} node${nodeCount !== 1 ? 's' : ''} (${nodeTypesList}) ${
+  
+  let baseSummary = `Found ${nodeCount} node${nodeCount !== 1 ? 's' : ''} (${nodeTypesList}) ${
     edgeCount > 0 ? `with ${edgeCount} relationship${edgeCount !== 1 ? 's' : ''}` : ''
   }.`;
+  
+  // Add connection path information if available
+  if (connectionPaths && connectionPaths.pathSummary) {
+    const pathSummaries = [];
+    for (const [entity, summary] of Object.entries(connectionPaths.pathSummary)) {
+      if (summary.hasConnections) {
+        const connectionInfo = [];
+        if (summary.directConnections > 0) {
+          connectionInfo.push(`${summary.directConnections} direct`);
+        }
+        if (summary.indirectConnections > 0) {
+          connectionInfo.push(`${summary.indirectConnections} indirect`);
+        }
+        pathSummaries.push(`${entity}: ${connectionInfo.join(', ')} connections`);
+      }
+    }
+    
+    if (pathSummaries.length > 0) {
+      baseSummary += ` Connection analysis: ${pathSummaries.join('; ')}.`;
+    }
+  }
+  
+  return baseSummary;
 }
 
 // Helper function to generate natural language answer using LLM

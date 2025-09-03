@@ -29,16 +29,29 @@ const GraphViz: React.FC<GraphVizProps> = ({
   graphVersion = 'base',
   onGraphDataUpdate
 }) => {
-  // Debug: Log when props change
+  // Determine which data to use: chat results override props
+  const getCurrentGraphData = useCallback(() => {
+    if (showingChatResults && chatQueryResults) {
+      return {
+        nodes: chatQueryResults.nodes,
+        edges: chatQueryResults.edges
+      };
+    }
+    return { nodes, edges };
+  }, [showingChatResults, chatQueryResults, nodes, edges]);
+  
+  const currentGraphData = getCurrentGraphData();
+  // Debug: Log when props or chat results change
   useEffect(() => {
-    console.log('GraphViz props updated:');
-    console.log('- Nodes count:', nodes.length);
-    console.log('- Edges count:', edges.length);
-    if (nodes.length > 0) {
-      const nodeTypes = new Set(nodes.slice(0, 10).map(n => n.group));
+    console.log('GraphViz data updated:');
+    console.log('- Nodes count:', currentGraphData.nodes.length);
+    console.log('- Edges count:', currentGraphData.edges.length);
+    console.log('- Using chat results:', showingChatResults && chatQueryResults !== null);
+    if (currentGraphData.nodes.length > 0) {
+      const nodeTypes = new Set(currentGraphData.nodes.slice(0, 10).map(n => n.group));
       console.log('- Sample node types:', Array.from(nodeTypes));
     }
-  }, [nodes, edges]);
+  }, [currentGraphData.nodes, currentGraphData.edges, showingChatResults, chatQueryResults]);
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedNodeData, setSelectedNodeData] = useState<GraphNode | null>(null);
@@ -61,19 +74,21 @@ const GraphViz: React.FC<GraphVizProps> = ({
   // Chat functionality
 
   const handleApplyQueryResult = (queryResult: ChatQueryResult) => {
-    console.log('handleApplyQueryResult called with:', queryResult);
+    console.log('🔄 handleApplyQueryResult called with:', queryResult);
     console.log('Graph data:', queryResult.graphData);
     console.log('Nodes count:', queryResult.graphData.nodes.length);
     console.log('Edges count:', queryResult.graphData.edges.length);
     
     // Update the main catalog builder graph with query results
     if (onGraphDataUpdate) {
-      console.log('Calling onGraphDataUpdate to update main catalog builder graph');
+      console.log('📤 Calling onGraphDataUpdate to update main catalog builder graph');
       onGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
     } else {
-      console.log('WARNING: onGraphDataUpdate not available, falling back to internal state');
+      console.log('⚠️ onGraphDataUpdate not available, using internal state');
+      console.log('Setting chatQueryResults state...');
       setChatQueryResults(queryResult.graphData);
       setShowingChatResults(true);
+      console.log('✅ State updated: showingChatResults=true, nodes=', queryResult.graphData.nodes.length);
     }
   };
 
@@ -91,7 +106,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     if (focusedNode !== null) {
       setFocusedNodeId(focusedNode);
       // If the focused node is provided, also auto-select it for the side panel
-      const focusedNodeData = nodes.find(n => n.id === focusedNode);
+      const focusedNodeData = currentGraphData.nodes.find(n => n.id === focusedNode);
       if (focusedNodeData) {
         setSelectedNode(focusedNode);
         setSelectedNodeData(focusedNodeData);
@@ -99,7 +114,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
         fetchNodeConnections(focusedNode);
       }
     }
-  }, [focusedNode, nodes]);
+  }, [focusedNode, currentGraphData.nodes]);
 
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {
@@ -108,10 +123,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const baseHeight = parseInt(height) || 700;
     
     // Auto-zoom calculation: zoom out when there are many nodes
-    const nodeCount = nodes.length;
+    const nodeCount = currentGraphData.nodes.length;
     
     // Estimate component count based on node count and edge density for initial sizing
-    const estimatedComponentCount = Math.max(1, Math.min(nodeCount / 5, edges.length === 0 ? nodeCount : Math.ceil(nodeCount / 10)));
+    const estimatedComponentCount = Math.max(1, Math.min(nodeCount / 5, currentGraphData.edges.length === 0 ? nodeCount : Math.ceil(nodeCount / 10)));
     
     // Scale factor based on complexity (more nodes = zoom out more)
     const nodeScaleFactor = Math.max(1, Math.sqrt(nodeCount / 20)); // Starts scaling after 20 nodes
@@ -123,7 +138,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const heightNum = Math.min(1500, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
     
     return { width, heightNum, combinedScaleFactor };
-  }, [nodes.length, edges.length, height, sidePanelCollapsed]);
+  }, [currentGraphData.nodes.length, currentGraphData.edges.length, height, sidePanelCollapsed]);
 
   const { width, heightNum, combinedScaleFactor } = getCanvasSize();
 
@@ -236,14 +251,14 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const runSimulation = useCallback(() => {
     if (simulationNodes.length === 0) return;
 
-    const currentData = { nodes, edges };
+    const activeGraphData = getCurrentGraphData();
     const repelForce = 2000; // Increased repulsion
     const linkForce = 0.03;
     const linkDistance = 150; // Increased link distance
     const hierarchyForce = 0.008; // Force for vertical hierarchy
 
     const newNodes = simulationNodes.map(node => ({ ...node }));
-    const components = findConnectedComponents(newNodes, currentData.edges);
+    const components = findConnectedComponents(newNodes, activeGraphData.edges);
 
     // Update component count state
     const numComponents = components.length;
@@ -358,7 +373,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     }
 
     // Link force (attracts connected nodes)
-    currentData.edges.forEach(edge => {
+    activeGraphData.edges.forEach(edge => {
       const source = newNodes.find(n => n.id === edge.from);
       const target = newNodes.find(n => n.id === edge.to);
       
@@ -401,14 +416,14 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
 
     setSimulationNodes(newNodes);
-  }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, nodes, edges]);
+  }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, getCurrentGraphData]);
 
   // Initialize node positions with better spacing and hierarchy (smooth updates)
   useEffect(() => {
-    const currentData = { nodes, edges };
-    if (currentData.nodes.length === 0) return;
+    const activeData = getCurrentGraphData();
+    if (activeData.nodes.length === 0) return;
 
-    console.log('Updating node positions with data:', currentData.nodes.length, 'nodes');
+    console.log('Updating node positions with data:', activeData.nodes.length, 'nodes');
 
     // Create a map of existing positions to preserve them
     const existingPositions = new Map<string, { x: number, y: number, vx: number, vy: number }>();
@@ -419,7 +434,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     }
 
     // Find connected components for initial positioning
-    const components = findConnectedComponents(currentData.nodes, currentData.edges);
+    const components = findConnectedComponents(activeData.nodes, activeData.edges);
     const allUpdatedNodes: GraphNode[] = [];
     
     components.forEach((component, componentIndex) => {
@@ -492,7 +507,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
     
     // Handle isolated nodes (not in any component)
-    currentData.nodes.forEach((node, i) => {
+    activeData.nodes.forEach((node, i) => {
       if (!allUpdatedNodes.find(n => n.id === node.id)) {
         const existing = existingPositions.get(node.id);
         
@@ -519,7 +534,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
     
     setSimulationNodes(allUpdatedNodes);
-  }, [nodes, edges, width, heightNum, findConnectedComponents]);
+  }, [getCurrentGraphData, width, heightNum, findConnectedComponents]);
 
   // Toggle side panel visibility
   const toggleSidePanel = () => {
@@ -645,9 +660,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   // Get direct connections for a node
   const getDirectConnections = useCallback((nodeId: string): Set<string> => {
-    const currentData = { nodes, edges };
+    const activeData = getCurrentGraphData();
     const connections = new Set<string>();
-    currentData.edges.forEach(edge => {
+    activeData.edges.forEach(edge => {
       if (edge.from === nodeId) {
         connections.add(edge.to);
       }
@@ -656,7 +671,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
       }
     });
     return connections;
-  }, [nodes, edges]);
+  }, [getCurrentGraphData]);
 
   // Determine if a node should be faded
   const shouldFadeNode = useCallback((nodeId: string): boolean => {
@@ -770,7 +785,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 <strong>{simulationNodes.length}</strong> nodes
               </div>
               <div className="graph-stat">
-                <strong>{edges.length}</strong> connections
+                <strong>{currentGraphData.edges.length}</strong> connections
               </div>
               <div className="graph-stat">
                 <strong>{componentCount}</strong> subgraphs
@@ -891,7 +906,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
           
           {/* Edges */}
           <g className="edges">
-            {edges.map(edge => {
+            {currentGraphData.edges.map(edge => {
               const source = simulationNodes.find(n => n.id === edge.from);
               const target = simulationNodes.find(n => n.id === edge.to);
               
