@@ -1,9 +1,7 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
-  // Get backend port from environment variable or default
-  const backendPort = process.env.REACT_APP_BACKEND_PORT || '5002';
-  const target = `http://localhost:${backendPort}`;
+  const target = 'http://localhost:5002';
   
   console.log(`🔗 Setting up proxy to backend: ${target}`);
   
@@ -12,6 +10,7 @@ module.exports = function(app) {
     createProxyMiddleware({
       target: target,
       changeOrigin: true,
+      logLevel: 'debug',
       onError: (err, req, res) => {
         console.error(`❌ Proxy error for ${req.url}:`, err.message);
         console.log(`💡 Make sure backend is running on ${target}`);

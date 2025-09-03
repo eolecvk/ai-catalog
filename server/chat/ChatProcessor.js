@@ -10,15 +10,15 @@ class ChatProcessor {
       nodeLabels: ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'Module', 'SubModule'],
       relationships: [
         '(Industry)-[:HAS_SECTOR]->(Sector)',
-        '(Sector)-[:HAS_DEPARTMENT]->(Department)', 
-        '(Department)-[:EXPERIENCES]->(PainPoint)',
+        '(Sector)-[:EXPERIENCES]->(PainPoint)',
+        '(Department)-[:EXPERIENCES]->(PainPoint)', 
+        '(Sector)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
+        '(Department)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
         '(ProjectOpportunity)-[:ADDRESSES]->(PainPoint)',
-        '(ProjectOpportunity)-[:BELONGS_TO_SECTOR]->(Sector)',
-        '(ProjectOpportunity)-[:TARGETS_DEPARTMENT]->(Department)',
-        '(ProjectOpportunity)-[:HAS_BLUEPRINT]->(ProjectBlueprint)',
-        '(ProjectBlueprint)-[:REQUIRES]->(Role)',
+        '(ProjectOpportunity)-[:IS_INSTANCE_OF]->(ProjectBlueprint)',
+        '(ProjectBlueprint)-[:REQUIRES_ROLE]->(Role)',
         '(ProjectBlueprint)-[:CONTAINS]->(Module)',
-        '(Module)-[:HAS_SUBMODULE]->(SubModule)'
+        '(Module)-[:NEEDS_SUBMODULE]->(SubModule)'
       ]
     };
   }

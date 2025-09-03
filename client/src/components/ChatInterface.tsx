@@ -51,7 +51,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const handleMutationConfirm = async (mutationPlan: any) => {
     try {
-      const response = await fetch('/api/chat/execute-mutation', {
+      const response = await fetch('http://localhost:5002/api/chat/execute-mutation', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -190,7 +190,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         conversationHistory: messages
       };
 
-      const response = await fetch('/api/chat/query', {
+      const response = await fetch('http://localhost:5002/api/chat/query', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
