@@ -24,26 +24,79 @@ class ChatProcessor {
   }
 
   async processChat(query, conversationHistory = [], graphContext = {}) {
+    const reasoningSteps = [];
+    const startTime = Date.now();
+    
     try {
       // Stage 1: Intent Classification & Context Analysis
-      const classification = await this.classifyIntent(query, conversationHistory);
+      const classificationStart = Date.now();
+      const classification = await this.classifyIntent(query, conversationHistory, reasoningSteps);
+      reasoningSteps.push({
+        type: 'intent_parsing',
+        description: `Classified query intent as "${classification.type}" with ${Math.round(classification.confidence * 100)}% confidence`,
+        input: query,
+        output: JSON.stringify({type: classification.type, entities: classification.entities}),
+        timestamp: classificationStart,
+        duration: Date.now() - classificationStart,
+        confidence: classification.confidence,
+        metadata: {
+          entities_found: classification.entities.length,
+          action: classification.action
+        }
+      });
       
       // Stage 2: Context Gathering & Validation
-      const contextData = await this.gatherContext(classification, graphContext);
+      const contextStart = Date.now();
+      const contextData = await this.gatherContext(classification, graphContext, reasoningSteps);
+      reasoningSteps.push({
+        type: 'context_analysis',
+        description: `Analyzed context and validated ${classification.entities.length} entities`,
+        timestamp: contextStart,
+        duration: Date.now() - contextStart,
+        metadata: {
+          entities_validated: Object.keys(contextData.entities).length,
+          validation_errors: contextData.validation.errors.length
+        }
+      });
       
       // Stage 3: Route to appropriate processor
-      return await this.routeToProcessor(classification, contextData, query, conversationHistory);
+      const processingStart = Date.now();
+      const result = await this.routeToProcessor(classification, contextData, query, conversationHistory, reasoningSteps);
+      
+      // Add reasoning steps to the result if it has queryResult
+      if (result.queryResult) {
+        result.queryResult.reasoningSteps = reasoningSteps;
+      }
+      
+      return result;
     } catch (error) {
       console.error('Chat processing error:', error);
+      reasoningSteps.push({
+        type: 'validation',
+        description: `Processing failed: ${error.message}`,
+        timestamp: Date.now(),
+        duration: Date.now() - startTime,
+        confidence: 0.0,
+        metadata: {
+          error_type: error.constructor.name
+        }
+      });
+      
       return {
         success: false,
         error: 'Failed to process your request. Please try again.',
-        type: 'error'
+        type: 'error',
+        queryResult: {
+          cypherQuery: '',
+          graphData: { nodes: [], edges: [] },
+          summary: '',
+          reasoningSteps: reasoningSteps
+        }
       };
     }
   }
 
-  async classifyIntent(query, conversationHistory) {
+  async classifyIntent(query, conversationHistory, reasoningSteps = []) {
     const historyContext = conversationHistory
       .slice(-6) // Last 3 exchanges
       .map(msg => `${msg.type}: ${msg.content}`)
@@ -63,12 +116,14 @@ ${historyContext || 'No previous context'}
 # Current Query
 "${query}"
 
-Classify this query and respond with JSON only:
+CRITICAL: You must respond with ONLY a JSON object. No markdown, no backticks, no explanations - just pure JSON.
+
+Expected JSON format:
 {
   "type": "QUERY|MUTATION|CREATIVE|ANALYSIS|UNCLEAR",
   "entities": ["extracted entities from query"],
   "action": "specific action if MUTATION",
-  "missing_context": "what context is needed if unclear",
+  "missing_context": "what context is needed if unclear", 
   "confidence": 0.0-1.0
 }
 
@@ -86,20 +141,48 @@ Intent Types:
         maxTokens: 300
       });
 
-      return JSON.parse(response.trim());
+      console.log(`[ChatProcessor] Intent classification raw response: "${response}"`);
+      
+      const result = JSON.parse(response.trim());
+      console.log(`[ChatProcessor] Intent classification result:`, result);
+      return result;
     } catch (error) {
       console.error('Intent classification error:', error);
+      console.error('Error type:', error.constructor.name);
+      console.error('Error message:', error.message);
+      
+      // If it's a JSON parsing error, try using the LLM manager's JSON parsing
+      if (error instanceof SyntaxError && error.message.includes('JSON')) {
+        try {
+          console.log('[ChatProcessor] Attempting fallback JSON parsing...');
+          const response = await this.llmManager.generateText(prompt, {
+            temperature: 0.1,
+            maxTokens: 300
+          });
+          
+          // Use the LLM provider's parseJSONResponse method
+          const currentProvider = this.llmManager.currentProvider;
+          if (currentProvider && currentProvider.parseJSONResponse) {
+            const result = currentProvider.parseJSONResponse(response);
+            console.log(`[ChatProcessor] Fallback parsing succeeded:`, result);
+            return result;
+          }
+        } catch (fallbackError) {
+          console.error('[ChatProcessor] Fallback parsing also failed:', fallbackError);
+        }
+      }
+      
       return {
         type: 'UNCLEAR',
         entities: [],
         action: null,
-        missing_context: 'Could not understand the request',
+        missing_context: 'Could not understand the request due to parsing error',
         confidence: 0.0
       };
     }
   }
 
-  async gatherContext(classification, graphContext) {
+  async gatherContext(classification, graphContext, reasoningSteps = []) {
     const session = this.driver.session();
     
     try {
@@ -215,41 +298,90 @@ Intent Types:
     return contextData;
   }
 
-  async routeToProcessor(classification, contextData, query, conversationHistory) {
+  async routeToProcessor(classification, contextData, query, conversationHistory, reasoningSteps = []) {
     switch (classification.type) {
       case 'QUERY':
-        return await this.processQuery(classification, contextData, query);
+        return await this.processQuery(classification, contextData, query, reasoningSteps);
       
       case 'MUTATION':
-        return await this.processMutation(classification, contextData, query);
+        return await this.processMutation(classification, contextData, query, reasoningSteps);
       
       case 'CREATIVE':
-        return await this.processCreative(classification, contextData, query, conversationHistory);
+        return await this.processCreative(classification, contextData, query, conversationHistory, reasoningSteps);
       
       case 'ANALYSIS':
-        return await this.processAnalysis(classification, contextData, query);
+        return await this.processAnalysis(classification, contextData, query, reasoningSteps);
       
       case 'UNCLEAR':
       default:
-        return await this.processClarification(classification, query);
+        return await this.processClarification(classification, query, reasoningSteps);
     }
   }
 
-  async processQuery(classification, contextData, query) {
+  async processQuery(classification, contextData, query, reasoningSteps = []) {
     // Generate and execute Cypher query
-    const cypherQuery = await this.generateCypherQuery(query, classification.entities, contextData);
+    const cypherStart = Date.now();
+    const cypherQuery = await this.generateCypherQuery(query, classification.entities, contextData, reasoningSteps);
     
     if (!cypherQuery) {
+      reasoningSteps.push({
+        type: 'cypher_generation',
+        description: 'Failed to generate valid Cypher query',
+        input: query,
+        timestamp: cypherStart,
+        duration: Date.now() - cypherStart,
+        confidence: 0.0
+      });
+      
       return {
         success: false,
         error: 'Could not generate a valid query for your request'
       };
     }
 
+    reasoningSteps.push({
+      type: 'cypher_generation',
+      description: cypherQuery.explanation || 'Generated Cypher query for data retrieval',
+      input: `Query: "${query}", Entities: ${classification.entities.join(', ')}`,
+      output: cypherQuery.query,
+      timestamp: cypherStart,
+      duration: Date.now() - cypherStart,
+      confidence: 0.85,
+      metadata: {
+        has_params: Object.keys(cypherQuery.params || {}).length > 0
+      }
+    });
+
     const session = this.driver.session();
     try {
+      console.log(`[ChatProcessor] Executing Cypher query: ${cypherQuery.query}`);
+      console.log(`[ChatProcessor] Query params:`, cypherQuery.params || {});
+      
+      const executionStart = Date.now();
       const result = await session.run(cypherQuery.query, cypherQuery.params || {});
+      console.log(`[ChatProcessor] Query executed, record count: ${result.records.length}`);
+      
+      const formattingStart = Date.now();
       const graphData = this.formatGraphData(result);
+      console.log(`[ChatProcessor] Formatted graph data:`, {
+        nodeCount: graphData.nodes.length,
+        edgeCount: graphData.edges.length,
+        nodes: graphData.nodes.slice(0, 3), // Log first 3 nodes for debugging
+        edges: graphData.edges.slice(0, 3)  // Log first 3 edges for debugging
+      });
+      
+      reasoningSteps.push({
+        type: 'result_formatting',
+        description: `Formatted query results into graph structure with ${graphData.nodes.length} nodes and ${graphData.edges.length} edges`,
+        timestamp: formattingStart,
+        duration: Date.now() - formattingStart,
+        metadata: {
+          records_processed: result.records.length,
+          nodes_created: graphData.nodes.length,
+          edges_created: graphData.edges.length,
+          execution_time: Date.now() - executionStart
+        }
+      });
       
       return {
         success: true,
@@ -257,11 +389,21 @@ Intent Types:
         queryResult: {
           type: 'query',
           graphData,
-          query: cypherQuery.query
+          cypherQuery: cypherQuery.query // Make sure this is passed to frontend
         }
       };
     } catch (error) {
       console.error('Query execution error:', error);
+      reasoningSteps.push({
+        type: 'validation',
+        description: `Query execution failed: ${error.message}`,
+        timestamp: Date.now(),
+        confidence: 0.0,
+        metadata: {
+          error_type: error.constructor.name
+        }
+      });
+      
       return {
         success: false,
         error: 'Failed to execute query. Please try rephrasing your request.'
@@ -271,7 +413,7 @@ Intent Types:
     }
   }
 
-  async processMutation(classification, contextData, query) {
+  async processMutation(classification, contextData, query, reasoningSteps = []) {
     // Generate mutation plan and Cypher
     const mutationPlan = await this.generateMutationPlan(classification, contextData, query);
     
@@ -283,7 +425,7 @@ Intent Types:
     };
   }
 
-  async processCreative(classification, contextData, query, conversationHistory) {
+  async processCreative(classification, contextData, query, conversationHistory, reasoningSteps = []) {
     const prompt = `
 Based on the graph data context and user request, generate creative suggestions.
 
@@ -321,7 +463,7 @@ Provide 3-5 creative, actionable suggestions that fit the graph schema. Focus on
     }
   }
 
-  async processAnalysis(classification, contextData, query) {
+  async processAnalysis(classification, contextData, query, reasoningSteps = []) {
     const analysisData = contextData.relatedData;
     
     const prompt = `
@@ -359,7 +501,22 @@ Provide a clear, structured analysis with specific insights and comparisons.
     }
   }
 
-  async processClarification(classification, query) {
+  async processClarification(classification, query, reasoningSteps = []) {
+    const clarificationStart = Date.now();
+    
+    reasoningSteps.push({
+      type: 'clarification',
+      description: `Query was unclear (confidence: ${Math.round((classification.confidence || 0) * 100)}%), requesting clarification`,
+      input: query,
+      timestamp: clarificationStart,
+      duration: Date.now() - clarificationStart,
+      confidence: classification.confidence || 0.0,
+      metadata: {
+        missing_context: classification.missing_context || 'Unknown reason',
+        entities_extracted: classification.entities?.length || 0
+      }
+    });
+    
     const clarificationPrompts = [
       "Could you be more specific about what you're looking for?",
       "What particular aspect of the graph data interests you?",
@@ -375,11 +532,17 @@ Provide a clear, structured analysis with specific insights and comparisons.
         "Find pain points in banking",
         "Add a new department to Operations",
         "Compare pain points between sectors"
-      ]
+      ],
+      queryResult: {
+        cypherQuery: '',
+        graphData: { nodes: [], edges: [] },
+        summary: 'Clarification needed',
+        reasoningSteps: reasoningSteps
+      }
     };
   }
 
-  async generateCypherQuery(query, entities, contextData) {
+  async generateCypherQuery(query, entities, contextData, reasoningSteps = []) {
     const prompt = `
 Generate a Cypher query for Neo4j based on the user request.
 
@@ -395,7 +558,9 @@ ${entities.join(', ')}
 # Available Context
 ${Object.keys(contextData.entities).join(', ')}
 
-Return JSON only:
+CRITICAL: Respond with ONLY pure JSON. No markdown, no backticks, no code blocks.
+
+JSON format:
 {
   "query": "MATCH... RETURN...",
   "params": {},
@@ -411,9 +576,36 @@ Make queries efficient and return relevant graph structure for visualization.
         maxTokens: 400
       });
 
-      return JSON.parse(response.trim());
+      console.log(`[ChatProcessor] Cypher generation raw response: "${response}"`);
+      
+      const result = JSON.parse(response.trim());
+      console.log(`[ChatProcessor] Cypher generation result:`, result);
+      return result;
     } catch (error) {
       console.error('Cypher generation error:', error);
+      console.error('Error type:', error.constructor.name);
+      
+      // If it's a JSON parsing error, try using the LLM manager's JSON parsing
+      if (error instanceof SyntaxError && error.message.includes('JSON')) {
+        try {
+          console.log('[ChatProcessor] Attempting fallback JSON parsing for Cypher...');
+          const response = await this.llmManager.generateText(prompt, {
+            temperature: 0.1,
+            maxTokens: 400
+          });
+          
+          // Use the LLM provider's parseJSONResponse method
+          const currentProvider = this.llmManager.currentProvider;
+          if (currentProvider && currentProvider.parseJSONResponse) {
+            const result = currentProvider.parseJSONResponse(response);
+            console.log(`[ChatProcessor] Cypher fallback parsing succeeded:`, result);
+            return result;
+          }
+        } catch (fallbackError) {
+          console.error('[ChatProcessor] Cypher fallback parsing also failed:', fallbackError);
+        }
+      }
+      
       return null;
     }
   }
@@ -434,10 +626,12 @@ ${classification.action || 'CREATE'}
 # Context
 ${JSON.stringify(contextData.entities, null, 2)}
 
-Return JSON only:
+CRITICAL: Respond with ONLY pure JSON. No markdown, no backticks, no code blocks.
+
+JSON format:
 {
   "explanation": "Human-readable explanation of the changes",
-  "query": "MATCH/CREATE/MERGE Cypher query",
+  "query": "MATCH/CREATE/MERGE Cypher query", 
   "params": {},
   "affectedNodes": ["list of node types affected"],
   "riskLevel": "LOW|MEDIUM|HIGH"

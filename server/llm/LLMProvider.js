@@ -43,22 +43,42 @@ class LLMProvider {
     }
 
     let cleanText = text.trim();
-    // console.log(`[${this.name}] Raw response:`, cleanText.substring(0, 200) + (cleanText.length > 200 ? '...' : ''));
+    console.log(`[${this.name}] Raw response (first 200 chars):`, cleanText.substring(0, 200) + (cleanText.length > 200 ? '...' : ''));
 
-    // Strategy 1: Try parsing as-is first
+    // Strategy 1: Handle backtick-wrapped responses first (most common issue)
+    if (cleanText.startsWith('`')) {
+      // Remove leading backtick(s)
+      cleanText = cleanText.replace(/^`+/, '');
+      
+      // Remove trailing backtick(s)
+      cleanText = cleanText.replace(/`+$/, '');
+      
+      // If there's a language identifier (like `json), remove the first line
+      if (cleanText.startsWith('json\n') || cleanText.startsWith('JSON\n')) {
+        const firstNewline = cleanText.indexOf('\n');
+        if (firstNewline !== -1) {
+          cleanText = cleanText.slice(firstNewline + 1);
+        }
+      }
+      
+      cleanText = cleanText.trim();
+      console.log(`[${this.name}] After backtick cleanup:`, cleanText.substring(0, 200) + '...');
+    }
+
+    // Strategy 2: Try parsing after backtick cleanup
     try {
       return JSON.parse(cleanText);
     } catch (e) {
-      // Strategy 1.1: Try cleaning multiline strings first
+      // Strategy 2.1: Try cleaning multiline strings first
       try {
         const normalizedText = this.cleanMultilineStrings(cleanText);
         return JSON.parse(normalizedText);
       } catch (e2) {
-        // Continue to cleaning strategies
+        // Continue to more cleaning strategies
       }
     }
 
-    // Strategy 2: Remove common markdown code blocks
+    // Strategy 3: Remove common markdown code blocks (for cases not caught by backtick strategy)
     if (cleanText.startsWith('```json')) {
       cleanText = cleanText.slice(7);
     } else if (cleanText.startsWith('```')) {
@@ -72,11 +92,11 @@ class LLMProvider {
       cleanText = cleanText.slice(0, -3);
     }
 
-    // Strategy 3: Try after markdown cleanup
+    // Strategy 4: Try after markdown cleanup
     try {
       return JSON.parse(cleanText.trim());
     } catch (e) {
-      // Strategy 3.1: Try cleaning multiline strings
+      // Strategy 4.1: Try cleaning multiline strings
       try {
         const normalizedText = this.cleanMultilineStrings(cleanText);
         return JSON.parse(normalizedText.trim());
@@ -85,7 +105,7 @@ class LLMProvider {
       }
     }
 
-    // Strategy 4: Extract JSON from mixed text (handle "Here's the JSON:" type responses)
+    // Strategy 5: Extract JSON from mixed text (handle "Here's the JSON:" type responses)
     const jsonPatterns = [
       /\{[\s\S]*\}/,  // Find first complete JSON object
       /\[[\s\S]*\]/,  // Find first complete JSON array
@@ -97,7 +117,7 @@ class LLMProvider {
         try {
           let jsonText = match[0].trim();
           
-          // Strategy 4.1: Try as-is first
+          // Strategy 5.1: Try as-is first
           try {
             // console.log(`[${this.name}] Extracted JSON:`, jsonText.substring(0, 100) + '...');
             return JSON.parse(jsonText);
@@ -112,7 +132,7 @@ class LLMProvider {
       }
     }
 
-    // Strategy 5: Try to find JSON after common prefixes
+    // Strategy 6: Try to find JSON after common prefixes
     const commonPrefixes = [
       'The JSON response is:',
       'Here is the JSON:',
@@ -142,7 +162,7 @@ class LLMProvider {
       }
     }
 
-    // Strategy 6: Split by lines and find JSON-like lines
+    // Strategy 7: Split by lines and find JSON-like lines
     const lines = cleanText.split('\n');
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();

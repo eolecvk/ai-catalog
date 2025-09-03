@@ -42,7 +42,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedNodeData, setSelectedNodeData] = useState<GraphNode | null>(null);
-  const [showNodePanel, setShowNodePanel] = useState<boolean>(true);
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState<boolean>(false);
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [simulationNodes, setSimulationNodes] = useState<GraphNode[]>([]);
@@ -86,13 +85,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
     // the return to original data internally via getCurrentGraphData()
   };
 
-  // Get the current graph data (either original or chat results)
-  const getCurrentGraphData = () => {
-    if (showingChatResults && chatQueryResults) {
-      return chatQueryResults;
-    }
-    return { nodes, edges };
-  };
 
   // Sync focused node from prop
   useEffect(() => {
@@ -131,7 +123,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const heightNum = Math.min(1500, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
     
     return { width, heightNum, combinedScaleFactor };
-  }, [nodes.length, edges.length, height, sidePanelCollapsed, leftPanelCollapsed]);
+  }, [nodes.length, edges.length, height, sidePanelCollapsed]);
 
   const { width, heightNum, combinedScaleFactor } = getCanvasSize();
 
@@ -245,7 +237,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
     if (simulationNodes.length === 0) return;
 
     const currentData = { nodes, edges };
-    const alpha = 0.01;
     const repelForce = 2000; // Increased repulsion
     const linkForce = 0.03;
     const linkDistance = 150; // Increased link distance
@@ -259,9 +250,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
     if (numComponents !== componentCount) {
       setComponentCount(numComponents);
     }
-
-    // Calculate adaptive layout parameters based on number of components and nodes
-    const totalNodes = newNodes.length;
     
     // Adaptive subgraph separation based on number of components and canvas size
     const baseSubgraphSeparation = Math.max(300, Math.min(500, width / (numComponents + 1)));
@@ -413,7 +401,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
 
     setSimulationNodes(newNodes);
-  }, [simulationNodes, width, heightNum, findConnectedComponents, showingChatResults, chatQueryResults, nodes, edges]);
+  }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, nodes, edges]);
 
   // Initialize node positions with better spacing and hierarchy (smooth updates)
   useEffect(() => {
@@ -531,7 +519,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
     
     setSimulationNodes(allUpdatedNodes);
-  }, [nodes, edges, width, heightNum, findConnectedComponents, showingChatResults, chatQueryResults]);
+  }, [nodes, edges, width, heightNum, findConnectedComponents]);
 
   // Toggle side panel visibility
   const toggleSidePanel = () => {
@@ -668,7 +656,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
       }
     });
     return connections;
-  }, [showingChatResults, chatQueryResults, nodes, edges]);
+  }, [nodes, edges]);
 
   // Determine if a node should be faded
   const shouldFadeNode = useCallback((nodeId: string): boolean => {
@@ -719,14 +707,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
     document.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Group nodes by type for legend
-  const nodesByGroup = simulationNodes.reduce((acc, node) => {
-    if (!acc[node.group]) {
-      acc[node.group] = [];
-    }
-    acc[node.group].push(node);
-    return acc;
-  }, {} as { [key: string]: GraphNode[] });
 
   return (
     <div ref={containerRef} className="graph-viz-container">
@@ -750,27 +730,27 @@ const GraphViz: React.FC<GraphVizProps> = ({
           )}
         </div>
 
-        {/* Left Panel Toggle Button */}
-        <button 
-          className="left-panel-toggle-btn"
-          onClick={toggleLeftPanel}
-          title={leftPanelCollapsed ? "Show query panel" : "Hide query panel"}
-        >
-          {leftPanelCollapsed ? '▶' : '◀'}
-        </button>
-        {/* Panel Toggle Button - Fixed Position */}
-        <button 
-          className="side-panel-toggle-btn-fixed"
-          onClick={toggleSidePanel}
-          title={sidePanelCollapsed ? "Show side panel" : "Hide side panel"}
-        >
-          {sidePanelCollapsed ? '◀' : '▶'}
-        </button>
-        
         {/* Graph Canvas - Center Panel */}
         <div 
           className={`graph-canvas-container center-panel ${sidePanelCollapsed ? 'right-collapsed' : ''} ${leftPanelCollapsed ? 'left-collapsed' : ''}`}
         >
+          {/* Left Panel Toggle Button - positioned at left edge of graph */}
+          <button 
+            className="left-panel-toggle-btn"
+            onClick={toggleLeftPanel}
+            title={leftPanelCollapsed ? "Show query panel" : "Hide query panel"}
+          >
+            {leftPanelCollapsed ? '▶' : '◀'}
+          </button>
+          
+          {/* Right Panel Toggle Button - positioned at right edge of graph */}
+          <button 
+            className="right-panel-toggle-btn"
+            onClick={toggleSidePanel}
+            title={sidePanelCollapsed ? "Show side panel" : "Hide side panel"}
+          >
+            {sidePanelCollapsed ? '◀' : '▶'}
+          </button>
           <div 
             className={`graph-canvas-2d ${focusedNodeId ? 'focused' : ''}`}
             style={{ 
@@ -1400,16 +1380,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
         </div>
       )}
       
-      <div className="graph-instructions">
-        <p>
-          <strong>Instructions:</strong> 
-          Drag nodes to reposition • Click to focus and view connections • Double-click to edit • 
-          Click connections in side panel to navigate • Toggle side panel with ▶/◀ button • 
-          Subgraphs auto-arranged in grid layout • Auto-zoom adjusts for complex graphs • 
-          Visual hierarchy: Industries (top) → Sectors/Departments → Pain Points → Projects (bottom)
-          {enableChat && ' • Use the chat interface to explore graph data with natural language queries'}
-        </p>
-      </div>
     </div>
   );
 };

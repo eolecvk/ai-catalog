@@ -91,6 +91,17 @@ export interface MutationPlan {
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
+export interface ReasoningStep {
+  type: 'intent_parsing' | 'context_analysis' | 'cypher_generation' | 'result_formatting' | 'clarification' | 'validation';
+  description: string;
+  input?: string;
+  output?: string;
+  timestamp: number;
+  duration?: number;
+  confidence?: number;
+  metadata?: Record<string, any>;
+}
+
 export interface ChatQueryResult {
   cypherQuery: string;
   graphData: {
@@ -109,6 +120,7 @@ export interface ChatQueryResult {
     }[];
   };
   detailedExplanation?: string;
+  reasoningSteps?: ReasoningStep[];
 }
 
 export interface GraphNode {

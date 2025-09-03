@@ -15,6 +15,11 @@ const QueryResult: React.FC<QueryResultProps> = ({
   const [showCypher, setShowCypher] = useState(false);
 
 
+  // Only render if there's actual content to show
+  if (!queryResult.cypherQuery || queryResult.cypherQuery.trim() === '') {
+    return null;
+  }
+
   return (
     <div className="query-result">
       <div className="query-result-actions">
