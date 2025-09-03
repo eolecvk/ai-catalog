@@ -100,6 +100,44 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     );
   };
 
+  const renderVisualizationConfirmation = () => {
+    if (!message.visualizationConfirmation) return null;
+
+    const { nodeCount, edgeCount, onConfirm, onCancel } = message.visualizationConfirmation;
+
+    return (
+      <div className="visualization-confirmation">
+        <div className="visualization-details">
+          <div className="visualization-header">
+            <h4>📊 Large Graph Visualization</h4>
+            <span className="performance-badge">
+              Performance Impact
+            </span>
+          </div>
+          <p className="visualization-warning">
+            This query returned <strong>{nodeCount} nodes</strong> and <strong>{edgeCount} edges</strong>. 
+            Rendering a large graph may impact performance.
+          </p>
+        </div>
+        
+        <div className="visualization-actions">
+          <button 
+            className="show-graph-btn"
+            onClick={onConfirm}
+          >
+            📈 Show Graph ({nodeCount} nodes, {edgeCount} edges)
+          </button>
+          <button 
+            className="cancel-btn"
+            onClick={onCancel}
+          >
+            ❌ Cancel
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderExampleQuestions = () => {
     if (!message.exampleQuestions || message.exampleQuestions.length === 0) return null;
 
@@ -252,6 +290,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     // Collect all the components that might render
     const clarificationComponent = renderClarificationOptions();
     const mutationComponent = renderMutationConfirmation();
+    const visualizationComponent = renderVisualizationConfirmation();
     const exampleQuestionsComponent = renderExampleQuestions();
     
     const hasNodes = message.queryResult && 
@@ -297,6 +336,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     // Only create the wrapper if there's actual content beyond just the message text
     const hasExtraContent = clarificationComponent || 
                            mutationComponent || 
+                           visualizationComponent ||
                            exampleQuestionsComponent || 
                            nodesComponent || 
                            queryResultComponent;
@@ -308,6 +348,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           <>
             {clarificationComponent}
             {mutationComponent}
+            {visualizationComponent}
             {exampleQuestionsComponent}
             {nodesComponent}
             {queryResultComponent}

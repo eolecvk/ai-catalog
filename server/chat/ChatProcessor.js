@@ -580,6 +580,25 @@ Intent Types:
         }
       });
       
+      // Check node count before visualization
+      if (graphData.nodes.length > 100) {
+        return {
+          success: true,
+          needsVisualizationConfirmation: true,
+          message: `Query returned ${graphData.nodes.length} nodes and ${graphData.edges.length} edges. This may impact performance. Do you want to update the graph visualization?`,
+          queryResult: {
+            type: 'query',
+            graphData, // Data is ready but won't update graph yet
+            cypherQuery: cypherQuery.query,
+            nodeCount: graphData.nodes.length,
+            edgeCount: graphData.edges.length,
+            connectionPaths: contextData.connectionPaths,
+            connectionStrategy: cypherQuery.connectionStrategy,
+            pendingVisualization: true // Flag to indicate data is waiting
+          }
+        };
+      }
+      
       // Include connection strategy information in the response
       let enhancedMessage = cypherQuery.explanation || 'Here are the results:';
       if (cypherQuery.connectionStrategy) {
@@ -939,6 +958,23 @@ JSON format:
 
   processGraphItem(item, nodes, edges) {
     if (!item || typeof item !== 'object') return;
+    
+    // Handle Neo4j Path objects
+    if (item.segments && Array.isArray(item.segments)) {
+      // Extract start node
+      if (item.start) this.processGraphItem(item.start, nodes, edges);
+      
+      // Extract end node  
+      if (item.end) this.processGraphItem(item.end, nodes, edges);
+      
+      // Extract all segments (relationships + intermediate nodes)
+      item.segments.forEach(segment => {
+        this.processGraphItem(segment.start, nodes, edges);
+        this.processGraphItem(segment.relationship, nodes, edges);
+        this.processGraphItem(segment.end, nodes, edges);
+      });
+      return;
+    }
     
     // Handle Neo4j nodes
     if (item.identity !== undefined && item.labels) {

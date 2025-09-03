@@ -1022,45 +1022,75 @@ const App: React.FC = () => {
 
   // Chat interface handlers
   const handleApplyQueryResult = (queryResult: ChatQueryResult) => {
-    console.log('Applying query result:', queryResult);
+    console.log('🎯 APP.TSX - handleApplyQueryResult called');
+    console.log('📊 Query result received:', {
+      cypherQuery: queryResult.cypherQuery,
+      hasGraphData: !!queryResult.graphData,
+      nodeCount: queryResult.graphData?.nodes?.length || 0,
+      edgeCount: queryResult.graphData?.edges?.length || 0,
+      summary: queryResult.summary
+    });
     
     // Automatically update the graph with the query results
     if (queryResult.graphData && queryResult.graphData.nodes && queryResult.graphData.edges) {
-      console.log('Auto-updating graph with assistant results...');
+      console.log('✅ Valid graph data detected, updating graph...');
+      console.log('📊 Graph data details:', {
+        nodes: queryResult.graphData.nodes.length,
+        edges: queryResult.graphData.edges.length,
+        sampleNodeIds: queryResult.graphData.nodes.slice(0, 5).map(n => n.id)
+      });
       
       // Show the graph when assistant finds results
       setShouldShowGraph(true);
+      console.log('📺 Set shouldShowGraph = true');
       
       // Show visual feedback that the assistant is updating the graph
       setIsAssistantUpdatingGraph(true);
+      console.log('🔄 Set isAssistantUpdatingGraph = true');
       
       // Update the graph data
+      console.log('🔄 Calling handleGraphDataUpdate...');
       handleGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
       
       // Brief delay for visual feedback, then clear the indicator
       setTimeout(() => {
         setIsAssistantUpdatingGraph(false);
+        console.log('✅ Cleared isAssistantUpdatingGraph flag');
       }, 800);
+    } else {
+      console.warn('❌ Invalid or missing graph data:', {
+        hasGraphData: !!queryResult.graphData,
+        hasNodes: !!queryResult.graphData?.nodes,
+        hasEdges: !!queryResult.graphData?.edges,
+        nodeCount: queryResult.graphData?.nodes?.length,
+        edgeCount: queryResult.graphData?.edges?.length
+      });
     }
   };
 
   // Handle graph data updates from chat interface
   const handleGraphDataUpdate = (nodes: GraphNode[], edges: GraphEdge[]) => {
-    console.log('handleGraphDataUpdate called with:');
+    console.log('🔄 APP.TSX - handleGraphDataUpdate START');
+    console.log('📊 Input data:');
     console.log('- Nodes count:', nodes.length);
     console.log('- Edges count:', edges.length);
     console.log('- Sample nodes:', nodes.slice(0, 3));
     console.log('- Sample edges:', edges.slice(0, 3));
     
-    console.log('BEFORE UPDATE - Current graph data:');
+    console.log('📊 BEFORE UPDATE - Current graph state:');
     console.log('- Current nodes count:', graphData.nodes.length);
     console.log('- Current edges count:', graphData.edges.length);
+    console.log('- Current shouldShowGraph:', shouldShowGraph);
     
-    console.log('Node IDs in query result:', nodes.map(n => n.id).slice(0, 10));
-    console.log('Current node IDs:', graphData.nodes.map(n => n.id).slice(0, 10));
+    console.log('🔍 Node ID comparison:');
+    console.log('- New node IDs:', nodes.map(n => n.id).slice(0, 10));
+    console.log('- Current node IDs:', graphData.nodes.map(n => n.id).slice(0, 10));
     
+    console.log('🔄 Calling setGraphData with new data...');
     setGraphData({ nodes, edges });
-    console.log('Graph data updated via setGraphData');
+    console.log('✅ setGraphData called - React state should update');
+    console.log('📊 New graph data object created:', { nodeCount: nodes.length, edgeCount: edges.length });
+    console.log('🔄 APP.TSX - handleGraphDataUpdate END');
   };
 
   // Load filter options
@@ -1648,38 +1678,25 @@ const App: React.FC = () => {
                 )}
                 
                 <div className="graph-hero-section">
-                  {shouldShowGraph || graphData.nodes.length > 0 ? (
+                  {graphLoading ? (
+                    <div className="builder-loading">
+                      <div className="spinner"></div>
+                      <p>Loading graph visualization...</p>
+                    </div>
+                  ) : (
                     <GraphViz
                       nodes={graphData.nodes}
                       edges={graphData.edges}
                       nodeType="all"
                       onNodeSelect={handleGraphNodeSelect}
                       onNodeDoubleClick={handleGraphNodeEdit}
-                      graphVersion={currentGraphVersion}
+                      onNavigateToNode={handleNavigateToNode}
                       focusedNode={focusedGraphNode}
+                      height="600px"
+                      enableChat={true}
+                      graphVersion={currentGraphVersion}
+                      onGraphDataUpdate={handleGraphDataUpdate}
                     />
-                  ) : (
-                    <div className="graph-welcome">
-                      <div className="welcome-content">
-                        <div className="welcome-icon">🗺️</div>
-                        <h2>Graph Intelligence Assistant</h2>
-                        <p>Ask questions about your data using the Query panel to explore and visualize your graph.</p>
-                        <div className="sample-queries">
-                          <h3>Try asking:</h3>
-                          <div className="sample-query-buttons">
-                            <button onClick={() => console.log('Sample query clicked')}>
-                              "Show me all industries"
-                            </button>
-                            <button onClick={() => console.log('Sample query clicked')}>
-                              "Find pain points in banking"
-                            </button>
-                            <button onClick={() => console.log('Sample query clicked')}>
-                              "What projects are available?"
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
                   )}
                 </div>
               </div>
@@ -1771,51 +1788,6 @@ const App: React.FC = () => {
                     }}
                   />
                 </div>
-                
-                {/* Graph Visualization - Only shown when needed */}
-                {shouldShowGraph && (
-                  <div className="builder-graph-section">
-                    {isAssistantUpdatingGraph && (
-                      <div className="assistant-update-indicator">
-                        <div className="assistant-update-message">
-                          <span className="assistant-icon">🤖</span>
-                          <span>Assistant is updating the graph based on your query...</span>
-                        </div>
-                      </div>
-                    )}
-                    {graphLoading ? (
-                      <div className="builder-loading">
-                        <div className="spinner"></div>
-                        <p>Loading graph visualization...</p>
-                      </div>
-                    ) : (
-                      <GraphViz
-                        nodes={graphData.nodes}
-                        edges={graphData.edges}
-                        nodeType="all"
-                        onNodeSelect={handleGraphNodeSelect}
-                        onNodeDoubleClick={handleGraphNodeEdit}
-                        onNavigateToNode={handleNavigateToNode}
-                        focusedNode={focusedGraphNode}
-                        height="600px"
-                        enableChat={true}
-                        graphVersion={currentGraphVersion}
-                        onGraphDataUpdate={handleGraphDataUpdate}
-                      />
-                    )}
-                  </div>
-                )}
-                
-                {/* Graph Placeholder - Shown when graph is hidden */}
-                {!shouldShowGraph && (
-                  <div className="builder-graph-placeholder">
-                    <div className="graph-placeholder-content">
-                      <div className="placeholder-icon">🎯</div>
-                      <h3>Graph Visualization</h3>
-                      <p>Click on a node type above or ask the assistant a question to visualize the graph</p>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 

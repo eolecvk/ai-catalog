@@ -99,6 +99,68 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setMessages(prev => [...prev, cancelMessage]);
   };
 
+  const handleVisualizationConfirm = (graphData: { nodes: any[], edges: any[] }) => {
+    console.log('🎯 VISUALIZATION CONFIRM START');
+    console.log('📊 Graph data to apply:', {
+      nodeCount: graphData.nodes.length,
+      edgeCount: graphData.edges.length,
+      sampleNodes: graphData.nodes.slice(0, 3),
+      sampleEdges: graphData.edges.slice(0, 3)
+    });
+    
+    if (onApplyQueryResult) {
+      console.log('📡 Calling onApplyQueryResult with graph data...');
+      const queryResult = { 
+        cypherQuery: 'MATCH p=(n)-[*0..5]-(m) RETURN p', // Include the original query
+        graphData: graphData,
+        summary: 'Graph visualization applied via confirmation'
+      };
+      console.log('📤 Query result object:', queryResult);
+      
+      onApplyQueryResult(queryResult);
+      console.log('✅ onApplyQueryResult called successfully');
+    } else {
+      console.error('❌ onApplyQueryResult callback not available!');
+    }
+
+    // Replace the last message (confirmation) with a success message
+    const confirmMessage: ChatMessageType = {
+      id: generateMessageId(),
+      type: 'assistant',
+      content: `✅ Graph visualization updated with ${graphData.nodes.length} nodes and ${graphData.edges.length} edges.`,
+      timestamp: new Date(),
+      queryResult: {
+        cypherQuery: 'MATCH p=(n)-[*0..5]-(m) RETURN p',
+        graphData: graphData,
+        summary: 'Graph visualization applied'
+      }
+    };
+
+    // Replace the last message (which should be the confirmation) with the success message
+    setMessages(prev => {
+      const newMessages = [...prev];
+      newMessages[newMessages.length - 1] = confirmMessage;
+      return newMessages;
+    });
+    console.log('🎯 VISUALIZATION CONFIRM END - Replaced confirmation message with success message');
+  };
+
+  const handleVisualizationCancel = () => {
+    const cancelMessage: ChatMessageType = {
+      id: generateMessageId(),
+      type: 'assistant',
+      content: '❌ Graph visualization cancelled. Showing current graph state.',
+      timestamp: new Date()
+    };
+
+    // Replace the last message (confirmation) with the cancel message  
+    setMessages(prev => {
+      const newMessages = [...prev];
+      newMessages[newMessages.length - 1] = cancelMessage;
+      return newMessages;
+    });
+  };
+
   const sendMessage = async (query: string) => {
     if (!query.trim() || isProcessing) return;
 
@@ -139,21 +201,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const data: ChatApiResponse = await response.json();
 
       if (data.success) {
-        const assistantMessage: ChatMessageType = {
-          id: generateMessageId(),
-          type: 'assistant',
-          content: data.message,
-          timestamp: new Date(),
-          queryResult: data.queryResult
-        };
+        // Handle visualization confirmation requests
+        if (data.needsVisualizationConfirmation && data.queryResult) {
+          const confirmationMessage: ChatMessageType = {
+            id: generateMessageId(),
+            type: 'assistant',
+            content: data.message,
+            timestamp: new Date(),
+            visualizationConfirmation: {
+              nodeCount: (data.queryResult as any).nodeCount || data.queryResult.graphData.nodes.length,
+              edgeCount: (data.queryResult as any).edgeCount || data.queryResult.graphData.edges.length,
+              graphData: data.queryResult.graphData,
+              onConfirm: () => handleVisualizationConfirm(data.queryResult!.graphData),
+              onCancel: () => handleVisualizationCancel()
+            }
+          };
 
-        setMessages(prev => prev.slice(0, -1).concat(assistantMessage));
+          setMessages(prev => prev.slice(0, -1).concat(confirmationMessage));
+        } else {
+          const assistantMessage: ChatMessageType = {
+            id: generateMessageId(),
+            type: 'assistant',
+            content: data.message,
+            timestamp: new Date(),
+            queryResult: data.queryResult
+          };
 
-        // Automatically apply query result to graph if it has data
-        if (data.queryResult && data.queryResult.graphData && 
-            data.queryResult.graphData.nodes.length > 0 && onApplyQueryResult) {
-          console.log('Automatically applying query result to graph');
-          onApplyQueryResult(data.queryResult);
+          setMessages(prev => prev.slice(0, -1).concat(assistantMessage));
+
+          // Automatically apply query result to graph if it has data
+          if (data.queryResult && data.queryResult.graphData && 
+              data.queryResult.graphData.nodes.length > 0 && onApplyQueryResult) {
+            console.log('Automatically applying query result to graph');
+            onApplyQueryResult(data.queryResult);
+          }
         }
       } else {
         // Handle mutation confirmation requests

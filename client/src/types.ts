@@ -81,6 +81,16 @@ export interface ChatMessage {
     onConfirm: () => void;
     onCancel: () => void;
   };
+  visualizationConfirmation?: {
+    nodeCount: number;
+    edgeCount: number;
+    graphData: {
+      nodes: GraphNode[];
+      edges: GraphEdge[];
+    };
+    onConfirm: () => void;
+    onCancel: () => void;
+  };
 }
 
 export interface MutationPlan {
@@ -110,6 +120,8 @@ export interface ChatQueryResult {
   };
   summary: string;
   executionTime?: number;
+  nodeCount?: number;
+  edgeCount?: number;
   reasoning?: {
     interpretations: string[];
     chosenInterpretation: string;
@@ -173,4 +185,5 @@ export interface ChatApiResponse {
   };
   needsConfirmation?: boolean;
   mutationPlan?: MutationPlan;
+  needsVisualizationConfirmation?: boolean;
 }
