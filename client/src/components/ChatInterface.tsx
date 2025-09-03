@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { ChatMessage as ChatMessageType, ChatQueryResult, ChatApiRequest, ChatApiResponse } from '../types';
 import ChatMessage from './ChatMessage';
+import { chatApi } from '../utils/api';
 
 interface ChatInterfaceProps {
   onApplyQueryResult?: (queryResult: ChatQueryResult) => void;
@@ -51,15 +53,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const handleMutationConfirm = async (mutationPlan: any) => {
     try {
-      const response = await fetch('http://localhost:5002/api/chat/execute-mutation', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ mutationPlan }),
-      });
-
-      const result = await response.json();
+      const result = await chatApi.executeMutation(mutationPlan);
 
       const resultMessage: ChatMessageType = {
         id: generateMessageId(),
@@ -184,21 +178,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsProcessing(true);
 
     try {
-      const requestBody: ChatApiRequest = {
-        query,
-        context: graphContext,
-        conversationHistory: messages
-      };
-
-      const response = await fetch('http://localhost:5002/api/chat/query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      const data: ChatApiResponse = await response.json();
+      const data: ChatApiResponse = await chatApi.query(query, graphContext, messages);
 
       if (data.success) {
         // Handle visualization confirmation requests
@@ -328,6 +308,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (messages.length === 0) {
       addWelcomeMessage();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -335,7 +316,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       <div className="chat-header">
         <div className="chat-title">
           <span className="chat-icon">💬</span>
-          <h3>Graph Query Assistant</h3>
+          <h3>AI Assistant</h3>
         </div>
         <div className="chat-actions">
           <button 

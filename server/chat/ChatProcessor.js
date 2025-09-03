@@ -549,13 +549,16 @@ Intent Types:
       }
     });
 
+    // Validate and fix common Cypher syntax errors before execution
+    const validatedQuery = this.validateAndFixCypherQuery(cypherQuery);
+    
     const session = this.driver.session();
     try {
-      console.log(`[ChatProcessor] Executing Cypher query: ${cypherQuery.query}`);
-      console.log(`[ChatProcessor] Query params:`, cypherQuery.params || {});
+      console.log(`[ChatProcessor] Executing Cypher query: ${validatedQuery.query}`);
+      console.log(`[ChatProcessor] Query params:`, validatedQuery.params || {});
       
       const executionStart = Date.now();
-      const result = await session.run(cypherQuery.query, cypherQuery.params || {});
+      const result = await session.run(validatedQuery.query, validatedQuery.params || {});
       console.log(`[ChatProcessor] Query executed, record count: ${result.records.length}`);
       
       const formattingStart = Date.now();
@@ -623,19 +626,74 @@ Intent Types:
       };
     } catch (error) {
       console.error('Query execution error:', error);
+      
+      // Check if this is the specific Path/Node type mismatch error
+      const isPathNodeError = error.message && (
+        error.message.includes('expected Path but was Node') ||
+        error.message.includes('Invalid input \'Node\' for argument at index 0 of function relationships()') ||
+        error.message.includes('Invalid input \'Node\' for argument at index 0 of function nodes()')
+      );
+      
+      if (isPathNodeError && !validatedQuery._wasAutoFixed) {
+        console.log('[ChatProcessor] 🔄 Detected Path/Node type mismatch - attempting recovery...');
+        
+        try {
+          // Try to generate a simpler, more robust query as fallback
+          const fallbackQuery = this.generateFallbackQuery(validatedQuery, entities);
+          
+          if (fallbackQuery && fallbackQuery.query !== validatedQuery.query) {
+            console.log(`[ChatProcessor] 🔄 Attempting fallback query: ${fallbackQuery.query}`);
+            
+            const fallbackResult = await session.run(fallbackQuery.query, fallbackQuery.params || {});
+            console.log(`[ChatProcessor] ✅ Fallback query succeeded with ${fallbackResult.records.length} records`);
+            
+            const graphData = this.formatGraphData(fallbackResult);
+            
+            reasoningSteps.push({
+              type: 'error_recovery',
+              description: `Recovered from Path/Node type mismatch using fallback query`,
+              timestamp: Date.now(),
+              confidence: 0.7,
+              metadata: {
+                original_error: error.message,
+                fallback_query: fallbackQuery.query,
+                recovery_successful: true
+              }
+            });
+            
+            return {
+              success: true,
+              queryResult: {
+                cypherQuery: fallbackQuery.query,
+                graphData: graphData,
+                summary: `Found ${graphData.nodes.length} nodes and ${graphData.edges.length} connections (recovered from query error)`,
+                reasoningSteps: reasoningSteps,
+                _wasRecovered: true
+              }
+            };
+          }
+        } catch (fallbackError) {
+          console.error('[ChatProcessor] ❌ Fallback query also failed:', fallbackError);
+        }
+      }
+      
       reasoningSteps.push({
         type: 'validation',
         description: `Query execution failed: ${error.message}`,
         timestamp: Date.now(),
         confidence: 0.0,
         metadata: {
-          error_type: error.constructor.name
+          error_type: error.constructor.name,
+          is_path_node_error: isPathNodeError,
+          recovery_attempted: isPathNodeError && !validatedQuery._wasAutoFixed
         }
       });
       
       return {
         success: false,
-        error: 'Failed to execute query. Please try rephrasing your request.'
+        error: isPathNodeError 
+          ? 'Query syntax error detected. This issue has been logged for improvement.' 
+          : 'Failed to execute query. Please try rephrasing your request.'
       };
     } finally {
       await session.close();
@@ -815,18 +873,38 @@ ${entities.join(', ')}
 ${Object.keys(contextData.entities).join(', ')}
 ${connectionContext}
 
-CRITICAL Cypher Syntax Rules:
-- relationships() function requires a Path, not a Node
-- Variable-length patterns: [:REL*1..3] not [:REL1|REL2*1..3] 
-- For paths: MATCH path = (a)-[*1..3]->(b) RETURN nodes(path), relationships(path)
-- For direct relationships: MATCH (a)-[r:REL]->(b) RETURN a, r, b
-- For shared connections: MATCH (a)-[:REL1]->(shared)<-[:REL2]-(b) RETURN a, shared, b
+⚠️ CRITICAL Cypher Syntax Rules - MUST FOLLOW EXACTLY:
+
+🚫 FORBIDDEN PATTERNS - These will cause Neo4jError:
+❌ RETURN sector, relationships(sector), painPoint    // ERROR: relationships() needs Path, not Node
+❌ RETURN industry, relationships(industry)           // ERROR: relationships() needs Path, not Node
+❌ RETURN nodes(sector)                              // ERROR: nodes() needs Path, not Node
+❌ MATCH (a)-[:REL1|REL2*1..3]->(b)                  // ERROR: Invalid variable-length syntax
+
+✅ CORRECT PATTERNS - Use these instead:
+✅ MATCH path = (industry:Industry)-[:HAS_SECTOR]->(sector:Sector) RETURN path
+✅ MATCH (industry:Industry)-[r:HAS_SECTOR]->(sector:Sector) RETURN industry, r, sector
+✅ MATCH path = (a)-[*1..3]->(b) RETURN nodes(path), relationships(path)
+✅ MATCH (a:Sector)-[r1:EXPERIENCES]->(shared:PainPoint)<-[r2:EXPERIENCES]-(b:Department) RETURN a, r1, shared, r2, b
+
+🔥 ABSOLUTELY CRITICAL:
+- relationships() function ONLY works with Path variables, NEVER with Node variables
+- If you need relationships, either use a path variable OR explicitly name relationship variables
+- ALWAYS include relationship variables in RETURN clause for graph visualization
+- Variable-length patterns: [:REL*1..3] not [:REL1|REL2*1..3]
+
+MUST Include Relationships in Results:
+- Graph visualization REQUIRES both nodes AND relationships to display connections
+- ALWAYS return relationship variables in your RETURN clause
+- For shared connections, return ALL relationships: RETURN a, r1, shared, r2, b
+- For path queries, use: RETURN path OR RETURN nodes(path), relationships(path)
+- For direct queries, use: RETURN a, r, b (not just a, b)
 
 Connection Strategy:
-- If direct connections exist, include them in results
-- If no direct connections but indirect ones exist, use variable-length relationships
+- If direct connections exist, include them AND their relationships in results
+- If no direct connections but indirect ones exist, use variable-length relationships or shared patterns
 - For multi-entity queries, look for shared connections through intermediate nodes
-- NEVER use relationships(node) - only relationships(path)
+- ALWAYS ensure relationships are returned for proper graph visualization
 
 CRITICAL: Respond with ONLY pure JSON. No markdown, no backticks, no code blocks.
 
@@ -879,6 +957,165 @@ Make queries efficient and return relevant graph structure for visualization.
       
       return null;
     }
+  }
+
+  validateAndFixCypherQuery(cypherQuery) {
+    if (!cypherQuery || !cypherQuery.query) {
+      return cypherQuery;
+    }
+
+    let query = cypherQuery.query;
+    let wasFixed = false;
+    const fixes = [];
+
+    // Check for relationships(node) patterns - this is the main issue
+    const relationshipsNodePattern = /relationships\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)/g;
+    const matches = [...query.matchAll(relationshipsNodePattern)];
+    
+    if (matches.length > 0) {
+      console.log(`[ChatProcessor] ⚠️  Found ${matches.length} relationships(node) pattern(s) - fixing...`);
+      
+      // For each relationships(node) pattern, we need to fix it
+      for (const match of matches) {
+        const nodeVar = match[1];
+        
+        // Check if this is a simple traversal pattern that can be converted to named relationships
+        if (query.includes(`MATCH (`) && query.includes(`)-[`) && query.includes(`]->(${nodeVar})`)) {
+          // This looks like it could be fixed by naming the relationships
+          // Pattern: MATCH (a)-[:REL]->(node) ... RETURN ..., relationships(node), ...
+          // Fix: MATCH (a)-[r:REL]->(node) ... RETURN ..., r, ...
+          
+          // Find the relationship pattern leading to this node
+          const relationshipPattern = new RegExp(`-\\[([^\\]]*):([^\\]]+)\\]->\\(${nodeVar}[^\\)]*\\)`, 'g');
+          const relMatch = relationshipPattern.exec(query);
+          
+          if (relMatch) {
+            const existingRelVar = relMatch[1];
+            let relVar = existingRelVar;
+            
+            // If no relationship variable exists, add one
+            if (!existingRelVar) {
+              relVar = 'r' + Math.floor(Math.random() * 1000); // Generate unique var name
+              const oldPattern = `-[:${relMatch[2]}]->(${nodeVar}`;
+              const newPattern = `-[${relVar}:${relMatch[2]}]->(${nodeVar}`;
+              query = query.replace(oldPattern, newPattern);
+            }
+            
+            // Replace relationships(node) with the relationship variable
+            query = query.replace(match[0], relVar);
+            fixes.push(`Replaced relationships(${nodeVar}) with relationship variable ${relVar}`);
+            wasFixed = true;
+          }
+        } else {
+          // More complex case - suggest using a path variable
+          // Look for the MATCH clause and convert to path
+          const matchClausePattern = /MATCH\s+\(([^)]+)\)(.*?)->\(([^)]+)\)/;
+          const matchResult = matchClausePattern.exec(query);
+          
+          if (matchResult) {
+            // Convert to path-based query
+            const pathVar = 'path' + Math.floor(Math.random() * 1000);
+            const originalMatch = matchResult[0];
+            const newMatch = `MATCH ${pathVar} = (${matchResult[1]})${matchResult[2]})->(${matchResult[3]})`;
+            
+            query = query.replace(originalMatch, newMatch);
+            query = query.replace(match[0], `relationships(${pathVar})`);
+            fixes.push(`Converted to path-based query using ${pathVar}`);
+            wasFixed = true;
+          }
+        }
+      }
+    }
+
+    // Check for nodes(node) patterns as well
+    const nodesNodePattern = /nodes\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)/g;
+    const nodeMatches = [...query.matchAll(nodesNodePattern)];
+    
+    if (nodeMatches.length > 0) {
+      console.log(`[ChatProcessor] ⚠️  Found ${nodeMatches.length} nodes(node) pattern(s) - fixing...`);
+      
+      for (const match of nodeMatches) {
+        const nodeVar = match[1];
+        // Similar logic to fix nodes(node) patterns
+        const pathVar = 'path' + Math.floor(Math.random() * 1000);
+        
+        // This is more complex to fix automatically, so we'll log it and remove the problematic part
+        query = query.replace(match[0], nodeVar);
+        fixes.push(`Replaced nodes(${nodeVar}) with node variable ${nodeVar}`);
+        wasFixed = true;
+      }
+    }
+
+    if (wasFixed) {
+      console.log(`[ChatProcessor] ✅ Fixed Cypher query:`);
+      console.log(`[ChatProcessor] Original: ${cypherQuery.query}`);
+      console.log(`[ChatProcessor] Fixed:    ${query}`);
+      console.log(`[ChatProcessor] Fixes applied: ${fixes.join(', ')}`);
+      
+      return {
+        ...cypherQuery,
+        query: query,
+        _wasAutoFixed: true,
+        _fixes: fixes
+      };
+    }
+
+    return cypherQuery;
+  }
+
+  generateFallbackQuery(failedQuery, entities) {
+    // Generate simple, robust fallback queries based on entities
+    if (!entities || entities.length === 0) {
+      return null;
+    }
+
+    // Extract the main entity types from the entities array
+    const nodeTypes = entities.filter(e => this.graphSchema.nodeLabels.includes(e));
+    
+    if (nodeTypes.length === 0) {
+      return null;
+    }
+
+    let fallbackQuery = '';
+    let explanation = '';
+
+    if (nodeTypes.length === 1) {
+      // Single entity - simple node retrieval with connected relationships
+      const nodeType = nodeTypes[0];
+      fallbackQuery = `MATCH (n:${nodeType})-[r]-(connected) RETURN n, r, connected LIMIT 50`;
+      explanation = `Fallback query to show ${nodeType} nodes with their direct connections`;
+    } else if (nodeTypes.length === 2) {
+      // Two entities - look for connections between them
+      const [type1, type2] = nodeTypes;
+      
+      // Try direct connection first
+      fallbackQuery = `
+        MATCH (a:${type1})-[r]-(b:${type2}) 
+        RETURN a, r, b 
+        LIMIT 20
+        UNION
+        MATCH (a:${type1})-[r1]-(intermediate)-[r2]-(b:${type2}) 
+        RETURN a, r1, intermediate, r2, b 
+        LIMIT 20
+      `;
+      explanation = `Fallback query to find connections between ${type1} and ${type2}`;
+    } else {
+      // Multiple entities - get a sample of each
+      const entityQueries = nodeTypes.slice(0, 3).map(type => 
+        `MATCH (n:${type}) RETURN n LIMIT 10`
+      );
+      fallbackQuery = entityQueries.join(' UNION ');
+      explanation = `Fallback query to show samples from multiple entity types: ${nodeTypes.join(', ')}`;
+    }
+
+    console.log(`[ChatProcessor] Generated fallback query: ${fallbackQuery}`);
+
+    return {
+      query: fallbackQuery,
+      params: {},
+      explanation: explanation,
+      connectionStrategy: 'fallback'
+    };
   }
 
   async generateMutationPlan(classification, contextData, query) {

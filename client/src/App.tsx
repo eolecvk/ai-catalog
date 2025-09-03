@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
 import ChatInterface from './components/ChatInterface';
+import { api, nodeApi } from './utils/api';
 import './App.css';
 
 const App: React.FC = () => {
   const [industries, setIndustries] = useState<Industry[]>([]);
   const [sectors, setSectors] = useState<{[key: string]: Sector[]}>({});
-  const [sectorsLoading, setSectorsLoading] = useState<boolean>(false);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [painPoints, setPainPoints] = useState<PainPoint[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -55,11 +55,9 @@ const App: React.FC = () => {
   // Builder mode state (default to builder mode)
   const [isBuilderMode, setIsBuilderMode] = useState(true);
   const [builderAuthenticated, setBuilderAuthenticated] = useState(true);
-  const [builderActiveSection, setBuilderActiveSection] = useState('overview');
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [builderStats, setBuilderStats] = useState<any>(null);
   const [builderLoading, setBuilderLoading] = useState(false);
-  const [builderNodes, setBuilderNodes] = useState<any[]>([]);
   const [currentGraphVersion, setCurrentGraphVersion] = useState('base');
   const [availableVersions, setAvailableVersions] = useState<string[]>(['base']);
   
@@ -70,18 +68,15 @@ const App: React.FC = () => {
   const [editingNode, setEditingNode] = useState<any>(null);
   
   // Graph visualization state
-  const [viewMode] = useState<'graph'>('graph');
   const [graphData, setGraphData] = useState<{ nodes: any[], edges: any[] }>({ nodes: [], edges: [] });
   const [graphLoading, setGraphLoading] = useState(false);
   const [focusedGraphNode, setFocusedGraphNode] = useState<string | null>(null);
+  const [isShowingNodeFocus, setIsShowingNodeFocus] = useState(false); // Track if showing node-specific data
   
   // Graph filter state
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   const [selectedSector, setSelectedSector] = useState<string>('');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('');
-  const [availableIndustries, setAvailableIndustries] = useState<string[]>([]);
-  const [availableSectors, setAvailableSectors] = useState<string[]>([]);
-  const [availableDepartments, setAvailableDepartments] = useState<string[]>([]);
 
   // Assistant-driven graph updates
   const [isAssistantUpdatingGraph, setIsAssistantUpdatingGraph] = useState(false);
@@ -89,8 +84,6 @@ const App: React.FC = () => {
   // Graph visibility control - only show when needed
   const [shouldShowGraph, setShouldShowGraph] = useState(false);
 
-  // Sample query state for welcome screen
-  const [sampleQuery, setSampleQuery] = useState('');
 
   // Chat interface state (always open)
 
@@ -134,6 +127,7 @@ const App: React.FC = () => {
     fetchDepartments();
     // Load all sectors for both Banking and Insurance
     fetchSectors(['Banking', 'Insurance']);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Initialize form with current selections when modal opens
@@ -154,6 +148,7 @@ const App: React.FC = () => {
         fetchDepartments();
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPainPointModal, selections.departments, selections.sectors]);
 
   // Keyboard support for modals
@@ -210,7 +205,6 @@ const App: React.FC = () => {
       return;
     }
     
-    setSectorsLoading(true);
     try {
       const response = await fetch('/api/sectors', {
         method: 'POST',
@@ -227,8 +221,6 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Error fetching sectors:', error);
       setSectors({}); // Clear sectors on error
-    } finally {
-      setSectorsLoading(false);
     }
   };
 
@@ -471,12 +463,14 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const fetchBuilderNodes = async (nodeType: string, version = currentGraphVersion) => {
     setBuilderLoading(true);
     try {
       const response = await fetch(`/api/admin/nodes/${nodeType}?version=${version}`);
       const nodes = await response.json();
-      setBuilderNodes(nodes);
+      // setBuilderNodes(nodes); // Removed builderNodes state
+      console.log('Fetched builder nodes:', nodes);
     } catch (error) {
       console.error('Error fetching admin nodes:', error);
     } finally {
@@ -507,93 +501,7 @@ const App: React.FC = () => {
     }
   };
 
-  const resetToBase = async () => {
-    if (!window.confirm('Are you sure you want to delete the draft and reset to base? All changes will be lost.')) {
-      return;
-    }
-    
-    setBuilderLoading(true);
-    try {
-      const response = await fetch('/api/admin/versions/draft', {
-        method: 'DELETE'
-      });
-      const result = await response.json();
-      if (response.ok) {
-        alert('Reset to base successfully!');
-        setCurrentGraphVersion('base');
-        await fetchAvailableVersions();
-        await fetchBuilderStats('base');
-      } else {
-        alert(`Error: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Error resetting to base:', error);
-      alert('Error resetting to base');
-    } finally {
-      setBuilderLoading(false);
-    }
-  };
 
-  // Admin node management functions
-  const handleAddNewNode = (nodeType: string) => {
-    if (currentGraphVersion === 'base') {
-      alert('Please create a draft version first to add new nodes');
-      return;
-    }
-    
-    setBuilderNodeForm({
-      type: nodeType,
-      name: '',
-      impact: ''
-    });
-    setShowBuilderNodeModal(true);
-  };
-
-  const handleEditNode = (node: any) => {
-    if (currentGraphVersion === 'base') {
-      alert('Please create a draft version first to edit nodes');
-      return;
-    }
-    
-    setEditingNode(node);
-    setBuilderNodeForm({
-      type: builderActiveSection,
-      name: node.properties.name || node.properties.title,
-      impact: node.properties.impact || ''
-    });
-    setShowBuilderEditModal(true);
-  };
-
-  const handleDeleteNode = async (nodeId: string) => {
-    if (currentGraphVersion === 'base') {
-      alert('Please create a draft version first to delete nodes');
-      return;
-    }
-    
-    if (!window.confirm('Are you sure you want to delete this node?')) {
-      return;
-    }
-    
-    setBuilderLoading(true);
-    try {
-      const response = await fetch(`/api/admin/nodes/${builderActiveSection}/${nodeId}?version=${currentGraphVersion}`, {
-        method: 'DELETE'
-      });
-      
-      if (response.ok) {
-        await fetchBuilderNodes(builderActiveSection, currentGraphVersion);
-        await fetchBuilderStats(currentGraphVersion);
-      } else {
-        const error = await response.json();
-        alert(`Error deleting node: ${error.error}`);
-      }
-    } catch (error) {
-      console.error('Error deleting node:', error);
-      alert('Failed to delete node');
-    } finally {
-      setBuilderLoading(false);
-    }
-  };
 
   const handleCreateNode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -612,7 +520,7 @@ const App: React.FC = () => {
       if (response.ok) {
         setShowBuilderNodeModal(false);
         setBuilderNodeForm({});
-        await fetchBuilderNodes(builderActiveSection, currentGraphVersion);
+        // await fetchBuilderNodes('nodes', currentGraphVersion); // 'nodes' removed
         await fetchBuilderStats(currentGraphVersion);
       } else {
         const error = await response.json();
@@ -631,7 +539,7 @@ const App: React.FC = () => {
     setBuilderLoading(true);
     
     try {
-      const response = await fetch(`/api/admin/nodes/${builderActiveSection}/${editingNode.id}?version=${currentGraphVersion}`, {
+      const response = await fetch(`/api/admin/nodes/${'nodes'}/${editingNode.id}?version=${currentGraphVersion}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -644,7 +552,7 @@ const App: React.FC = () => {
         setShowBuilderEditModal(false);
         setEditingNode(null);
         setBuilderNodeForm({});
-        await fetchBuilderNodes(builderActiveSection, currentGraphVersion);
+        // await fetchBuilderNodes('nodes', currentGraphVersion); // 'nodes' removed
       } else {
         const error = await response.json();
         alert(`Error updating node: ${error.error}`);
@@ -900,10 +808,13 @@ const App: React.FC = () => {
 
   const fetchAvailableVersions = async () => {
     try {
-      const response = await fetch('/api/admin/versions');
+      const response = await api.get('/api/admin/versions');
       if (response.ok) {
         const versions = await response.json();
         setAvailableVersions(versions);
+        console.log('Available versions:', versions);
+      } else {
+        console.error('Failed to fetch versions:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Error fetching versions:', error);
@@ -915,6 +826,7 @@ const App: React.FC = () => {
   const fetchGraphData = useCallback(async (nodeType: string) => {
     setGraphLoading(true);
     setFocusedGraphNode(null); // Reset focused node when loading new data
+    setIsShowingNodeFocus(false); // Clear node focus when fetching general graph data
     
     try {
       const params = new URLSearchParams();
@@ -968,28 +880,21 @@ const App: React.FC = () => {
     
     try {
       // Fetch the node's direct connections from the API
-      const response = await fetch(`/api/admin/node/${nodeId}/graph?version=${currentGraphVersion}`);
+      const data = await nodeApi.getGraph(nodeId, currentGraphVersion);
       
-      if (response.ok) {
-        const data = await response.json();
-        
-        console.log(`API returned ${data.nodes.length} nodes and ${data.edges.length} edges for node ${nodeId}`);
-        
-        // Update graph data smoothly without loading state or delays
-        setGraphData({
-          nodes: data.nodes,
-          edges: data.edges
-        });
-        
-        // Set the focused node to highlight it
-        setFocusedGraphNode(nodeId);
-        
-        console.log(`Successfully updated graph for node ${nodeId}`);
-      } else {
-        const error = await response.json();
-        console.error('Error fetching node connections:', error);
-        alert(`Error loading connections: ${error.error}`);
-      }
+      console.log(`API returned ${data.nodes.length} nodes and ${data.edges.length} edges for node ${nodeId}`);
+      
+      // Update graph data smoothly without loading state or delays
+      setGraphData({
+        nodes: data.nodes,
+        edges: data.edges
+      });
+      
+      // Set flags to prevent automatic refreshes from overriding this focused view
+      setFocusedGraphNode(nodeId);
+      setIsShowingNodeFocus(true);
+      
+      console.log(`Successfully updated graph for node ${nodeId} - blocking auto-refresh`);
     } catch (error) {
       console.error('Failed to fetch node connections:', error);
       alert('Failed to load node connections');
@@ -1048,8 +953,9 @@ const App: React.FC = () => {
       setIsAssistantUpdatingGraph(true);
       console.log('🔄 Set isAssistantUpdatingGraph = true');
       
-      // Update the graph data
+      // Update the graph data and clear any node focus (chat takes precedence)
       console.log('🔄 Calling handleGraphDataUpdate...');
+      setIsShowingNodeFocus(false); // Chat updates override node focus
       handleGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
       
       // Brief delay for visual feedback, then clear the indicator
@@ -1099,15 +1005,17 @@ const App: React.FC = () => {
       // Load industries
       const industriesResponse = await fetch('/api/industries');
       if (industriesResponse.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const industriesData = await industriesResponse.json();
-        setAvailableIndustries(industriesData.map((i: any) => i.name));
+        // setAvailableIndustries(industriesData.map((i: any) => i.name)); // Removed availableIndustries state
       }
 
       // Load departments
       const departmentsResponse = await fetch('/api/departments');
       if (departmentsResponse.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const departmentsData = await departmentsResponse.json();
-        setAvailableDepartments(departmentsData.map((d: any) => d.name));
+        // setAvailableDepartments(departmentsData.map((d: any) => d.name)); // Removed availableDepartments state
       }
 
       // Load sectors (all sectors initially)
@@ -1119,8 +1027,9 @@ const App: React.FC = () => {
         });
         if (sectorsResponse.ok) {
           const sectorsData = await sectorsResponse.json();
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const allSectors = Object.values(sectorsData).flat() as any[];
-          setAvailableSectors(allSectors.map((s: any) => s.name));
+          // setAvailableSectors(allSectors.map((s: any) => s.name)); // Removed availableSectors state
         }
       }
     } catch (error) {
@@ -1135,60 +1044,6 @@ const App: React.FC = () => {
     setSelectedDepartment('');
   };
 
-  // Handle filter changes
-  const handleIndustryToggle = (industry: string) => {
-    setSelectedIndustries(prev => {
-      const newSelection = prev.includes(industry)
-        ? prev.filter(i => i !== industry)
-        : [...prev, industry];
-      
-      // Reset sector when industry selection changes
-      setSelectedSector('');
-      
-      // Reload sectors for the selected industries
-      if (newSelection.length > 0) {
-        loadSectorsForIndustries(newSelection);
-      } else {
-        setAvailableSectors([]);
-      }
-      
-      return newSelection;
-    });
-  };
-
-  const loadSectorsForIndustries = async (industries: string[]) => {
-    try {
-      const sectorsResponse = await fetch('/api/sectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ industries })
-      });
-      if (sectorsResponse.ok) {
-        const sectorsData = await sectorsResponse.json();
-        const allSectors = Object.values(sectorsData).flat() as any[];
-        setAvailableSectors(allSectors.map((s: any) => s.name));
-      }
-    } catch (error) {
-      console.error('Failed to load sectors for industries:', error);
-    }
-  };
-
-  const loadSectorsForIndustry = async (industry: string) => {
-    try {
-      const sectorsResponse = await fetch('/api/sectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ industries: [industry] })
-      });
-      if (sectorsResponse.ok) {
-        const sectorsData = await sectorsResponse.json();
-        const sectors = sectorsData[industry] || [];
-        setAvailableSectors(sectors.map((s: any) => s.name));
-      }
-    } catch (error) {
-      console.error('Failed to load sectors for industry:', error);
-    }
-  };
 
   // Load builder data when entering builder mode
   useEffect(() => {
@@ -1197,48 +1052,59 @@ const App: React.FC = () => {
       fetchBuilderStats();
       loadFilterOptions();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBuilderMode, builderAuthenticated]);
 
   // Load graph data when builder mode starts or when specific node type is selected
   useEffect(() => {
     if (isBuilderMode && builderAuthenticated) {
-      // If a specific node type was selected from overview, use it
-      if (selectedNodeType) {
-        const nodeTypeMap: { [key: string]: string } = {
-          'industries': 'industries',
-          'sectors': 'sectors', 
-          'departments': 'departments',
-          'painpoints': 'painpoints',
-          'projects': 'projects',
-          'blueprints': 'blueprints',
-          'roles': 'roles',
-          'modules': 'modules',
-          'submodules': 'submodules'
-        };
-        
-        const nodeType = nodeTypeMap[selectedNodeType];
-        if (nodeType) {
-          fetchGraphData(nodeType);
+      // Only refresh graph data if not showing node-specific focus
+      if (!isShowingNodeFocus) {
+        // If a specific node type was selected from overview, use it
+        if (selectedNodeType) {
+          const nodeTypeMap: { [key: string]: string } = {
+            'industries': 'industries',
+            'sectors': 'sectors', 
+            'departments': 'departments',
+            'painpoints': 'painpoints',
+            'projects': 'projects',
+            'blueprints': 'blueprints',
+            'roles': 'roles',
+            'modules': 'modules',
+            'submodules': 'submodules'
+          };
+          
+          const nodeType = nodeTypeMap[selectedNodeType];
+          if (nodeType) {
+            fetchGraphData(nodeType);
+          }
+        } else {
+          // Default to showing all node types
+          fetchGraphData('all');
         }
       } else {
-        // Default to showing all node types
-        fetchGraphData('all');
+        console.log('Skipping auto-refresh: user is viewing focused node data');
       }
     }
-  }, [isBuilderMode, builderAuthenticated, selectedNodeType, fetchGraphData]);
+  }, [isBuilderMode, builderAuthenticated, selectedNodeType, fetchGraphData, isShowingNodeFocus]);
 
   // Refresh data when version changes
   useEffect(() => {
     if (isBuilderMode && builderAuthenticated) {
       fetchBuilderStats(currentGraphVersion);
-      // Also refresh graph data when version changes
-      if (selectedNodeType) {
-        fetchGraphData(selectedNodeType);
+      // Only refresh graph data if not showing node-specific focus
+      if (!isShowingNodeFocus) {
+        if (selectedNodeType) {
+          fetchGraphData(selectedNodeType);
+        } else {
+          fetchGraphData('all');
+        }
       } else {
-        fetchGraphData('all');
+        console.log('Skipping auto-refresh: user is viewing focused node data');
       }
     }
-  }, [currentGraphVersion, isBuilderMode, builderAuthenticated, selectedNodeType]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentGraphVersion, isBuilderMode, builderAuthenticated, selectedNodeType, isShowingNodeFocus]);
 
   const resetSelections = () => {
     setSelections({ viewMode: '', industries: [], sectors: [], departments: [], painPoints: [] });
@@ -1633,15 +1499,13 @@ const App: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                {availableVersions.length > 1 && (
-                  <button 
-                    className="version-manage-btn"
-                    onClick={() => setShowManageVersionsModal(true)}
-                    title="Manage all versions"
-                  >
-                    🗂️
-                  </button>
-                )}
+                <button 
+                  className="version-manage-btn"
+                  onClick={() => setShowManageVersionsModal(true)}
+                  title="Manage all versions"
+                >
+                  🗂️
+                </button>
               </div>
             )}
             <button 
@@ -1678,6 +1542,7 @@ const App: React.FC = () => {
                 )}
                 
                 <div className="graph-hero-section">
+                  
                   {graphLoading ? (
                     <div className="builder-loading">
                       <div className="spinner"></div>
@@ -2656,7 +2521,7 @@ const App: React.FC = () => {
             <div className="modal-backdrop" onClick={() => setShowBuilderEditModal(false)}>
               <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
-                  <h2>Edit {builderActiveSection.slice(0, -1)}</h2>
+                  <h2>Edit {'nodes'.slice(0, -1)}</h2>
                   <button className="modal-close" onClick={() => setShowBuilderEditModal(false)}>×</button>
                 </div>
                 
@@ -2669,11 +2534,11 @@ const App: React.FC = () => {
                       value={builderNodeForm.name}
                       onChange={(e) => setBuilderNodeForm({...builderNodeForm, name: e.target.value})}
                       required
-                      placeholder={`Enter ${builderActiveSection.slice(0, -1)} name`}
+                      placeholder={`Enter ${'nodes'.slice(0, -1)} name`}
                     />
                   </div>
                   
-                  {(builderActiveSection === 'painpoints') && (
+                  {false && ( // Disabled: (builderActiveSection === 'painpoints') but builderActiveSection was removed
                     <div className="form-group">
                       <label className="form-label">Impact Description</label>
                       <textarea

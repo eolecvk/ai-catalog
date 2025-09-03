@@ -12,6 +12,7 @@
 .app-header {
   text-align: center;
   margin-bottom: 1.5rem;
+  padding: 1rem 0;
 }
 
 .header-content {
@@ -151,20 +152,24 @@
   50% { transform: translateY(-3px); }
 }
 
-.app-header.builder-mode {
-  background: linear-gradient(135deg, #2980b9 0%, #1f5582 100%);
+.app-header.builder-mode h1 {
+  color: #2c3e50;
+}
+
+.app-header.builder-mode p {
+  color: #6c757d;
 }
 
 .app-header h1 {
-  font-size: 2rem;
+  font-size: 1.75rem;
   margin-bottom: 0.3rem;
-  font-weight: 700;
-  text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+  font-weight: 600;
+  color: #2c3e50;
 }
 
 .app-header p {
   font-size: 1rem;
-  opacity: 0.9;
+  color: #6c757d;
 }
 
 
@@ -4444,7 +4449,7 @@ html, body {
   }
 }
 
-/* Enhanced Graph Query Assistant Styles */
+/* Enhanced AI Assistant Styles */
 
 /* Clarification Options */
 .clarification-options {

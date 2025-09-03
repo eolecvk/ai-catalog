@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GraphNode, GraphEdge, ChatQueryResult } from './types';
 import ChatInterface from './components/ChatInterface';
+import { nodeApi } from './utils/api';
 
 interface GraphVizProps {
   nodes: GraphNode[];
@@ -36,6 +37,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [simulationNodes, setSimulationNodes] = useState<GraphNode[]>([]);
   const [componentCount, setComponentCount] = useState<number>(1);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
   const [nodeConnections, setNodeConnections] = useState<any[]>([]);
   const [loadingConnections, setLoadingConnections] = useState<boolean>(false);
@@ -95,6 +97,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
         fetchNodeConnections(focusedNode);
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedNode, nodes]);
 
   // Calculate adaptive canvas size based on available space and content
@@ -119,6 +122,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const heightNum = Math.min(1500, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
     
     return { width, heightNum, combinedScaleFactor };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length, edges.length, height, sidePanelCollapsed]);
 
   const { width, heightNum, combinedScaleFactor } = getCanvasSize();
@@ -397,6 +401,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
 
     setSimulationNodes(newNodes);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, nodes, edges]);
 
   // Initialize node positions with better spacing and hierarchy (smooth updates)
@@ -523,6 +528,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
     
     setSimulationNodes(allUpdatedNodes);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges, width, heightNum, findConnectedComponents]);
 
   // Toggle side panel visibility
@@ -557,14 +563,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const fetchNodeConnections = async (nodeId: string) => {
     setLoadingConnections(true);
     try {
-      const response = await fetch(`/api/admin/node/${nodeId}/connections`);
-      if (response.ok) {
-        const data = await response.json();
-        setNodeConnections(data.connections || []);
-      } else {
-        console.error('Failed to fetch node connections');
-        setNodeConnections([]);
-      }
+      const data = await nodeApi.getConnections(nodeId);
+      setNodeConnections(data.connections || []);
     } catch (error) {
       console.error('Error fetching node connections:', error);
       setNodeConnections([]);
