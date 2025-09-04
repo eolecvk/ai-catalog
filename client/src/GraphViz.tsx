@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GraphNode, GraphEdge, ChatQueryResult } from './types';
-import ChatInterface from './components/ChatInterface';
-import { nodeApi } from './utils/api';
+import { GraphNode, GraphEdge } from './types';
 
 interface GraphVizProps {
   nodes: GraphNode[];
@@ -31,18 +29,11 @@ const GraphViz: React.FC<GraphVizProps> = ({
   onGraphDataUpdate
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [selectedNodeData, setSelectedNodeData] = useState<GraphNode | null>(null);
-  const [sidePanelCollapsed, setSidePanelCollapsed] = useState<boolean>(false);
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [simulationNodes, setSimulationNodes] = useState<GraphNode[]>([]);
   const [componentCount, setComponentCount] = useState<number>(1);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
-  const [nodeConnections, setNodeConnections] = useState<any[]>([]);
-  const [loadingConnections, setLoadingConnections] = useState<boolean>(false);
-  const [editingNodeName, setEditingNodeName] = useState<boolean>(false);
-  const [editedNodeName, setEditedNodeName] = useState<string>('');
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
 
   // Use props directly - single source of truth from App.tsx
@@ -64,23 +55,11 @@ const GraphViz: React.FC<GraphVizProps> = ({
     console.log('- edges prop:', edges.length);
     console.log('- Sample node IDs from props:', nodes.slice(0, 5).map(n => n.id));
   }, [nodes, edges]);
-  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState<boolean>(false);
   const animationRef = useRef<number>();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Chat functionality
 
-  const handleApplyQueryResult = (queryResult: ChatQueryResult) => {
-    console.log('🎯 GraphViz.handleApplyQueryResult called with', queryResult.graphData.nodes.length, 'nodes and', queryResult.graphData.edges.length, 'edges');
-    
-    // Always update through parent App.tsx for single graph view
-    if (onGraphDataUpdate) {
-      console.log('🎯 GraphViz calling onGraphDataUpdate to parent App');
-      onGraphDataUpdate(queryResult.graphData.nodes, queryResult.graphData.edges);
-    } else {
-      console.warn('🚨 onGraphDataUpdate not provided - graph will not update');
-    }
-  };
 
 
 
@@ -88,23 +67,41 @@ const GraphViz: React.FC<GraphVizProps> = ({
   useEffect(() => {
     if (focusedNode !== null) {
       setFocusedNodeId(focusedNode);
-      // If the focused node is provided, also auto-select it for the side panel
-      const focusedNodeData = currentGraphData.nodes.find(n => n.id === focusedNode);
-      if (focusedNodeData) {
-        setSelectedNode(focusedNode);
-        setSelectedNodeData(focusedNodeData);
-        setEditedNodeName(focusedNodeData.label);
-        fetchNodeConnections(focusedNode);
-      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedNode, nodes]);
+  }, [focusedNode]);
+
+  // Listen for container resize when using percentage heights
+  useEffect(() => {
+    if (height === "100%") {
+      const handleResize = () => {
+        // Trigger recalculation of canvas size
+        setSimulationNodes([...simulationNodes]);
+      };
+
+      const resizeObserver = new ResizeObserver(handleResize);
+      if (containerRef.current) {
+        resizeObserver.observe(containerRef.current);
+      }
+
+      return () => resizeObserver.disconnect();
+    }
+  }, [height, simulationNodes]);
 
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {
     // Base dimensions that work well for most graphs
-    const baseWidth = sidePanelCollapsed ? 1200 : 800; // Adjust for right panel visibility
-    const baseHeight = parseInt(height) || 700;
+    const baseWidth = 1200; // Full width since no side panel
+    let baseHeight = 700; // Default fallback
+    
+    // Handle percentage heights by using container dimensions
+    if (height === "100%" && containerRef.current) {
+      const containerHeight = containerRef.current.clientHeight;
+      if (containerHeight > 0) {
+        baseHeight = Math.max(400, containerHeight - 100); // Subtract padding/margins
+      }
+    } else {
+      baseHeight = parseInt(height) || 700;
+    }
     
     // Auto-zoom calculation: zoom out when there are many nodes
     const nodeCount = currentGraphData.nodes.length;
@@ -123,7 +120,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     
     return { width, heightNum, combinedScaleFactor };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, edges.length, height, sidePanelCollapsed]);
+  }, [nodes.length, edges.length, height]);
 
   const { width, heightNum, combinedScaleFactor } = getCanvasSize();
 
@@ -532,14 +529,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   }, [nodes, edges, width, heightNum, findConnectedComponents]);
 
   // Toggle side panel visibility
-  const toggleSidePanel = () => {
-    setSidePanelCollapsed(!sidePanelCollapsed);
-  };
 
-  // Toggle left panel visibility
-  const toggleLeftPanel = () => {
-    setLeftPanelCollapsed(!leftPanelCollapsed);
-  };
 
   // Animation loop
   useEffect(() => {
@@ -559,36 +549,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
     };
   }, [runSimulation, simulationNodes.length]);
 
-  // Fetch all connections for a specific node
-  const fetchNodeConnections = async (nodeId: string) => {
-    setLoadingConnections(true);
-    try {
-      const data = await nodeApi.getConnections(nodeId);
-      setNodeConnections(data.connections || []);
-    } catch (error) {
-      console.error('Error fetching node connections:', error);
-      setNodeConnections([]);
-    } finally {
-      setLoadingConnections(false);
-    }
-  };
 
   // Handle node interactions
   const handleNodeClick = (node: GraphNode, event: React.MouseEvent) => {
     event.stopPropagation();
     event.preventDefault();
     
-    // Update node selection and focus
-    setSelectedNode(node.id);
-    setSelectedNodeData(node);
     setFocusedNodeId(node.id);
-    
-    // Initialize editing state
-    setEditingNodeName(false);
-    setEditedNodeName(node.label);
-    
-    // Fetch all connections for this node from the database
-    fetchNodeConnections(node.id);
     
     if (onNodeSelect) {
       onNodeSelect(node.id, node);
@@ -608,44 +575,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
     // Only clear focus if clicking directly on the background rectangle
     if (event.target === event.currentTarget) {
       setFocusedNodeId(null);
-      setSelectedNode(null);
-      setSelectedNodeData(null);
-      // Note: We don't close the panel anymore
     }
   };
 
-  // Handle connection click from side panel
-  const handleConnectionClick = (nodeId: string, nodeData?: any) => {
-    // First try to find the node in current simulation nodes
-    let targetNode = simulationNodes.find(n => n.id === nodeId);
-    
-    // If not found in simulation, use the node data from connection or create a basic node object
-    if (!targetNode && nodeData) {
-      targetNode = {
-        id: nodeData.id || nodeId,
-        label: nodeData.label || nodeData.name || 'Unknown Node',
-        group: nodeData.group || 'Other',
-        properties: nodeData.properties || {},
-        x: 0,
-        y: 0,
-        vx: 0,
-        vy: 0
-      };
-    }
-    
-    if (targetNode) {
-      setFocusedNodeId(nodeId);
-      setSelectedNode(nodeId);
-      setSelectedNodeData(targetNode);
-      fetchNodeConnections(nodeId);
-      
-      if (onNavigateToNode) {
-        onNavigateToNode(nodeId);
-      }
-    } else {
-      console.warn('Target node not found:', nodeId);
-    }
-  };
 
   // Get direct connections for a node
   const getDirectConnections = useCallback((nodeId: string): Set<string> => {
@@ -714,46 +646,14 @@ const GraphViz: React.FC<GraphVizProps> = ({
   return (
     <div ref={containerRef} className="graph-viz-container">
 
-      {/* Main Content Area - Three Panel Layout */}
-      <div className="graph-main-content three-panel-layout">
-        {/* Left Panel - Query Agent */}
-        <div className={`graph-left-panel ${leftPanelCollapsed ? 'collapsed' : ''}`}>
-          {!leftPanelCollapsed && (
-            <div className="left-panel-content">
-              <ChatInterface
-                onApplyQueryResult={handleApplyQueryResult}
-                onNavigateToNode={onNavigateToNode}
-                graphContext={{
-                  currentNodeType: nodeType,
-                  selectedNodes: selectedNode ? [selectedNode] : [],
-                  graphVersion
-                }}
-              />
-            </div>
-          )}
-        </div>
+      {/* Main Content Area - Two Panel Layout */}
+      <div className="graph-main-content two-panel-layout">
 
         {/* Graph Canvas - Center Panel */}
         <div 
-          className={`graph-canvas-container center-panel ${sidePanelCollapsed ? 'right-collapsed' : ''} ${leftPanelCollapsed ? 'left-collapsed' : ''}`}
+          className={`graph-canvas-container center-panel full-width`}
         >
-          {/* Left Panel Toggle Button - positioned at left edge of graph */}
-          <button 
-            className="left-panel-toggle-btn"
-            onClick={toggleLeftPanel}
-            title={leftPanelCollapsed ? "Show query panel" : "Hide query panel"}
-          >
-            {leftPanelCollapsed ? '▶' : '◀'}
-          </button>
           
-          {/* Right Panel Toggle Button - positioned at right edge of graph */}
-          <button 
-            className="right-panel-toggle-btn"
-            onClick={toggleSidePanel}
-            title={sidePanelCollapsed ? "Show side panel" : "Hide side panel"}
-          >
-            {sidePanelCollapsed ? '◀' : '▶'}
-          </button>
           <div 
             className={`graph-canvas-2d ${focusedNodeId ? 'focused' : ''}`}
             style={{ 
@@ -1023,7 +923,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
               
               const radius = getNodeRadius(node.group);
               const gradient = getNodeGradient(node.group);
-              const isSelected = selectedNode === node.id;
               const isDragged = draggedNode === node.id;
               const isFocused = focusedNodeId === node.id;
               const shouldFade = shouldFadeNode(node.id);
@@ -1036,8 +935,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     cy={node.y}
                     r={radius}
                     fill={gradient}
-                    stroke={isFocused ? '#e74c3c' : (isSelected ? '#2c3e50' : '#ffffff')}
-                    strokeWidth={isFocused ? 5 : (isSelected ? 4 : 3)}
+                    stroke={isFocused ? '#e74c3c' : '#ffffff'}
+                    strokeWidth={isFocused ? 5 : 3}
                     opacity={shouldFade ? 0.25 : (isDragged ? 0.8 : 1)}
                     filter="url(#nodeShadow)"
                     style={{ 
@@ -1129,246 +1028,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
           </div>
         </div>
 
-        {/* Side Panel */}
-        <div className={`graph-side-panel ${sidePanelCollapsed ? 'collapsed' : ''}`}>
-          {!sidePanelCollapsed && (
-            <div className="side-panel-content">
-              {selectedNodeData ? (
-                <>
-                  {/* Panel Header */}
-                  <div className="side-panel-header">
-                    <div className="node-panel-title-container">
-                      {editingNodeName ? (
-                        <input 
-                          type="text" 
-                          className="node-panel-title-input editing"
-                          value={editedNodeName}
-                          onChange={(e) => setEditedNodeName(e.target.value)}
-                          onBlur={() => {
-                            // Save name change
-                            console.log('Saving node name change:', editedNodeName);
-                            setEditingNodeName(false);
-                            // This would typically call an API to update the node name
-                            alert('Node name editing would update the database (read-only mode)');
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.currentTarget.blur();
-                            } else if (e.key === 'Escape') {
-                              setEditedNodeName(selectedNodeData.label);
-                              setEditingNodeName(false);
-                            }
-                          }}
-                          autoFocus
-                          placeholder="Enter node name"
-                        />
-                      ) : (
-                        <div className="node-panel-title-display">
-                          <span className="node-panel-title-text">{editedNodeName}</span>
-                          <button 
-                            className="node-edit-btn"
-                            onClick={() => setEditingNodeName(true)}
-                            title="Edit node name"
-                          >
-                            ✏️
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <div className="node-panel-type">{selectedNodeData.group}</div>
-                  </div>
-
-            {/* Panel Content */}
-            <div className="node-panel-content">
-              {/* Properties Section */}
-              <div className="node-panel-section">
-                <h3 className="node-panel-section-title">Properties</h3>
-                {Object.entries(selectedNodeData.properties || {}).map(([key, value]) => {
-                  // Filter out non-useful properties from user perspective
-                  if (key === 'original_id' || key === 'label' || key === 'name' || key === 'id') {
-                    return null;
-                  }
-                  
-                  return (
-                    <div key={key} className="node-property">
-                      <span className="property-label">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
-                      <input 
-                        type="text" 
-                        className="form-input"
-                        defaultValue={String(value)}
-                        placeholder={`Enter ${key}`}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Connections Section */}
-              <div className="node-panel-section">
-                <h3 className="node-panel-section-title">
-                  Connections {loadingConnections && <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>(loading...)</span>}
-                  <button 
-                    className="add-item-btn"
-                    style={{ marginLeft: 'auto', fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
-                    onClick={() => {
-                      // Add connection logic would go here
-                      console.log('Add new connection clicked');
-                    }}
-                  >
-                    + Add
-                  </button>
-                </h3>
-                <div className="connections-list">
-                  {/* Group connections by connected node type */}
-                  {(() => {
-                    // Helper function to get plural form of node type
-                    const getPluralNodeType = (nodeType: string): string => {
-                      const pluralMapping: { [key: string]: string } = {
-                        'Industry': 'Industries',
-                        'Sector': 'Sectors', 
-                        'Department': 'Departments',
-                        'PainPoint': 'Pain Points',
-                        'ProjectBlueprint': 'Project Blueprints',
-                        'ProjectOpportunity': 'Project Opportunities',
-                        'Role': 'Roles',
-                        'SubModule': 'Sub Modules',
-                        'Module': 'Modules'
-                      };
-                      return pluralMapping[nodeType] || nodeType + 's';
-                    };
-
-                    // Group connections by connected node type
-                    const groupedConnections = nodeConnections.reduce((groups, connection) => {
-                      const isIncoming = connection.direction === 'incoming';
-                      const connectedNode = isIncoming ? connection.sourceNode : connection.targetNode;
-                      const nodeType = connectedNode?.group || 'Other';
-                      if (!groups[nodeType]) groups[nodeType] = [];
-                      groups[nodeType].push(connection);
-                      return groups;
-                    }, {} as { [key: string]: any[] });
-
-                    return Object.entries(groupedConnections).map(([nodeType, connections]) => {
-                      const connectionsArray = connections as any[];
-                      return (
-                        <div key={nodeType} className="connection-group">
-                          <h4 className="connection-group-title">
-                            {getPluralNodeType(nodeType)} ({connectionsArray.length})
-                          </h4>
-                          <div className="connection-group-items">
-                            {connectionsArray.map((connection: any) => {
-                              const isIncoming = connection.direction === 'incoming';
-                              const connectedNode = isIncoming ? connection.sourceNode : connection.targetNode;
-                              const isNodeVisible = simulationNodes.some(n => n.id === connectedNode?.id);
-                              
-                              return (
-                                <div key={connection.id} className="connection-item clickable">
-                                  <div className={`connection-direction ${isIncoming ? 'incoming' : 'outgoing'}`}>
-                                    {isIncoming ? '←' : '→'}
-                                  </div>
-                                  <div 
-                                    className="connection-details"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (connectedNode?.id) {
-                                        handleConnectionClick(connectedNode.id, connectedNode);
-                                      }
-                                    }}
-                                    style={{ cursor: 'pointer' }}
-                                  >
-                                    <div className="connection-node">
-                                      <span style={{ 
-                                        color: isNodeVisible ? '#1f2937' : '#9ca3af',
-                                        textDecoration: 'underline',
-                                        textDecorationColor: '#3b82f6'
-                                      }}>
-                                        {connectedNode?.label || 'Unknown Node'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <button 
-                                    className="remove-item-btn"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      // Remove connection logic would go here
-                                      console.log(`Remove connection ${connection.id}`);
-                                    }}
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
-
-                  {/* Loading state */}
-                  {loadingConnections && (
-                    <div className="empty-connections">
-                      <div className="empty-connections-icon">⏳</div>
-                      Loading connections...
-                    </div>
-                  )}
-
-                  {/* No connections message */}
-                  {!loadingConnections && nodeConnections.length === 0 && (
-                    <div className="empty-connections">
-                      <div className="empty-connections-icon">🔗</div>
-                      No connections found
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Panel Actions */}
-            <div className="node-panel-actions">
-              <button 
-                className="node-action-btn primary"
-                onClick={() => {
-                  // Save changes logic would go here
-                      console.log('Saving node changes...');
-                    }}
-                  >
-                    💾 Save Changes
-                  </button>
-                  {(() => {
-                    // Check if node has any connections (use fetched connections for accurate count)
-                    const hasConnections = nodeConnections.length > 0;
-                    
-                    return (
-                      <button 
-                        className={`node-action-btn ${hasConnections ? 'danger-disabled' : 'danger'}`}
-                        disabled={hasConnections}
-                        onClick={() => {
-                          if (hasConnections) {
-                            alert('Remove all connections before deleting this node');
-                          } else {
-                            if (window.confirm(`Are you sure you want to delete "${selectedNodeData.label}"?`)) {
-                              console.log('Deleting node:', selectedNodeData.id);
-                              // Delete logic would go here
-                            }
-                          }
-                        }}
-                        title={hasConnections ? 'Remove all connections before deleting this node' : 'Delete this node'}
-                      >
-                        🗑️ Delete Node
-                      </button>
-                    );
-                  })()}
-                </div>
-              </>
-            ) : (
-              <div className="side-panel-empty">
-                <div className="empty-icon">🎯</div>
-                <p>Click on a node to view its details and connections</p>
-              </div>
-            )}
-            </div>
-          )}
-        </div>
       </div>
 
 

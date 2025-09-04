@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
 import ChatInterface from './components/ChatInterface';
+import GraphErrorBoundary from './components/GraphErrorBoundary';
 import { api, nodeApi } from './utils/api';
 import './App.css';
 
@@ -73,6 +74,10 @@ const App: React.FC = () => {
   const [focusedGraphNode, setFocusedGraphNode] = useState<string | null>(null);
   const [isShowingNodeFocus, setIsShowingNodeFocus] = useState(false); // Track if showing node-specific data
   
+  // UI visibility state - tabbed interface in right panel
+  const [activeRightTab, setActiveRightTab] = useState<'assistant' | 'nodeDetails'>('assistant');
+  const [selectedNodeForDetails, setSelectedNodeForDetails] = useState<any>(null);
+  
   // Graph filter state
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   const [selectedSector, setSelectedSector] = useState<string>('');
@@ -83,6 +88,10 @@ const App: React.FC = () => {
 
   // Graph visibility control - only show when needed
   const [shouldShowGraph, setShouldShowGraph] = useState(false);
+  
+  // Computed state for better UX
+  const hasGraphData = graphData.nodes.length > 0;
+  const showGraphSection = shouldShowGraph && hasGraphData;
 
 
   // Chat interface state (always open)
@@ -872,7 +881,11 @@ const App: React.FC = () => {
   // Handle node selection in graph
   const handleGraphNodeSelect = (nodeId: string, nodeData: any) => {
     console.log('Selected node:', nodeId, nodeData);
+    // When a node is selected, switch to Node Details tab
+    setSelectedNodeForDetails(nodeData);
+    setActiveRightTab('nodeDetails');
   };
+
 
   // Handle node double-click in graph (center and show connections)
   const handleGraphNodeEdit = async (nodeId: string, nodeData: any) => {
@@ -1548,69 +1561,67 @@ const App: React.FC = () => {
                       <div className="spinner"></div>
                       <p>Loading graph visualization...</p>
                     </div>
+                  ) : showGraphSection ? (
+                    <GraphErrorBoundary>
+                      <GraphViz
+                        nodes={graphData.nodes}
+                        edges={graphData.edges}
+                        nodeType="all"
+                        onNodeSelect={handleGraphNodeSelect}
+                        onNodeDoubleClick={handleGraphNodeEdit}
+                        onNavigateToNode={handleNavigateToNode}
+                        focusedNode={focusedGraphNode}
+                        height="100%"
+                        enableChat={true}
+                        graphVersion={currentGraphVersion}
+                        onGraphDataUpdate={handleGraphDataUpdate}
+                      />
+                    </GraphErrorBoundary>
                   ) : (
-                    <GraphViz
-                      nodes={graphData.nodes}
-                      edges={graphData.edges}
-                      nodeType="all"
-                      onNodeSelect={handleGraphNodeSelect}
-                      onNodeDoubleClick={handleGraphNodeEdit}
-                      onNavigateToNode={handleNavigateToNode}
-                      focusedNode={focusedGraphNode}
-                      height="600px"
-                      enableChat={true}
-                      graphVersion={currentGraphVersion}
-                      onGraphDataUpdate={handleGraphDataUpdate}
-                    />
+                    <div className="graph-welcome-state">
+                      <div className="welcome-content">
+                        <div className="welcome-icon">🔍</div>
+                        <h3>Ready to Explore</h3>
+                        <p>Ask the AI Assistant to explore the data and discover insights about industries, sectors, pain points, and AI project opportunities.</p>
+                        <div className="example-queries">
+                          <h4>Try asking:</h4>
+                          <ul>
+                            <li>"Show me all healthcare sectors"</li>
+                            <li>"What are the main pain points in finance?"</li>
+                            <li>"Find AI projects for retail departments"</li>
+                            <li>"Show connections between industries and sectors"</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-
-            </>
-          )}
-        </div>
-        {/* Original Builder Dashboard (hidden) */}
-        <div className="builder-dashboard" style={{ display: 'none' }}>
-          
-          <div className="builder-content">
-
-            {builderLoading && (
-              <div className="builder-loading">
-                <div className="spinner"></div>
-                <p>Loading...</p>
-              </div>
-            )}
-
-            {/* Overview Section */}
-            {!builderLoading && (
-              <div className="builder-overview">
-                <div className="node-cards-grid">
+                
+                {/* Node Cards - Horizontal layout under graph */}
+                <div className="node-cards-horizontal">
                   <div 
-                    className="node-card clickable industry-node" 
+                    className="node-card industry-node clickable" 
                     onClick={() => handleOverviewCardClick('industries')}
-                    title="Click to view Industries in graph"
                   >
                     <div className="node-circle">
-                      <span className="node-icon">🏢</span>
+                      <span className="node-icon">🏭</span>
                       <span className="node-count">{builderStats?.Industry || 0}</span>
                     </div>
                     <span className="node-label">Industries</span>
                   </div>
                   <div 
-                    className="node-card clickable sector-node" 
+                    className="node-card sector-node clickable" 
                     onClick={() => handleOverviewCardClick('sectors')}
-                    title="Click to view Sectors in graph"
                   >
                     <div className="node-circle">
-                      <span className="node-icon">🏛️</span>
+                      <span className="node-icon">🎯</span>
                       <span className="node-count">{builderStats?.Sector || 0}</span>
                     </div>
                     <span className="node-label">Sectors</span>
                   </div>
                   <div 
-                    className="node-card clickable department-node" 
+                    className="node-card department-node clickable" 
                     onClick={() => handleOverviewCardClick('departments')}
-                    title="Click to view Departments in graph"
                   >
                     <div className="node-circle">
                       <span className="node-icon">🏢</span>
@@ -1619,9 +1630,8 @@ const App: React.FC = () => {
                     <span className="node-label">Departments</span>
                   </div>
                   <div 
-                    className="node-card clickable painpoint-node" 
+                    className="node-card painpoint-node clickable" 
                     onClick={() => handleOverviewCardClick('painpoints')}
-                    title="Click to view Pain Points in graph"
                   >
                     <div className="node-circle">
                       <span className="node-icon">⚠️</span>
@@ -1630,9 +1640,8 @@ const App: React.FC = () => {
                     <span className="node-label">Pain Points</span>
                   </div>
                   <div 
-                    className="node-card clickable project-node" 
+                    className="node-card project-node clickable" 
                     onClick={() => handleOverviewCardClick('projects')}
-                    title="Click to view Projects in graph"
                   >
                     <div className="node-circle">
                       <span className="node-icon">🚀</span>
@@ -1641,23 +1650,87 @@ const App: React.FC = () => {
                     <span className="node-label">Projects</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Secondary Panel - Tabbed Interface */}
+              <div className="secondary-panel">
+                {/* Tab Navigation */}
+                <div className="tab-navigation">
+                  <button 
+                    className={`tab ${activeRightTab === 'assistant' ? 'active' : ''}`}
+                    onClick={() => setActiveRightTab('assistant')}
+                  >
+                    🤖 AI Assistant
+                  </button>
+                  <button 
+                    className={`tab ${activeRightTab === 'nodeDetails' ? 'active' : ''}`}
+                    onClick={() => setActiveRightTab('nodeDetails')}
+                  >
+                    📊 Node Details
+                  </button>
+                </div>
                 
-                {/* AI Query Assistant */}
-                <div className="chat-window">
-                  <ChatInterface
-                    onApplyQueryResult={handleApplyQueryResult}
-                    onNavigateToNode={handleNavigateToNode}
-                    graphContext={{
-                      currentNodeType: selectedNodeType || 'all',
-                      graphVersion: currentGraphVersion
-                    }}
-                  />
+                {/* Tab Content */}
+                <div className="tab-content">
+                  {activeRightTab === 'assistant' && (
+                    <div className="chat-window">
+                      <ChatInterface
+                        onApplyQueryResult={handleApplyQueryResult}
+                        onNavigateToNode={handleNavigateToNode}
+                        graphContext={{
+                          currentNodeType: selectedNodeType || 'all',
+                          graphVersion: currentGraphVersion
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {activeRightTab === 'nodeDetails' && (
+                    <div className="node-details-content">
+                      {selectedNodeForDetails ? (
+                        <>
+                          <div className="detail-section">
+                            <h4>Type</h4>
+                            <p>{selectedNodeForDetails.labels ? selectedNodeForDetails.labels.join(', ') : 'Unknown'}</p>
+                          </div>
+                          
+                          {selectedNodeForDetails.properties && (
+                            <div className="detail-section">
+                              <h4>Properties</h4>
+                              <div className="properties-list">
+                                {Object.entries(selectedNodeForDetails.properties).map(([key, value]) => (
+                                  <div key={key} className="property-item">
+                                    <span className="property-key">{key}:</span>
+                                    <span className="property-value">{String(value)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {selectedNodeForDetails.identity && (
+                            <div className="detail-section">
+                              <h4>ID</h4>
+                              <p>{String(selectedNodeForDetails.identity)}</p>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="empty-state">
+                          <div className="empty-state-content">
+                            <div className="empty-state-icon">📊</div>
+                            <h3>Node Details</h3>
+                            <p>Click on a node in the graph to view its details and connections</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
 
-
-          </div>
+            </>
+          )}
         </div>
         </>
       ) : (

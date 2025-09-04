@@ -1600,11 +1600,13 @@
 .graph-viz-container {
   background: #f8f9fa;
   border-radius: 8px;
-  padding: 1rem;
-  margin: 1rem 0;
   overflow-x: auto;
   max-width: 100%;
   position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .graph-controls {
@@ -2915,7 +2917,7 @@ html, body {
   min-width: 0;
   width: 0; /* Force flex child to respect container */
   box-sizing: border-box;
-  height: 700px; /* Match side panel height exactly */
+  min-height: 0; /* Allow flex shrinking */
 }
 
 .graph-canvas-container.center-panel {
@@ -3011,7 +3013,7 @@ html, body {
   }
   
   .graph-canvas-container {
-    height: 600px; /* Match side panel height at this breakpoint */
+    min-height: 400px; /* Minimum height for usability */
   }
   
   .left-panel-toggle-btn {
@@ -3032,7 +3034,7 @@ html, body {
   
   .graph-canvas-container {
     padding: 0; /* Remove padding to align with side panel */
-    height: 550px; /* Match side panel height at this breakpoint */
+    min-height: 400px; /* Minimum height for tablets */
   }
   
   .side-panel-content {
@@ -3091,7 +3093,7 @@ html, body {
   
   .graph-canvas-container {
     flex: none;
-    height: 350px; /* Match side panel height exactly */
+    height: 350px; /* Mobile needs fixed height due to limited space */
     min-height: 350px;
     width: 100%;
     padding: 0; /* Remove padding to align with side panel */
@@ -3126,7 +3128,7 @@ html, body {
   }
   
   .graph-canvas-container {
-    height: 300px; /* Match side panel height exactly */
+    height: 300px; /* Very small screens need fixed height */
     min-height: 300px;
     padding: 0; /* Remove padding to align with side panel */
   }
@@ -5002,6 +5004,8 @@ html, body {
   padding: 0.5rem;
   background: #f8f9fa;
   border-radius: 4px;
+  overflow: hidden;
+  max-width: 100%;
 }
 
 .step-detail strong {
@@ -5018,6 +5022,10 @@ html, body {
   font-size: 0.85rem;
   white-space: pre-wrap;
   color: #444;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .step-metadata {
@@ -5066,4 +5074,503 @@ html, body {
 .step-validation::before {
   background: #6c5ce7;
   box-shadow: 0 0 0 2px #6c5ce7;
+}
+
+/* Component Visibility Toggle Styles */
+.chat-header, .node-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-header h3, .node-detail-header h3 {
+  margin: 0;
+  color: white;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.toggle-view-button {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toggle-view-button:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+/* Node Details Panel Styles */
+.node-details-view {
+  min-height: 400px;
+}
+
+.node-detail-content {
+  color: white;
+}
+
+.detail-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.detail-section h4 {
+  margin: 0 0 0.75rem 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-section p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.properties-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.property-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.property-key {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
+
+.property-value {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  text-align: right;
+  word-break: break-word;
+}
+
+/* Welcome States Styles */
+.graph-welcome-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 500px;
+  background: rgba(41, 128, 185, 0.05);
+  border-radius: 12px;
+  border: 2px dashed rgba(41, 128, 185, 0.3);
+}
+
+.graph-welcome-state .welcome-content {
+  text-align: center;
+  color: #1a202c;
+  max-width: 500px;
+  padding: 2rem;
+}
+
+.graph-welcome-state .welcome-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.graph-welcome-state h3 {
+  margin: 0 0 1rem 0;
+  color: #1a202c;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.graph-welcome-state p {
+  margin: 0 0 2rem 0;
+  color: #4a5568;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.example-queries {
+  text-align: left;
+  background: rgba(41, 128, 185, 0.1);
+  border-radius: 8px;
+  padding: 1.5rem;
+  border: 1px solid rgba(41, 128, 185, 0.2);
+}
+
+.example-queries h4 {
+  margin: 0 0 1rem 0;
+  color: #2d3748;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.example-queries ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  list-style-type: disc;
+}
+
+.example-queries li {
+  margin-bottom: 0.5rem;
+  color: #4a5568;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.example-queries li:last-child {
+  margin-bottom: 0;
+}
+
+/* AI Assistant Welcome State */
+.ai-assistant-welcome {
+  padding: 1.5rem;
+  text-align: center;
+  color: white;
+}
+
+.ai-assistant-welcome .welcome-content {
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.ai-assistant-welcome p {
+  margin: 0 0 2rem 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.getting-started {
+  text-align: left;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.getting-started h4 {
+  margin: 0 0 1rem 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.getting-started ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  list-style-type: disc;
+}
+
+.getting-started li {
+  margin-bottom: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.getting-started li:last-child {
+  margin-bottom: 0;
+}
+
+/* Horizontal Node Cards Under Graph */
+.node-cards-horizontal {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  margin-top: 1rem;
+  background: rgba(41, 128, 185, 0.05);
+  border-radius: 12px;
+  border: 1px solid rgba(41, 128, 185, 0.1);
+  flex-wrap: wrap;
+}
+
+.node-cards-horizontal .node-card {
+  flex: 1;
+  min-width: 120px;
+  max-width: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.node-cards-horizontal .node-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  border-color: rgba(41, 128, 185, 0.3);
+}
+
+.node-cards-horizontal .node-card .node-circle {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+  position: relative;
+  background: linear-gradient(135deg, #2980b9, #3498db);
+}
+
+.node-cards-horizontal .node-card .node-icon {
+  font-size: 1.2rem;
+  z-index: 2;
+}
+
+.node-cards-horizontal .node-card .node-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #e74c3c;
+  color: white;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: bold;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.node-cards-horizontal .node-card .node-label {
+  color: #2d3748;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* Secondary Panel - AI Assistant Only */
+.secondary-panel {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tab Navigation Styles */
+.tab-navigation {
+  display: flex;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px 12px 0 0;
+}
+
+.tab-navigation .tab {
+  flex: 1;
+  padding: 1rem 1.5rem;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  border-radius: 12px 12px 0 0;
+}
+
+.tab-navigation .tab:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-navigation .tab.active {
+  color: white;
+  background: rgba(41, 128, 185, 0.2);
+  font-weight: 600;
+}
+
+.tab-navigation .tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #3498db;
+}
+
+/* Tab Content Styles */
+.tab-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-content .chat-window {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.tab-content .chat-interface {
+  max-height: none;
+  height: 100%;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.node-details-content {
+  padding: 1.5rem;
+  flex: 1;
+  overflow-y: auto;
+  color: white;
+}
+
+/* Empty State for Node Details */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 300px;
+}
+
+.empty-state-content {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.8);
+  max-width: 300px;
+}
+
+.empty-state-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.6;
+}
+
+.empty-state h3 {
+  margin: 0 0 1rem 0;
+  color: white;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.empty-state p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.5;
+  font-size: 0.9rem;
+}
+
+/* Remove old overview-stats from secondary panel */
+.secondary-panel .overview-stats {
+  display: none;
+}
+
+/* Responsive Design for Horizontal Node Cards */
+@media (max-width: 768px) {
+  .node-cards-horizontal {
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+  
+  .node-cards-horizontal .node-card {
+    min-width: 100px;
+    max-width: 130px;
+    padding: 0.75rem;
+  }
+  
+  .node-cards-horizontal .node-card .node-circle {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .node-cards-horizontal .node-card .node-icon {
+    font-size: 1rem;
+  }
+  
+  .node-cards-horizontal .node-card .node-count {
+    width: 20px;
+    height: 20px;
+    font-size: 0.6rem;
+    top: -6px;
+    right: -6px;
+  }
+}
+
+/* Error Boundary Styles */
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgba(255, 0, 0, 0.1);
+  border: 2px solid rgba(255, 0, 0, 0.3);
+  border-radius: 8px;
+  min-height: 300px;
+  text-align: center;
+}
+
+.error-state h2 {
+  color: #ff6b6b;
+  margin-bottom: 1rem;
+}
+
+.error-state p {
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 1.5rem;
+}
+
+.reset-button {
+  background: #ff6b6b;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s ease;
+}
+
+.reset-button:hover {
+  background: #ff5252;
 }

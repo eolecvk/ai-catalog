@@ -1329,6 +1329,7 @@ app.post('/api/chat/query-legacy', async (req, res) => {
     }
     
     // Check if query returned empty results and provide suggestions
+    console.log('🔍 Debug - graphData.nodes.length:', graphData.nodes.length);
     if (graphData.nodes.length === 0) {
       console.log('Query returned no results, checking for suggestions...');
       
@@ -1389,7 +1390,7 @@ app.post('/api/chat/query-legacy', async (req, res) => {
     const executionTime = Date.now() - startTime;
     
     // Generate natural language answer based on the query results
-    const conciseAnswer = await generateNaturalLanguageAnswer(query, graphData);
+    const conciseAnswer = await generateNaturalLanguageAnswer(query, graphData, finalExplanation);
     
     // Find all relationships between the identified relevant nodes
     const enhancedGraphData = await findAllRelationshipsBetweenNodes(
@@ -2181,12 +2182,12 @@ function generateResultSummary(graphData, connectionPaths) {
 }
 
 // Helper function to generate natural language answer using LLM
-async function generateNaturalLanguageAnswer(query, graphData) {
+async function generateNaturalLanguageAnswer(query, graphData, finalExplanation = null) {
   const nodeCount = graphData.nodes.length;
   
-  // If no results, return a helpful response
+  // If no results, use the enhanced explanation if available
   if (nodeCount === 0) {
-    return "I don't have information about that in the graph. Try asking about industries, sectors, departments, pain points, or projects.";
+    return finalExplanation || "I don't have information about that in the graph. Try asking about industries, sectors, departments, pain points, or projects.";
   }
   
   try {

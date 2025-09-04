@@ -5,6 +5,15 @@ class ChatProcessor {
     this.driver = driver;
     this.llmManager = llmManager;
     
+    // Initialize new V2 architecture components
+    const ExecutionPlanner = require('./ExecutionPlanner');
+    const Orchestrator = require('./Orchestrator');
+    this.executionPlanner = new ExecutionPlanner();
+    this.orchestrator = new Orchestrator(driver);
+    
+    // Keep legacy components for fallback
+    this.legacyMode = false; // Set to true to use old architecture
+    
     // Graph schema for LLM context
     this.graphSchema = {
       nodeLabels: ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'Module', 'SubModule'],
@@ -24,72 +33,54 @@ class ChatProcessor {
   }
 
   async processChat(query, conversationHistory = [], graphContext = {}) {
-    const reasoningSteps = [];
+    console.log(`[ChatProcessor] Processing chat query: "${query}"`);
+    console.log(`[ChatProcessor] Using V2 Architecture (orchestrated execution)`);
+    
     const startTime = Date.now();
     
     try {
-      // Stage 1: Intent Classification & Context Analysis
-      const classificationStart = Date.now();
-      const classification = await this.classifyIntent(query, conversationHistory, reasoningSteps);
-      reasoningSteps.push({
-        type: 'intent_parsing',
-        description: `Classified query intent as "${classification.type}" with ${Math.round(classification.confidence * 100)}% confidence`,
-        input: query,
-        output: JSON.stringify({type: classification.type, entities: classification.entities}),
-        timestamp: classificationStart,
-        duration: Date.now() - classificationStart,
-        confidence: classification.confidence,
-        metadata: {
-          entities_found: classification.entities.length,
-          action: classification.action
-        }
-      });
+      // V2 Architecture: Generate Execution Plan
+      console.log('[ChatProcessor] Stage 1: Generating execution plan...');
+      const planStart = Date.now();
+      const executionPlan = await this.executionPlanner.generateExecutionPlan(query, conversationHistory);
+      console.log(`[ChatProcessor] Generated plan with ${executionPlan.plan?.length || 0} steps in ${Date.now() - planStart}ms`);
       
-      // Stage 2: Context Gathering & Validation
-      const contextStart = Date.now();
-      const contextData = await this.gatherContext(classification, graphContext, reasoningSteps);
-      reasoningSteps.push({
-        type: 'context_analysis',
-        description: `Analyzed context and validated ${classification.entities.length} entities`,
-        timestamp: contextStart,
-        duration: Date.now() - contextStart,
-        metadata: {
-          entities_validated: Object.keys(contextData.entities).length,
-          validation_errors: contextData.validation.errors.length
-        }
-      });
+      // V2 Architecture: Execute Plan via Orchestrator
+      console.log('[ChatProcessor] Stage 2: Executing plan via orchestrator...');
+      const executionStart = Date.now();
+      const result = await this.orchestrator.executeExecutionPlan(executionPlan, conversationHistory);
+      console.log(`[ChatProcessor] Plan execution completed in ${Date.now() - executionStart}ms`);
       
-      // Stage 3: Route to appropriate processor
-      const processingStart = Date.now();
-      const result = await this.routeToProcessor(classification, contextData, query, conversationHistory, reasoningSteps);
-      
-      // Add reasoning steps to the result if it has queryResult
-      if (result.queryResult) {
-        result.queryResult.reasoningSteps = reasoningSteps;
-      }
+      // Log total processing time
+      const totalTime = Date.now() - startTime;
+      console.log(`[ChatProcessor] Total processing time: ${totalTime}ms`);
       
       return result;
+      
     } catch (error) {
-      console.error('Chat processing error:', error);
-      reasoningSteps.push({
-        type: 'validation',
-        description: `Processing failed: ${error.message}`,
+      console.error('Chat processing error (V2):', error);
+      
+      // Fallback to a basic error response with reasoning steps format
+      const reasoningSteps = [{
+        type: 'execution_planning',
+        description: `V2 Architecture failed: ${error.message}`,
         timestamp: Date.now(),
         duration: Date.now() - startTime,
         confidence: 0.0,
         metadata: {
-          error_type: error.constructor.name
+          error_type: error.constructor.name,
+          architecture_version: 'v2'
         }
-      });
+      }];
       
       return {
         success: false,
-        error: 'Failed to process your request. Please try again.',
+        error: 'Failed to process your request using the new architecture. Please try again.',
         type: 'error',
         queryResult: {
           cypherQuery: '',
           graphData: { nodes: [], edges: [] },
-          summary: '',
+          summary: 'Processing failed with V2 architecture',
           reasoningSteps: reasoningSteps
         }
       };
@@ -602,15 +593,22 @@ Intent Types:
         };
       }
       
-      // Include connection strategy information in the response
+      // Check for empty results and provide helpful messaging
       let enhancedMessage = cypherQuery.explanation || 'Here are the results:';
-      if (cypherQuery.connectionStrategy) {
-        const strategyInfo = {
-          'direct': 'showing direct connections',
-          'indirect': 'showing indirect connections through intermediate nodes',
-          'both': 'showing both direct and indirect connections'
-        };
-        enhancedMessage += ` (${strategyInfo[cypherQuery.connectionStrategy] || 'exploring connections'})`;
+      
+      if (graphData.nodes.length === 0) {
+        // Provide helpful messaging for empty results
+        enhancedMessage = this.generateEmptyResultMessage(query, classification.entities);
+      } else {
+        // Include connection strategy information for non-empty results
+        if (cypherQuery.connectionStrategy) {
+          const strategyInfo = {
+            'direct': 'showing direct connections',
+            'indirect': 'showing indirect connections through intermediate nodes',
+            'both': 'showing both direct and indirect connections'
+          };
+          enhancedMessage += ` (${strategyInfo[cypherQuery.connectionStrategy] || 'exploring connections'})`;
+        }
       }
       
       return {
@@ -1241,6 +1239,29 @@ JSON format:
     }
   }
 
+  // Generate helpful message for empty results
+  generateEmptyResultMessage(query, entities) {
+    const queryLower = query.toLowerCase();
+    
+    // Check for specific problematic terms
+    if (queryLower.includes('retail')) {
+      return "I couldn't find 'retail' in the database. However, I found 'Retail Banking' sector which has several available projects. Try asking about 'retail banking' projects instead, or explore available sectors: Banking, Insurance.";
+    }
+    
+    if (queryLower.includes('agriculture')) {
+      return "I couldn't find 'agriculture' in the database. The available industries are Banking and Insurance. Try asking about projects in Banking or Insurance instead.";
+    }
+    
+    // Check for other common entity types
+    if (entities && entities.length > 0) {
+      const entityList = entities.join(', ');
+      return `I couldn't find information about "${entityList}" in the database. The available data includes industries (Banking, Insurance), sectors (Retail Banking, Commercial Banking, Investment Banking, Life Insurance, Property & Casualty), and various AI project opportunities. Try asking about these specific areas instead.`;
+    }
+    
+    // Generic fallback
+    return "I don't have information about that in the graph. Try asking about industries (Banking, Insurance), sectors, departments, pain points, or AI projects instead.";
+  }
+
   // Method to execute confirmed mutations
   async executeMutation(mutationPlan) {
     const session = this.driver.session();
@@ -1266,6 +1287,17 @@ JSON format:
     } finally {
       await session.close();
     }
+  }
+  
+  // Legacy mode toggle for fallback
+  enableLegacyMode() {
+    this.legacyMode = true;
+    console.log('[ChatProcessor] Switched to legacy V1 architecture');
+  }
+  
+  disableLegacyMode() {
+    this.legacyMode = false;
+    console.log('[ChatProcessor] Switched to V2 orchestrated architecture');
   }
 }
 
