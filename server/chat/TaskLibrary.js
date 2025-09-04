@@ -32,32 +32,33 @@ class TaskLibrary {
       return { success: false, error: 'Missing entity_type parameter' };
     }
 
-    // Check if entity_type is in the schema
+    // Check if entity_type is in the schema (exact match)
     if (this.graphSchema.nodeLabels.includes(entity_type)) {
       return {
         success: true,
         output: {
           valid: true,
           entity_type,
-          exists_in_schema: true
+          exists_in_schema: true,
+          confidence: 1.0
         }
       };
     }
 
-    // Check if entity exists as actual data in the graph
+    // Enhanced entity validation with fuzzy matching
     const session = this.driver.session();
     try {
-      const query = `
+      // First check for exact name/title matches in the data
+      const exactQuery = `
         MATCH (n)
-        WHERE toLower(n.name) CONTAINS toLower($entity) 
-          OR ANY(label IN labels(n) WHERE toLower(label) = toLower($entity))
+        WHERE toLower(n.name) = toLower($entity) OR toLower(n.title) = toLower($entity)
         RETURN n, labels(n) as labels
         LIMIT 5
       `;
       
-      const result = await session.run(query, { entity: entity_type });
+      const exactResult = await session.run(exactQuery, { entity: entity_type });
       
-      if (result.records.length > 0) {
+      if (exactResult.records.length > 0) {
         return {
           success: true,
           output: {
@@ -65,7 +66,9 @@ class TaskLibrary {
             entity_type,
             exists_in_schema: false,
             exists_in_data: true,
-            sample_data: result.records.map(r => ({
+            confidence: 1.0,
+            match_type: 'exact',
+            sample_data: exactResult.records.map(r => ({
               node: r.get('n').properties,
               labels: r.get('labels')
             }))
@@ -73,6 +76,67 @@ class TaskLibrary {
         };
       }
 
+      // Check for partial/fuzzy matches with enhanced search
+      const fuzzyQuery = `
+        MATCH (n)
+        WHERE toLower(n.name) CONTAINS toLower($entity) 
+          OR toLower(n.title) CONTAINS toLower($entity)
+          OR ANY(label IN labels(n) WHERE toLower(label) CONTAINS toLower($entity))
+        RETURN n, labels(n) as labels, 
+               CASE 
+                 WHEN toLower(n.name) CONTAINS toLower($entity) THEN n.name
+                 WHEN toLower(n.title) CONTAINS toLower($entity) THEN n.title
+                 ELSE labels(n)[0]
+               END as matched_field
+        ORDER BY size(matched_field) ASC
+        LIMIT 10
+      `;
+      
+      const fuzzyResult = await session.run(fuzzyQuery, { entity: entity_type });
+      
+      if (fuzzyResult.records.length > 0) {
+        // Calculate similarity scores for better matching
+        const matches = fuzzyResult.records.map(r => {
+          const node = r.get('n');
+          const labels = r.get('labels');
+          const matchedField = r.get('matched_field');
+          
+          // Calculate similarity score
+          const similarity = this.calculateEntitySimilarity(entity_type, matchedField);
+          
+          return {
+            node: node.properties,
+            labels,
+            matched_field: matchedField,
+            similarity_score: similarity
+          };
+        });
+        
+        // Sort by similarity and take best matches
+        const bestMatches = matches
+          .sort((a, b) => b.similarity_score - a.similarity_score)
+          .slice(0, 5);
+        
+        const bestScore = bestMatches[0].similarity_score;
+        
+        return {
+          success: true,
+          output: {
+            valid: bestScore > 0.3, // Threshold for valid fuzzy match
+            entity_type,
+            exists_in_schema: false,
+            exists_in_data: true,
+            confidence: bestScore,
+            match_type: 'fuzzy',
+            sample_data: bestMatches,
+            suggested_entities: bestMatches.slice(0, 3).map(match => match.matched_field)
+          }
+        };
+      }
+
+      // No matches found - provide smart suggestions
+      const smartSuggestions = this.getSmartEntitySuggestions(entity_type);
+      
       return {
         success: true,
         output: {
@@ -80,7 +144,10 @@ class TaskLibrary {
           entity_type,
           exists_in_schema: false,
           exists_in_data: false,
-          suggested_entities: this.graphSchema.nodeLabels
+          confidence: 0.0,
+          match_type: 'none',
+          suggested_entities: smartSuggestions,
+          suggestion_reason: 'Based on contextual similarity and common patterns'
         }
       };
     } catch (error) {
@@ -88,7 +155,7 @@ class TaskLibrary {
       return {
         success: false,
         error: `Failed to validate entity: ${entity_type}`,
-        output: { valid: false, entity_type }
+        output: { valid: false, entity_type, confidence: 0.0 }
       };
     } finally {
       await session.close();
@@ -196,10 +263,15 @@ class TaskLibrary {
   async generateCypher(params) {
     console.log('[TaskLibrary] Executing generate_cypher:', params);
     
-    const { goal, entities, context } = params;
+    const { goal, entities, context, exploration_mode } = params;
     
     if (!goal) {
       return { success: false, error: 'Missing goal parameter' };
+    }
+
+    // Handle exploration mode with special query generation
+    if (exploration_mode) {
+      return this.generateExplorationQuery(goal, entities, context);
     }
 
     const prompt = `
@@ -477,19 +549,51 @@ Provide 3-5 specific, implementable suggestions or ideas.
   async clarifyWithUser(params) {
     console.log('[TaskLibrary] Executing clarify_with_user:', params);
     
-    const { message, suggestions } = params;
+    const { 
+      message, 
+      suggestions, 
+      conversation_state,
+      alternative_approach,
+      helpful_guidance,
+      entity_issues,
+      corrected_entities,
+      show_exploration_data
+    } = params;
+    
+    // Enhance message based on conversation state
+    let enhancedMessage = message || 'I need more information to help you better.';
+    let enhancedSuggestions = suggestions || [
+      'Show me all industries',
+      'Find pain points in banking',
+      'Compare sectors and departments',
+      'Add a new project opportunity'
+    ];
+
+    // Add conversation state awareness to the response
+    if (conversation_state === 'post_rejection') {
+      // User rejected previous suggestions, be more helpful
+      enhancedMessage += " I want to make sure I understand what you're looking for.";
+    } else if (conversation_state === 'meta_conversation') {
+      // User is asking about the conversation itself
+      enhancedMessage += " Let me help you navigate our conversation more effectively.";
+    } else if (conversation_state === 'repeated_failure') {
+      // Multiple failures, escalate to exploration
+      enhancedMessage += " I'll show you what's available so we can find what you need together.";
+    }
     
     return {
       success: true,
       output: {
         needsClarification: true,
-        message: message || 'I need more information to help you better.',
-        suggestions: suggestions || [
-          'Show me all industries',
-          'Find pain points in banking',
-          'Compare sectors and departments',
-          'Add a new project opportunity'
-        ]
+        message: enhancedMessage,
+        suggestions: enhancedSuggestions,
+        conversation_state: conversation_state,
+        alternative_approach: alternative_approach,
+        helpful_guidance: helpful_guidance,
+        entity_issues: entity_issues,
+        corrected_entities: corrected_entities,
+        show_exploration_data: show_exploration_data,
+        conversation_aware: true
       }
     };
   }
@@ -630,6 +734,200 @@ Provide 3-5 specific, implementable suggestions or ideas.
         });
       }
     }
+  }
+
+  // Helper methods for enhanced entity validation
+  calculateEntitySimilarity(queryEntity, targetEntity) {
+    const query = queryEntity.toLowerCase();
+    const target = targetEntity.toLowerCase();
+    
+    // Multiple similarity scoring methods
+    let score = 0;
+    
+    // 1. Exact containment (high weight)
+    if (query === target) return 1.0;
+    if (query.includes(target) || target.includes(query)) {
+      score += 0.7;
+    }
+    
+    // 2. Word-based matching
+    const queryWords = query.split(/\s+/);
+    const targetWords = target.split(/\s+/);
+    
+    const commonWords = queryWords.filter(word => 
+      targetWords.some(tWord => tWord.includes(word) || word.includes(tWord))
+    );
+    
+    if (commonWords.length > 0) {
+      score += (commonWords.length / Math.max(queryWords.length, targetWords.length)) * 0.5;
+    }
+    
+    // 3. Character-level similarity for short strings
+    if (query.length <= 20 && target.length <= 20) {
+      const editDistance = this.levenshteinDistance(query, target);
+      const maxLen = Math.max(query.length, target.length);
+      score += Math.max(0, (maxLen - editDistance) / maxLen * 0.3);
+    }
+    
+    // 4. Special patterns for common entity types
+    if (this.hasSpecialPatternMatch(query, target)) {
+      score += 0.4;
+    }
+    
+    return Math.min(score, 1.0);
+  }
+
+  hasSpecialPatternMatch(query, target) {
+    // Special matching patterns for business domains
+    const patterns = [
+      { pattern: 'retail', matches: ['retail banking', 'consumer banking'] },
+      { pattern: 'commercial', matches: ['commercial banking', 'business banking'] },
+      { pattern: 'health', matches: ['health insurance', 'medical insurance'] },
+      { pattern: 'property', matches: ['property insurance', 'home insurance'] },
+      { pattern: 'life', matches: ['life insurance'] },
+      { pattern: 'investment', matches: ['investment banking'] }
+    ];
+    
+    for (const { pattern, matches } of patterns) {
+      if (query.includes(pattern) && matches.some(match => target.includes(match))) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  levenshteinDistance(str1, str2) {
+    const matrix = [];
+    
+    // Initialize matrix
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+    
+    // Fill matrix
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1, // substitution
+            matrix[i][j - 1] + 1,     // insertion
+            matrix[i - 1][j] + 1      // deletion
+          );
+        }
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
+  }
+
+  getSmartEntitySuggestions(entity) {
+    const entityLower = entity.toLowerCase();
+    const suggestions = [];
+    
+    // Context-based suggestions
+    if (entityLower.includes('retail') || entityLower.includes('consumer') || entityLower.includes('personal')) {
+      suggestions.push('Retail Banking', 'Consumer Banking');
+    }
+    
+    if (entityLower.includes('commercial') || entityLower.includes('business') || entityLower.includes('corporate')) {
+      suggestions.push('Commercial Banking', 'Investment Banking');
+    }
+    
+    if (entityLower.includes('health') || entityLower.includes('medical') || entityLower.includes('healthcare')) {
+      suggestions.push('Health Insurance');
+    }
+    
+    if (entityLower.includes('property') || entityLower.includes('home') || entityLower.includes('real estate')) {
+      suggestions.push('Property Insurance');
+    }
+    
+    if (entityLower.includes('life') || entityLower.includes('mortality')) {
+      suggestions.push('Life Insurance');
+    }
+    
+    if (entityLower.includes('casualty') || entityLower.includes('accident') || entityLower.includes('liability')) {
+      suggestions.push('Casualty Insurance');
+    }
+    
+    if (entityLower.includes('investment') || entityLower.includes('securities') || entityLower.includes('trading')) {
+      suggestions.push('Investment Banking');
+    }
+    
+    if (entityLower.includes('credit') || entityLower.includes('union')) {
+      suggestions.push('Credit Unions');
+    }
+    
+    if (entityLower.includes('online') || entityLower.includes('digital') || entityLower.includes('virtual')) {
+      suggestions.push('Online Banking');
+    }
+    
+    if (entityLower.includes('private') || entityLower.includes('wealth')) {
+      suggestions.push('Private Banking');
+    }
+    
+    // If no context-specific suggestions, provide general ones
+    if (suggestions.length === 0) {
+      suggestions.push('Banking', 'Insurance', 'Retail Banking', 'Commercial Banking');
+    }
+    
+    // Remove duplicates and limit to top 4
+    return [...new Set(suggestions)].slice(0, 4);
+  }
+
+  // Exploration mode query generation
+  generateExplorationQuery(goal, entities, context) {
+    console.log('[TaskLibrary] Generating exploration query for:', { goal, entities });
+    
+    // Create a comprehensive overview query
+    let query = '';
+    let explanation = '';
+    
+    if (entities && entities.includes('Industry')) {
+      query = `
+        MATCH (i:Industry)
+        OPTIONAL MATCH (i)-[:HAS_SECTOR]->(s:Sector)
+        RETURN i, s
+        ORDER BY i.name
+        LIMIT 20
+      `;
+      explanation = 'Show all industries and their associated sectors for exploration';
+    } else if (entities && entities.includes('Sector')) {
+      query = `
+        MATCH (s:Sector)
+        OPTIONAL MATCH (s)-[:HAS_OPPORTUNITY]->(po:ProjectOpportunity)
+        RETURN s, po
+        ORDER BY s.name
+        LIMIT 20
+      `;
+      explanation = 'Show all sectors and available project opportunities';
+    } else {
+      // Default comprehensive query
+      query = `
+        MATCH (i:Industry)-[:HAS_SECTOR]->(s:Sector)
+        RETURN i, s
+        ORDER BY i.name, s.name
+        LIMIT 15
+      `;
+      explanation = 'Show overview of industries and sectors available for exploration';
+    }
+    
+    return {
+      success: true,
+      output: {
+        query: query.trim(),
+        params: {},
+        explanation: explanation,
+        connectionStrategy: 'exploration',
+        exploration_mode: true
+      }
+    };
   }
 }
 

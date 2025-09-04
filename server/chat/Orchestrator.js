@@ -99,8 +99,39 @@ class Orchestrator {
               needsClarification: true,
               message: taskResult.output.message,
               suggestions: taskResult.output.suggestions,
+              entity_issues: taskResult.output.entity_issues,
+              corrected_entities: taskResult.output.corrected_entities,
+              conversation_state: taskResult.output.conversation_state,
+              alternative_approach: taskResult.output.alternative_approach,
+              helpful_guidance: taskResult.output.helpful_guidance,
               executionLog
             };
+          }
+          
+          // Early halt for entity validation failures with smart suggestions
+          if (step.task_type === 'validate_entity' && taskResult.output && !taskResult.output.valid) {
+            const confidence = taskResult.output.confidence || 0;
+            const suggestedEntities = taskResult.output.suggested_entities || [];
+            
+            // If we have good suggestions and low confidence, halt early
+            if (confidence < 0.5 && suggestedEntities.length > 0) {
+              return {
+                success: false,
+                needsClarification: true,
+                message: `I couldn't find "${taskResult.output.entity_type}" in the database. Did you mean: ${suggestedEntities.slice(0, 3).join(', ')}?`,
+                suggestions: suggestedEntities.slice(0, 3).map(entity => 
+                  `What projects are available for ${entity}?`
+                ),
+                entity_issues: [{
+                  entity: taskResult.output.entity_type,
+                  issue: 'not_found',
+                  suggestions: suggestedEntities
+                }],
+                corrected_entities: suggestedEntities,
+                executionLog,
+                early_halt_reason: 'entity_validation_failure'
+              };
+            }
           }
           
           // Check for large graph data that needs confirmation
@@ -118,9 +149,43 @@ class Orchestrator {
                 cypherQuery: this.getLastCypherQuery(),
                 summary: this.generateExecutionSummary(executionLog, taskResult.output)
               };
+            } else if (nodeCount === 0 && step.task_type === 'execute_cypher') {
+              // Empty result from cypher execution - check if we should suggest corrections
+              const lastCypherQuery = this.getLastCypherQuery();
+              const entityHints = this.extractEntityHintsFromQuery(lastCypherQuery);
+              
+              if (entityHints.length > 0) {
+                console.log(`[Orchestrator] Empty result detected for entities: ${entityHints.join(', ')}`);
+                
+                // Early halt with entity suggestions for empty results
+                return {
+                  success: false,
+                  needsClarification: true,
+                  message: `No data found for "${entityHints.join(', ')}". This might be because the entity doesn't exist in our database.`,
+                  suggestions: this.generateEntitySuggestions(entityHints),
+                  entity_issues: entityHints.map(entity => ({
+                    entity,
+                    issue: 'empty_result',
+                    suggestions: this.getContextualSuggestions(entity)
+                  })),
+                  executionLog,
+                  early_halt_reason: 'empty_query_result'
+                };
+              }
             }
           }
           
+          // Handle exploration mode results
+          if (step.params && step.params.exploration_mode && taskResult.output && taskResult.output.graphData) {
+            finalResult = {
+              type: 'exploration',
+              graphData: taskResult.output.graphData,
+              cypherQuery: this.getLastCypherQuery(),
+              summary: `Showing ${taskResult.output.nodeCount} available entities to help with exploration`,
+              isExploration: true
+            };
+          }
+
           // Handle analysis results
           if (taskResult.output && taskResult.output.analysis) {
             if (finalResult && finalResult.graphData) {
@@ -353,6 +418,105 @@ class Orchestrator {
         execution_success: log.success
       }
     }));
+  }
+
+  // Helper methods for smart error handling
+  extractEntityHintsFromQuery(cypherQuery) {
+    if (!cypherQuery || typeof cypherQuery !== 'string') {
+      return [];
+    }
+    
+    const entityHints = [];
+    
+    // Extract entity names from WHERE clauses
+    const whereMatches = cypherQuery.match(/WHERE\s+.*?[\s\w]+\s*=\s*['"]([^'"]+)['"]/gi);
+    if (whereMatches) {
+      whereMatches.forEach(match => {
+        const nameMatch = match.match(/['"]([^'"]+)['"]/);
+        if (nameMatch) {
+          entityHints.push(nameMatch[1]);
+        }
+      });
+    }
+    
+    // Extract from CONTAINS clauses
+    const containsMatches = cypherQuery.match(/CONTAINS\s+['"]([^'"]+)['"]/gi);
+    if (containsMatches) {
+      containsMatches.forEach(match => {
+        const nameMatch = match.match(/['"]([^'"]+)['"]/);
+        if (nameMatch) {
+          entityHints.push(nameMatch[1]);
+        }
+      });
+    }
+    
+    // Extract node label constraints like (n:Industry)
+    const labelMatches = cypherQuery.match(/\(\w+:(\w+)\s*\{[^}]*name:\s*['"]([^'"]+)['"]/gi);
+    if (labelMatches) {
+      labelMatches.forEach(match => {
+        const nameMatch = match.match(/name:\s*['"]([^'"]+)['"]/);
+        if (nameMatch) {
+          entityHints.push(nameMatch[1]);
+        }
+      });
+    }
+    
+    return [...new Set(entityHints)]; // Remove duplicates
+  }
+
+  generateEntitySuggestions(entityHints) {
+    const suggestions = [];
+    
+    for (const entity of entityHints) {
+      const contextualSuggestions = this.getContextualSuggestions(entity);
+      suggestions.push(...contextualSuggestions.slice(0, 2).map(suggestion => 
+        `What projects are available for ${suggestion}?`
+      ));
+    }
+    
+    // Add some generic helpful suggestions if no specific ones found
+    if (suggestions.length === 0) {
+      suggestions.push(
+        'Show me all available industries',
+        'What sectors are in Banking?',
+        'Find projects in Retail Banking',
+        'What pain points exist in Commercial Banking?'
+      );
+    }
+    
+    return [...new Set(suggestions)].slice(0, 4);
+  }
+
+  getContextualSuggestions(entity) {
+    const entityLower = entity.toLowerCase();
+    
+    // Context-based suggestions matching TaskLibrary logic
+    if (entityLower.includes('retail') || entityLower.includes('consumer') || entityLower.includes('personal')) {
+      return ['Retail Banking', 'Consumer Banking'];
+    }
+    
+    if (entityLower.includes('commercial') || entityLower.includes('business') || entityLower.includes('corporate')) {
+      return ['Commercial Banking', 'Investment Banking'];
+    }
+    
+    if (entityLower.includes('health') || entityLower.includes('medical') || entityLower.includes('healthcare')) {
+      return ['Health Insurance'];
+    }
+    
+    if (entityLower.includes('property') || entityLower.includes('home') || entityLower.includes('real estate')) {
+      return ['Property Insurance'];
+    }
+    
+    if (entityLower.includes('life') || entityLower.includes('mortality')) {
+      return ['Life Insurance'];
+    }
+    
+    if (entityLower.includes('investment') || entityLower.includes('securities') || entityLower.includes('trading')) {
+      return ['Investment Banking'];
+    }
+    
+    // Default suggestions
+    return ['Banking', 'Insurance', 'Retail Banking', 'Commercial Banking'];
   }
 }
 

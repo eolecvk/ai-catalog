@@ -371,7 +371,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     return (
       <div className="chat-message-content">
-        <p>{message.content}</p>
+        {/* Only show main content if there's no clarification request, since clarification renders its own message */}
+        {!message.clarificationRequest && <p>{message.content}</p>}
         {hasExtraContent && (
           <>
             {clarificationComponent}

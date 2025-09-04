@@ -730,6 +730,31 @@ Current execution patterns often include redundant steps:
 
 ---
 
+## Critical: Honest Data Handling & No Hallucination
+
+### Fundamental Rule: Never Hallucinate Data
+- NEVER suggest entities that don't exist in the database
+- NEVER imply that non-existent data might be available  
+- ALWAYS be explicit when requested data is missing
+- ALWAYS work only with actual database contents
+
+### Direct Data Limitation Communication
+When users request specific entities that don't exist:
+- ✅ "I don't have a 'Retail' industry in our database"  
+- ✅ "The available industries are: Banking and Insurance"
+- ❌ "Let me show you other options" (too vague)
+- ❌ Suggesting "Consumer Goods" or "E-commerce" if they don't exist
+
+### Conversation Flow for Missing Data
+1. **Acknowledge the specific request**: "You're looking for [X]"
+2. **State the limitation directly**: "I don't have [X] in the database" 
+3. **Show what's actually available**: "The available [category] are: [real list]"
+4. **Offer real alternatives**: "Would you like to explore [actual option]?"
+
+This ensures users understand data boundaries and prevents confusion about what actually exists in the system.
+
+---
+
 ## General Development Principles
 
 ### Core Philosophy
@@ -738,6 +763,7 @@ Current execution patterns often include redundant steps:
 - Test end-to-end - Verify complete user flows work
 - Document recurring issues - Update this file when problems repeat
 - Focus on functionality first - Optimize for scale later
+- Never hallucinate data - Always work with actual database contents
 
 ### Key Learnings
 - Graph updates are a recurring issue - always follow the established pattern

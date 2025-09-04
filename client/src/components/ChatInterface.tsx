@@ -240,7 +240,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             type: 'assistant',
             content: data.message,
             timestamp: new Date(),
-            clarificationRequest: data.needsClarification
+            clarificationRequest: {
+              question: data.message,
+              options: (data as any).suggestions || (data as any).corrected_entities || (data.needsClarification as any)?.options || [],
+              context: (data as any).entity_issues || data.needsClarification
+            }
           };
 
           setMessages(prev => prev.slice(0, -1).concat(clarificationMessage));
