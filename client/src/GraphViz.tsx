@@ -13,6 +13,7 @@ interface GraphVizProps {
   enableChat?: boolean;
   graphVersion?: string;
   onGraphDataUpdate?: (nodes: GraphNode[], edges: GraphEdge[]) => void;
+  hasData?: boolean;
 }
 
 // Quadtree implementation for spatial partitioning
@@ -125,7 +126,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
   focusedNode = null,
   enableChat = true,
   graphVersion = 'base',
-  onGraphDataUpdate
+  onGraphDataUpdate,
+  hasData = true
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
@@ -182,7 +184,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     simulationTime: 0,
     renderTime: 0
   });
-  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   // Batched state updates to reduce re-renders
   const batchedUpdateNodes = useCallback((updater: (prev: GraphNode[]) => GraphNode[]) => {
@@ -201,38 +203,62 @@ const GraphViz: React.FC<GraphVizProps> = ({
     }
   }, [focusedNode]);
 
-  // Listen for container resize when using percentage heights
+  // State to force canvas size recalculation
+  const [resizeCounter, setResizeCounter] = useState(0);
+
+  // Listen for container resize to make graph responsive
   useEffect(() => {
-    if (height === "100%") {
-      const handleResize = () => {
-        // Trigger recalculation of canvas size
-        batchedUpdateNodes(prev => [...prev]);
-      };
+    const handleResize = (entries: ResizeObserverEntry[]) => {
+      console.log('🔄 Container resize detected:', entries[0]?.contentRect);
+      // Force recalculation of canvas size by updating counter
+      setResizeCounter(prev => prev + 1);
+    };
 
-      const resizeObserver = new ResizeObserver(handleResize);
-      if (containerRef.current) {
-        resizeObserver.observe(containerRef.current);
-      }
-
-      return () => {
-        resizeObserver.disconnect();
-        console.log('🧹 ResizeObserver disconnected');
-      };
+    const resizeObserver = new ResizeObserver(handleResize);
+    if (canvasContainerRef.current) {
+      resizeObserver.observe(canvasContainerRef.current);
+      console.log('👁️ Observing canvas container resize:', canvasContainerRef.current.clientWidth, 'x', canvasContainerRef.current.clientHeight);
     }
-  }, [height, batchedUpdateNodes]);
+
+    return () => {
+      resizeObserver.disconnect();
+      console.log('🧹 ResizeObserver disconnected');
+    };
+  }, []);
+
+  // Additional window resize listener as fallback
+  useEffect(() => {
+    const handleWindowResize = () => {
+      console.log('🪟 Window resize detected');
+      setResizeCounter(prev => prev + 1);
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, []);
 
   // Memoize expensive calculations
   const memoizedCanvasSize = useMemo(() => {
     console.log('🔄 Recalculating canvas size');
-    // Base dimensions that work well for most graphs
-    const baseWidth = 1200; // Full width since no side panel
+    
+    // Get actual container dimensions for responsive behavior
+    let baseWidth = 1200; // Default fallback
     let baseHeight = 700; // Default fallback
     
-    // Handle percentage heights by using container dimensions
-    if (height === "100%" && containerRef.current) {
-      const containerHeight = containerRef.current.clientHeight;
-      if (containerHeight > 0) {
+    if (canvasContainerRef.current) {
+      const containerWidth = canvasContainerRef.current.clientWidth;
+      const containerHeight = canvasContainerRef.current.clientHeight;
+      
+      if (containerWidth > 0) {
+        baseWidth = Math.max(400, containerWidth - 40); // Subtract padding/margins
+      }
+      
+      if (height === "100%" && containerHeight > 0) {
         baseHeight = Math.max(400, containerHeight - 100); // Subtract padding/margins
+      } else {
+        baseHeight = parseInt(height) || 700;
       }
     } else {
       baseHeight = parseInt(height) || 700;
@@ -249,12 +275,25 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const componentScaleFactor = Math.max(1, estimatedComponentCount / 3); // Starts scaling after 3 components
     const combinedScaleFactor = Math.max(nodeScaleFactor, componentScaleFactor);
     
-    // Apply scaling to canvas dimensions, but keep within reasonable bounds for the layout
-    const width = Math.min(2000, baseWidth * combinedScaleFactor);
-    const heightNum = Math.min(1500, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
+    // For responsive behavior, use the actual canvas container size as the base for viewBox
+    // This ensures the graph content scales proportionally to fit the container
+    const containerWidth = canvasContainerRef.current?.clientWidth || 1200;
+    const containerHeight = canvasContainerRef.current?.clientHeight || 700;
     
-    return { width, heightNum, combinedScaleFactor };
-  }, [nodes.length, edges.length, height, containerRef.current?.clientHeight]);
+    console.log('📏 Container dimensions:', containerWidth, 'x', containerHeight);
+    
+    // Create viewBox that matches container aspect ratio
+    const width = Math.max(400, containerWidth - 40); // Minimum width with padding
+    const heightNum = Math.max(300, height === "100%" ? containerHeight - 100 : parseInt(height) || 700);
+    
+    // For large graphs, we might need a larger viewBox to prevent node overlap
+    const scaledWidth = Math.max(width, width * combinedScaleFactor);
+    const scaledHeight = Math.max(heightNum, heightNum * Math.max(1, combinedScaleFactor * 0.8));
+    
+    // Return scaled dimensions for viewBox (allows proper scaling for large graphs)
+    // But the SVG container will still fit within the actual container bounds
+    return { width: scaledWidth, heightNum: scaledHeight, combinedScaleFactor };
+  }, [nodes.length, edges.length, height, canvasContainerRef.current?.clientWidth, canvasContainerRef.current?.clientHeight, resizeCounter]);
 
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {
@@ -966,16 +1005,29 @@ const GraphViz: React.FC<GraphVizProps> = ({
   };
 
 
+  // Show empty state if no data
+  if (!hasData || nodes.length === 0) {
+    return (
+      <div 
+        ref={canvasContainerRef}
+        className="graph-viz-container"
+      >
+        <div className="graph-welcome-state">
+          <div className="welcome-content">
+            <div className="welcome-icon">📊</div>
+            <h3>No Data Available</h3>
+            <p>Click on a node type card to explore the graph, or try a different selection.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div ref={containerRef} className="graph-viz-container">
-
-      {/* Main Content Area - Two Panel Layout */}
-      <div className="graph-main-content two-panel-layout">
-
-        {/* Graph Canvas - Center Panel */}
-        <div 
-          className={`graph-canvas-container center-panel full-width`}
-        >
+    <div 
+      ref={canvasContainerRef}
+      className="graph-viz-container"
+    >
           
           <div 
             className={`graph-canvas-2d ${focusedNodeId ? 'focused' : ''}`}
@@ -1026,7 +1078,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
               style={{ 
                 cursor: draggedNode ? 'grabbing' : 'grab',
                 maxWidth: '100%',
-                maxHeight: '100%'
+                maxHeight: '100%',
+                overflow: 'visible',
+                display: 'block'
               }}
             >
           {/* Grid background and gradients */}
@@ -1368,12 +1422,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
           </g>
           </svg>
           </div>
-        </div>
-
-      </div>
-
-
-      
     </div>
   );
 };
@@ -1388,6 +1436,7 @@ const GraphVizMemoized = memo(GraphViz, (prevProps, nextProps) => {
     prevProps.height === nextProps.height &&
     prevProps.focusedNode === nextProps.focusedNode &&
     prevProps.graphVersion === nextProps.graphVersion &&
+    prevProps.hasData === nextProps.hasData &&
     // Deep compare first few nodes for changes
     JSON.stringify(prevProps.nodes.slice(0, 5)) === JSON.stringify(nextProps.nodes.slice(0, 5)) &&
     JSON.stringify(prevProps.edges.slice(0, 10)) === JSON.stringify(nextProps.edges.slice(0, 10))

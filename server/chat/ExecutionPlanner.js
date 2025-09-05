@@ -31,197 +31,36 @@ class ExecutionPlanner {
         '(Module)-[:NEEDS_SUBMODULE]->(SubModule)'
       ]
     };
-    
-    // Known entities from the database for fuzzy matching
-    this.knownEntities = {
-      industries: ['Banking', 'Insurance'],
-      sectors: ['Retail Banking', 'Commercial Banking', 'Investment Banking', 'Private Banking', 
-               'Credit Unions', 'Online Banking', 'Life Insurance', 'Health Insurance', 
-               'Property Insurance', 'Casualty Insurance'],
-      roles: ['Data Scientist', 'AI Engineer', 'DevOps Engineer', 'MLOps Engineer'],
-      // Common pain point patterns for suggestions
-      painPointPatterns: ['fraud', 'risk', 'claims', 'customer', 'churn', 'processing']
-    };
   }
 
   async generateExecutionPlan(query, conversationHistory = []) {
-    console.log(`[ExecutionPlanner] Generating execution plan for query: "${query}"`);
+    console.log(`[ExecutionPlanner] Generating LLM-first execution plan for query: "${query}"`);
     
-    // Analyze conversation context and detect patterns
-    const conversationContext = this.analyzeConversationContext(query, conversationHistory);
-    console.log(`[ExecutionPlanner] Conversation context:`, conversationContext);
-    
-    // Handle special conversation states first
-    if (conversationContext.requiresSpecialHandling) {
-      return this.generateContextualPlan(query, conversationContext, conversationHistory);
-    }
-    
-    // Pre-analyze query for entity recognition issues
-    const entityAnalysis = this.analyzeQueryEntities(query);
-    console.log(`[ExecutionPlanner] Entity analysis:`, entityAnalysis);
-    
-    // If we have entity recognition issues, create a smart plan with conversation awareness
-    if (entityAnalysis.hasIssues) {
-      return this.generateSmartCorrectionPlan(query, entityAnalysis, conversationContext);
-    }
-    
-    const historyContext = conversationHistory
-      .slice(-6) // Last 3 exchanges
-      .map(msg => `${msg.type}: ${msg.content}`)
-      .join('\n');
-
-    const prompt = `
-You are an execution planner that converts natural language queries into structured, step-by-step execution plans for a graph database system.
-
-# Graph Schema
-Node Labels: ${this.graphSchema.nodeLabels.join(', ')}
-Relationships: 
-${this.graphSchema.relationships.map(rel => `- ${rel}`).join('\n')}
-
-# Available Tasks
-${this.availableTasks.map(task => `- ${task}`).join('\n')}
-
-# Recent Chat History
-${historyContext || 'No previous context'}
-
-# Current Query
-"${query}"
-
-# Plan Optimization Guidelines
-- Skip validation for well-known schema entities: ${this.graphSchema.nodeLabels.join(', ')}
-- Combine related operations when possible to reduce execution steps
-- Prioritize direct queries over complex analysis chains for simple requests
-- Use efficient query patterns for common scenarios
-
-Your task is to create a JSON execution plan that breaks down the query into discrete, executable tasks.
-
-## Task Descriptions:
-- validate_entity: Check if an entity type exists in the schema (params: {entity_type: "EntityName"})
-- find_connection_paths: Analyze schema for connection paths between entities (params: {entities: ["Entity1", "Entity2"]})
-- generate_cypher: Generate a specific Cypher query for a well-defined goal (params: {goal: "description", entities: ["Entity1", "Entity2"]})
-- execute_cypher: Run a query against Neo4j and return results (params: {query: "CYPHER_QUERY"})
-- analyze_and_summarize: Use LLM to analyze data from graph queries (params: {dataset: graphData} OR {dataset1: data1, dataset2: data2})
-- generate_creative_text: Generate creative suggestions based on graph context (params: {creative_goal: "description", context: data})
-- clarify_with_user: Request clarification when query is ambiguous (params: {message: "question", suggestions: ["option1", "option2"]})
-
-## Task Parameters:
-- Static values: Direct strings or numbers
-- Dynamic references: Use $stepN.output to reference previous task outputs
-- Conditional logic: Use on_failure to define error handling
-
-CRITICAL: You must respond with ONLY a JSON object. No markdown, no backticks, no explanations - just pure JSON.
-
-Expected JSON format:
-{
-  "plan": [
-    {
-      "task_type": "task_name",
-      "params": { "param1": "value", "param2": "$step1.output" },
-      "on_failure": "clarify_and_halt|continue|retry",
-      "reasoning": "Brief explanation of why this task is needed"
-    }
-  ]
-}
-
-Example for query "Compare pain points between Sectors and Departments" (OPTIMIZED):
-{
-  "plan": [
-    {
-      "task_type": "generate_cypher",
-      "params": {
-        "goal": "Find all pain points connected to Sectors and Departments for comparison",
-        "entities": ["Sector", "Department", "PainPoint"]
-      },
-      "on_failure": "continue",
-      "reasoning": "Generate efficient query to get both datasets in one operation"
-    },
-    {
-      "task_type": "execute_cypher",
-      "params": { "query": "$step1.output" },
-      "on_failure": "continue",
-      "reasoning": "Execute combined query for both Sectors and Departments"
-    },
-    {
-      "task_type": "analyze_and_summarize",
-      "params": {
-        "dataset": "$step2.output",
-        "comparison_type": "pain_points_comparison",
-        "analysis_goal": "Compare pain points between Sectors and Departments"
-      },
-      "on_failure": "continue",
-      "reasoning": "Analyze the combined dataset for comparison insights"
-    }
-  ]
-}
-
-Example for simple query "What projects are available for retail?" (SMART CORRECTION):
-{
-  "plan": [
-    {
-      "task_type": "generate_cypher",
-      "params": {
-        "goal": "Find projects for retail banking sector (auto-corrected from 'retail')",
-        "entities": ["Retail Banking", "ProjectOpportunity"]
-      },
-      "on_failure": "continue",
-      "reasoning": "Query projects for Retail Banking sector with intelligent entity correction"
-    },
-    {
-      "task_type": "execute_cypher",
-      "params": { "query": "$step1.output" },
-      "on_failure": "continue",
-      "reasoning": "Execute the project query"
-    }
-  ]
-}
-
-Guidelines for efficient plans:
-- Skip validation for schema entities (Industry, Sector, Department, etc.)
-- Combine queries when possible instead of separate dataset retrieval
-- For single dataset analysis, use: {"dataset": "$stepN.output"}
-- For comparison, prefer combined queries over separate ones
-
-Generate an appropriate execution plan for the given query.
-`;
-
     try {
-      const response = await this.llmManager.generateText(prompt, {
-        temperature: 0.1,
-        maxTokens: 800
-      });
-
-      console.log(`[ExecutionPlanner] Raw response: "${response}"`);
+      // LLM Call #1: Intent Classification & Entity Recognition
+      const intentAnalysis = await this.classifyQueryWithEntityAnalysis(query, conversationHistory);
+      console.log(`[ExecutionPlanner] Intent analysis:`, intentAnalysis);
       
-      const result = JSON.parse(response.trim());
-      console.log(`[ExecutionPlanner] Generated plan with ${result.plan?.length || 0} steps`);
-      
-      // Validate the plan structure
-      this.validatePlan(result);
-      
-      return result;
-    } catch (error) {
-      console.error('Execution plan generation error:', error);
-      
-      // If JSON parsing fails, try fallback parsing
-      if (error instanceof SyntaxError && error.message.includes('JSON')) {
-        try {
-          const response = await this.llmManager.generateText(prompt, {
-            temperature: 0.1,
-            maxTokens: 800
-          });
+      // Handle different query types with appropriate LLM processing
+      switch (intentAnalysis.query_type) {
+        case 'company_proxy':
+          return this.handleCompanyProxyQuery(query, intentAnalysis, conversationHistory);
           
-          const currentProvider = this.llmManager.currentProvider;
-          if (currentProvider && currentProvider.parseJSONResponse) {
-            const result = currentProvider.parseJSONResponse(response);
-            this.validatePlan(result);
-            return result;
-          }
-        } catch (fallbackError) {
-          console.error('[ExecutionPlanner] Fallback parsing failed:', fallbackError);
-        }
+        case 'analytical':
+          return this.handleAnalyticalQuery(query, intentAnalysis, conversationHistory);
+          
+        case 'comparison':
+          return this.handleComparisonQuery(query, intentAnalysis, conversationHistory);
+          
+        case 'lookup':
+        default:
+          return this.handleLookupQuery(query, intentAnalysis, conversationHistory);
       }
       
-      // Return a basic clarification plan as fallback
+    } catch (error) {
+      console.error('[ExecutionPlanner] LLM-first processing failed:', error);
+      
+      // Fallback to basic clarification
       return {
         plan: [
           {
@@ -231,11 +70,480 @@ Generate an appropriate execution plan for the given query.
               suggestions: ['Show me all industries', 'Find pain points in banking', 'Compare sectors and departments']
             },
             on_failure: 'halt',
-            reasoning: 'Query was too complex to parse automatically'
+            reasoning: 'LLM processing failed, requesting clarification'
           }
         ]
       };
     }
+  }
+
+  async classifyQueryWithEntityAnalysis(query, conversationHistory) {
+    console.log('[ExecutionPlanner] LLM Call #1: Intent Classification & Entity Recognition');
+    
+    const historyContext = conversationHistory
+      .slice(-4) // Last 2 exchanges
+      .map(msg => `${msg.type}: ${msg.content}`)
+      .join('\n');
+
+    const prompt = `
+Analyze this user query to understand the intent and identify entities mentioned.
+
+# Graph Database Schema
+Node Types: ${this.graphSchema.nodeLabels.join(', ')}
+Relationships: ${this.graphSchema.relationships.join(', ')}
+
+# Recent Conversation Context
+${historyContext || 'No previous context'}
+
+# User Query
+"${query}"
+
+# Your Task
+Classify the query intent and identify entities. Focus on understanding natural language patterns rather than exact matches.
+
+Respond with ONLY a JSON object with this structure:
+{
+  "query_type": "lookup|analytical|comparison|company_proxy",
+  "entities_mentioned": ["entity1", "entity2"],
+  "unknown_entities": ["company_name"],
+  "requires_company_mapping": true/false,
+  "analytical_operation": "exclusion|inclusion|comparison|relationship_analysis",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation of the classification"
+}
+
+# Query Type Guidelines
+- "lookup": Simple requests like "show me banking sectors", "find pain points"
+- "analytical": Complex operations like "painpoints without projects", "sectors not connected to departments"
+- "comparison": "compare X vs Y", "differences between A and B"
+- "company_proxy": Questions about real companies not in the graph (Tesla, Amazon, Netflix, etc.)
+
+# Analytical Operations
+- "exclusion": queries with "without", "not", "except", "lacking"
+- "inclusion": queries with "with", "having", "containing"  
+- "relationship_analysis": queries about connections, paths, relationships
+
+Focus on intent understanding, not exact entity matching.
+`;
+
+    const response = await this.llmManager.generateText(prompt, {
+      temperature: 0.1,
+      maxTokens: 300
+    });
+
+    console.log(`[ExecutionPlanner] Raw LLM response: "${response}"`);
+    
+    // Clean and parse JSON response
+    let cleanResponse = response.trim();
+    
+    // Remove common markdown artifacts
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    }
+    if (cleanResponse.startsWith('```')) {
+      cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    
+    try {
+      return JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('[ExecutionPlanner] JSON parse error:', parseError);
+      console.error('[ExecutionPlanner] Clean response was:', cleanResponse);
+      throw new Error(`Failed to parse LLM response as JSON: ${parseError.message}`);
+    }
+  }
+
+  async handleCompanyProxyQuery(query, intentAnalysis, conversationHistory) {
+    console.log('[ExecutionPlanner] Handling company proxy query');
+    
+    // LLM Call #2: Company-to-Graph Mapping
+    const companyMapping = await this.mapCompanyToGraphEntities(
+      intentAnalysis.unknown_entities[0], 
+      intentAnalysis
+    );
+    
+    // LLM Call #3: Query Transformation
+    const transformedQuery = await this.transformQueryWithProxies(
+      query, 
+      companyMapping, 
+      intentAnalysis
+    );
+    
+    // LLM Call #4: Generate Final Execution Plan
+    return this.generateFinalExecutionPlan(transformedQuery, companyMapping);
+  }
+
+  async mapCompanyToGraphEntities(companyName, intentAnalysis) {
+    console.log(`[ExecutionPlanner] LLM Call #2: Company-to-Graph Mapping for "${companyName}"`);
+    
+    const prompt = `
+You need to map a real-world company to relevant entities in our graph database for proxy analysis.
+
+# Graph Database Schema
+Available Industries and Sectors:
+- Banking: Retail Banking, Commercial Banking, Investment Banking, Private Banking, Credit Unions, Online Banking
+- Insurance: Life Insurance, Health Insurance, Property Insurance, Casualty Insurance
+
+# Company to Map
+"${companyName}"
+
+# Original Query Context
+"${intentAnalysis.reasoning}"
+
+# Your Task
+Based on your knowledge of this company, identify which industries/sectors would be most relevant as proxies.
+
+Respond with ONLY a JSON object:
+{
+  "company": "${companyName}",
+  "primary_industries": ["Industry1", "Industry2"],
+  "relevant_sectors": ["Sector1", "Sector2", "Sector3"],
+  "reasoning": "Brief explanation of why these sectors represent the company",
+  "confidence": 0.0-1.0,
+  "mapping_strategy": "use_closest_sectors|use_industry_broad|use_specific_match"
+}
+
+# Examples
+- Tesla → ["Technology", "Manufacturing"] + ["Electric Vehicles", "Battery Technology"] 
+- Netflix → ["Technology", "Media"] + ["Streaming Services", "Digital Content"]
+- Amazon → ["Technology", "Retail"] + ["E-commerce", "Cloud Services"]
+
+Focus on the most relevant sectors that would have similar pain points and project opportunities.
+`;
+
+    const response = await this.llmManager.generateText(prompt, {
+      temperature: 0.2,
+      maxTokens: 200
+    });
+
+    console.log(`[ExecutionPlanner] Raw company mapping response: "${response}"`);
+    
+    // Clean and parse JSON response
+    let cleanResponse = response.trim();
+    
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    }
+    if (cleanResponse.startsWith('```')) {
+      cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    
+    try {
+      return JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('[ExecutionPlanner] Company mapping JSON parse error:', parseError);
+      throw new Error(`Failed to parse company mapping as JSON: ${parseError.message}`);
+    }
+  }
+
+  async transformQueryWithProxies(originalQuery, companyMapping, intentAnalysis) {
+    console.log('[ExecutionPlanner] LLM Call #3: Query Transformation with Proxies');
+    
+    const prompt = `
+Transform the original query to use proxy entities from our graph database, replacing the unknown company with relevant sectors.
+
+# Original Query
+"${originalQuery}"
+
+# Company Mapping
+Company: ${companyMapping.company}
+Proxy Sectors: ${companyMapping.relevant_sectors.join(', ')}
+Reasoning: ${companyMapping.reasoning}
+
+# Your Task
+Rewrite the query to use the proxy sectors while maintaining the original intent. Also create a user-friendly explanation.
+
+Respond with ONLY a JSON object:
+{
+  "transformed_query": "Rewritten query using proxy entities",
+  "proxy_explanation": "Clear explanation for the user about the proxy approach",
+  "execution_strategy": "lookup|analytical|comparison",
+  "target_entities": ["Entity1", "Entity2"],
+  "transparency_message": "I don't have [Company] specifically, but I'm using [sectors] as proxies because..."
+}
+
+# Examples
+- "Tesla pain points" → "Find pain points in Electric Vehicles and Battery Technology sectors"
+- "Amazon projects" → "Show projects for E-commerce and Cloud Services sectors" 
+- "Netflix challenges" → "Analyze challenges in Streaming Services and Digital Content sectors"
+
+Maintain the analytical intent while making it clear we're using proxies.
+`;
+
+    const response = await this.llmManager.generateText(prompt, {
+      temperature: 0.1,
+      maxTokens: 300
+    });
+
+    console.log(`[ExecutionPlanner] Raw query transformation response: "${response}"`);
+    
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    }
+    if (cleanResponse.startsWith('```')) {
+      cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    
+    try {
+      return JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('[ExecutionPlanner] Query transformation JSON parse error:', parseError);
+      throw new Error(`Failed to parse query transformation as JSON: ${parseError.message}`);
+    }
+  }
+
+  async handleAnalyticalQuery(query, intentAnalysis, conversationHistory) {
+    console.log('[ExecutionPlanner] Handling analytical query');
+    
+    // LLM Call #2: Query Decomposition for Analytical Operations
+    const decomposition = await this.decomposeAnalyticalQuery(query, intentAnalysis);
+    
+    // LLM Call #3: Generate Execution Strategy
+    return this.generateAnalyticalExecutionPlan(decomposition);
+  }
+
+  async decomposeAnalyticalQuery(query, intentAnalysis) {
+    console.log('[ExecutionPlanner] LLM Call #2: Analytical Query Decomposition');
+    
+    const prompt = `
+Break down this analytical query into logical components for graph database execution.
+
+# Query
+"${query}"
+
+# Detected Operation
+${intentAnalysis.analytical_operation}
+
+# Graph Schema
+${this.graphSchema.relationships.join('\n')}
+
+# Your Task
+Analyze the query structure and identify the components needed for execution.
+
+Respond with ONLY a JSON object:
+{
+  "operation_type": "exclusion|inclusion|comparison|relationship_analysis",
+  "primary_entity": "PainPoint|Sector|Department|ProjectOpportunity",
+  "secondary_entity": "ProjectOpportunity|PainPoint|Sector",
+  "relationship_pattern": "NOT_EXISTS|EXISTS|CONNECTED|COMPARED",
+  "cypher_strategy": "LEFT JOIN|NOT EXISTS|MATCH WHERE",
+  "analysis_goal": "Clear description of what we're trying to find",
+  "expected_result": "Description of expected output"
+}
+
+# Examples
+- "painpoints without projects" → primary: PainPoint, secondary: ProjectOpportunity, pattern: NOT_EXISTS
+- "sectors with pain points" → primary: Sector, secondary: PainPoint, pattern: EXISTS
+- "departments not connected to projects" → primary: Department, secondary: ProjectOpportunity, pattern: NOT_EXISTS
+
+Focus on the logical structure of the analytical operation.
+`;
+
+    const response = await this.llmManager.generateText(prompt, {
+      temperature: 0.1,
+      maxTokens: 250
+    });
+
+    console.log(`[ExecutionPlanner] Raw analytical decomposition response: "${response}"`);
+    
+    // Clean and parse JSON response
+    let cleanResponse = response.trim();
+    
+    // Remove common markdown artifacts
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    }
+    if (cleanResponse.startsWith('```')) {
+      cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    
+    try {
+      return JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('[ExecutionPlanner] Analytical decomposition JSON parse error:', parseError);
+      console.error('[ExecutionPlanner] Clean response was:', cleanResponse);
+      throw new Error(`Failed to parse analytical decomposition as JSON: ${parseError.message}`);
+    }
+  }
+
+  async handleComparisonQuery(query, intentAnalysis, conversationHistory) {
+    console.log('[ExecutionPlanner] Handling comparison query');
+    
+    // Direct execution plan for comparison - these are usually straightforward
+    return {
+      plan: [
+        {
+          task_type: 'generate_cypher',
+          params: {
+            goal: `Compare entities as requested: ${query}`,
+            entities: intentAnalysis.entities_mentioned,
+            query_type: 'comparison'
+          },
+          on_failure: 'continue',
+          reasoning: 'Generate comparison query for the requested entities'
+        },
+        {
+          task_type: 'execute_cypher',
+          params: { query: '$step1.output' },
+          on_failure: 'continue',
+          reasoning: 'Execute comparison query'
+        },
+        {
+          task_type: 'analyze_and_summarize',
+          params: { 
+            dataset: '$step2.output',
+            analysis_type: 'comparison',
+            comparison_goal: query
+          },
+          on_failure: 'continue',
+          reasoning: 'Analyze results for comparison insights'
+        }
+      ]
+    };
+  }
+
+  async handleLookupQuery(query, intentAnalysis, conversationHistory) {
+    console.log('[ExecutionPlanner] Handling lookup query');
+    
+    // Direct execution plan for simple lookups
+    return {
+      plan: [
+        {
+          task_type: 'generate_cypher',
+          params: {
+            goal: `Find requested information: ${query}`,
+            entities: intentAnalysis.entities_mentioned,
+            query_type: 'lookup'
+          },
+          on_failure: 'continue',
+          reasoning: 'Generate lookup query for requested entities'
+        },
+        {
+          task_type: 'execute_cypher',
+          params: { query: '$step1.output' },
+          on_failure: 'continue',
+          reasoning: 'Execute lookup query'
+        }
+      ]
+    };
+  }
+
+  async generateFinalExecutionPlan(transformedQuery, companyMapping) {
+    console.log('[ExecutionPlanner] LLM Call #4: Generate Final Execution Plan');
+    
+    const prompt = `
+Create an execution plan for this transformed query that uses company proxy entities.
+
+# Transformed Query
+${transformedQuery.transformed_query}
+
+# Execution Strategy  
+${transformedQuery.execution_strategy}
+
+# Available Tasks
+${this.availableTasks.join(', ')}
+
+# Proxy Context
+Company: ${companyMapping.company}
+Proxy Entities: ${companyMapping.relevant_sectors.join(', ')}
+Transparency Message: ${transformedQuery.transparency_message}
+
+# Your Task
+Generate a structured execution plan that handles the proxy query and includes transparent messaging.
+
+Respond with ONLY a JSON object:
+{
+  "plan": [
+    {
+      "task_type": "generate_cypher",
+      "params": {
+        "goal": "Specific goal for this step",
+        "entities": ["Entity1", "Entity2"],
+        "proxy_context": "${transformedQuery.transparency_message}"
+      },
+      "on_failure": "continue",
+      "reasoning": "Why this step is needed"
+    },
+    {
+      "task_type": "execute_cypher", 
+      "params": { "query": "$step1.output" },
+      "on_failure": "continue",
+      "reasoning": "Execute the proxy query"
+    },
+    {
+      "task_type": "analyze_and_summarize",
+      "params": {
+        "dataset": "$step2.output",
+        "proxy_explanation": "${transformedQuery.proxy_explanation}",
+        "original_company": "${companyMapping.company}"
+      },
+      "on_failure": "continue", 
+      "reasoning": "Provide results with proxy context"
+    }
+  ]
+}
+
+Keep the plan focused and efficient while maintaining transparency about proxy usage.
+`;
+
+    const response = await this.llmManager.generateText(prompt, {
+      temperature: 0.1,
+      maxTokens: 500
+    });
+
+    console.log(`[ExecutionPlanner] Raw final execution plan response: "${response}"`);
+    
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    }
+    if (cleanResponse.startsWith('```')) {
+      cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    
+    try {
+      return JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('[ExecutionPlanner] Final execution plan JSON parse error:', parseError);
+      throw new Error(`Failed to parse final execution plan as JSON: ${parseError.message}`);
+    }
+  }
+
+  async generateAnalyticalExecutionPlan(decomposition) {
+    console.log('[ExecutionPlanner] Generating analytical execution plan');
+    
+    return {
+      plan: [
+        {
+          task_type: 'generate_cypher',
+          params: {
+            goal: decomposition.analysis_goal,
+            entities: [decomposition.primary_entity, decomposition.secondary_entity],
+            operation_type: decomposition.operation_type,
+            cypher_strategy: decomposition.cypher_strategy
+          },
+          on_failure: 'continue',
+          reasoning: `Generate ${decomposition.operation_type} query for ${decomposition.primary_entity} analysis`
+        },
+        {
+          task_type: 'execute_cypher',
+          params: { query: '$step1.output' },
+          on_failure: 'continue',
+          reasoning: 'Execute analytical query'
+        },
+        {
+          task_type: 'analyze_and_summarize',
+          params: { 
+            dataset: '$step2.output',
+            analysis_type: decomposition.operation_type,
+            expected_result: decomposition.expected_result
+          },
+          on_failure: 'continue',
+          reasoning: 'Analyze and summarize the analytical results'
+        }
+      ]
+    };
   }
 
   validatePlan(planResult) {
@@ -260,631 +568,6 @@ Generate an appropriate execution plan for the given query.
     }
     
     console.log(`[ExecutionPlanner] Plan validation passed for ${planResult.plan.length} steps`);
-  }
-
-  // Fuzzy matching and entity analysis methods
-  analyzeQueryEntities(query) {
-    const queryLower = query.toLowerCase();
-    const issues = [];
-    const suggestions = [];
-    const detectedEntities = [];
-
-    // Extract potential entities from query using improved patterns
-    const entityPatterns = [
-      /(?:projects|opportunities).*?(?:in|for)\s+([a-zA-Z\s]+?)(?:\s*\?|$)/gi,
-      /(?:in|for|from|about)\s+([a-zA-Z\s]+?)(?:\s+projects|\s+opportunities|\s+sector|\s+industry|$|[.?!])/gi,
-      /([a-zA-Z\s]+?)\s+(?:industry|sector|projects|pain|department)/gi
-    ];
-
-    for (const pattern of entityPatterns) {
-      let match;
-      while ((match = pattern.exec(query)) !== null) {
-        const entity = match[1].trim();
-        if (entity.length > 2 && entity.length < 30) {
-          detectedEntities.push(entity);
-        }
-      }
-    }
-
-    // Clean and analyze each detected entity
-    const cleanedEntities = [...new Set(detectedEntities)]
-      .map(entity => entity.trim())
-      .filter(entity => this.isLikelyEntityName(entity))
-      .sort((a, b) => b.length - a.length); // Prioritize longer entities (more specific)
-
-    for (const entity of cleanedEntities) {
-      // Skip if this entity is already part of a longer entity we've processed
-      const isPartOfLonger = cleanedEntities.some(longerEntity => 
-        longerEntity !== entity && 
-        longerEntity.toLowerCase().includes(entity.toLowerCase()) &&
-        longerEntity.length > entity.length
-      );
-      
-      if (isPartOfLonger) {
-        continue;
-      }
-      
-      const fuzzyResult = this.findSimilarEntities(entity);
-      
-      if (fuzzyResult.exactMatch) {
-        // Entity exists, no issues
-        continue;
-      }
-      
-      if (fuzzyResult.similarEntities.length > 0) {
-        issues.push({
-          entity,
-          issue: 'fuzzy_match',
-          suggestions: fuzzyResult.similarEntities
-        });
-        suggestions.push(...fuzzyResult.similarEntities.slice(0, 2));
-      } else {
-        issues.push({
-          entity,
-          issue: 'not_found',
-          suggestions: this.getContextualSuggestions(entity)
-        });
-        suggestions.push(...this.getContextualSuggestions(entity));
-      }
-    }
-
-    return {
-      hasIssues: issues.length > 0,
-      issues,
-      suggestions: [...new Set(suggestions)],
-      detectedEntities
-    };
-  }
-
-  findSimilarEntities(queryEntity) {
-    const entityLower = queryEntity.toLowerCase();
-    const allEntities = [
-      ...this.knownEntities.industries,
-      ...this.knownEntities.sectors,
-      ...this.knownEntities.roles
-    ];
-    
-    // Check for exact match first
-    const exactMatch = allEntities.find(entity => 
-      entity.toLowerCase() === entityLower
-    );
-    
-    if (exactMatch) {
-      return { exactMatch: true, similarEntities: [] };
-    }
-    
-    // Fuzzy matching using similarity scoring
-    const similarities = allEntities.map(entity => ({
-      entity,
-      score: this.calculateSimilarity(entityLower, entity.toLowerCase())
-    }));
-    
-    // Filter and sort by similarity
-    const similarEntities = similarities
-      .filter(item => item.score > 0.4) // Threshold for similarity
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .map(item => item.entity);
-    
-    return { exactMatch: false, similarEntities };
-  }
-
-  calculateSimilarity(str1, str2) {
-    // Simple similarity scoring using multiple methods
-    
-    // 1. Substring containment
-    let score = 0;
-    if (str1.includes(str2) || str2.includes(str1)) {
-      score += 0.6;
-    }
-    
-    // 2. Word overlap
-    const words1 = str1.split(' ');
-    const words2 = str2.split(' ');
-    const commonWords = words1.filter(word => words2.includes(word));
-    if (commonWords.length > 0) {
-      score += (commonWords.length / Math.max(words1.length, words2.length)) * 0.4;
-    }
-    
-    // 3. Levenshtein distance for short strings
-    if (str1.length <= 15 && str2.length <= 15) {
-      const distance = this.levenshteinDistance(str1, str2);
-      const maxLen = Math.max(str1.length, str2.length);
-      score += Math.max(0, (maxLen - distance) / maxLen * 0.3);
-    }
-    
-    return Math.min(score, 1.0);
-  }
-
-  levenshteinDistance(str1, str2) {
-    const matrix = [];
-    
-    for (let i = 0; i <= str2.length; i++) {
-      matrix[i] = [i];
-    }
-    
-    for (let j = 0; j <= str1.length; j++) {
-      matrix[0][j] = j;
-    }
-    
-    for (let i = 1; i <= str2.length; i++) {
-      for (let j = 1; j <= str1.length; j++) {
-        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1];
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j] + 1
-          );
-        }
-      }
-    }
-    
-    return matrix[str2.length][str1.length];
-  }
-
-  isLikelyEntityName(entity) {
-    // Heuristics to determine if a string looks like an entity name
-    const entityLower = entity.toLowerCase();
-    
-    // Skip common stop words and question words
-    const stopWords = [
-      'the', 'and', 'or', 'in', 'on', 'at', 'for', 'with', 'by', 'to', 'from', 'of',
-      'what', 'where', 'when', 'why', 'how', 'who', 'which', 'that', 'this', 'these',
-      'those', 'are', 'is', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-      'do', 'does', 'did', 'will', 'would', 'could', 'should', 'can', 'may', 'might',
-      'projects', 'available', 'opportunities'
-    ];
-    if (stopWords.includes(entityLower)) {
-      return false;
-    }
-    
-    // Should be reasonable length and not contain special patterns
-    return entity.length >= 3 && 
-           entity.length <= 30 && 
-           !/^\d+$/.test(entity) && // Not just numbers
-           !/[!@#$%^&*(),.?":{}|<>]/.test(entity); // No special chars
-  }
-
-  getContextualSuggestions(entity) {
-    const entityLower = entity.toLowerCase();
-    
-    // Provide contextual suggestions based on query patterns
-    if (entityLower.includes('retail') || entityLower.includes('consumer')) {
-      return ['Retail Banking', 'Consumer Banking'];
-    }
-    
-    if (entityLower.includes('commercial') || entityLower.includes('business')) {
-      return ['Commercial Banking'];
-    }
-    
-    if (entityLower.includes('health') || entityLower.includes('medical')) {
-      return ['Health Insurance'];
-    }
-    
-    if (entityLower.includes('property') || entityLower.includes('home')) {
-      return ['Property Insurance'];
-    }
-    
-    // Default suggestions
-    return ['Banking', 'Insurance', 'Retail Banking', 'Commercial Banking'];
-  }
-
-  async generateSmartCorrectionPlan(query, entityAnalysis) {
-    console.log(`[ExecutionPlanner] Generating smart correction plan for entity issues`);
-    
-    const primaryIssue = entityAnalysis.issues[0];
-    const suggestions = entityAnalysis.suggestions.slice(0, 3);
-    
-    // Create a plan that offers corrections and alternatives
-    const clarificationMessage = this.buildClarificationMessage(query, primaryIssue, suggestions);
-    
-    return {
-      plan: [
-        {
-          task_type: 'clarify_with_user',
-          params: {
-            message: clarificationMessage,
-            suggestions: this.buildQuerySuggestions(query, suggestions),
-            entity_issues: entityAnalysis.issues,
-            corrected_entities: suggestions
-          },
-          on_failure: 'halt',
-          reasoning: `Detected entity recognition issue: "${primaryIssue.entity}" not found. Offering corrections and alternatives.`
-        }
-      ]
-    };
-  }
-
-  buildClarificationMessage(query, issue, suggestions) {
-    const entity = issue.entity;
-    
-    if (issue.issue === 'fuzzy_match') {
-      return `I couldn't find "${entity}" but found similar options: ${suggestions.join(', ')}. Did you mean one of these?`;
-    } else {
-      return `I couldn't find "${entity}" in the database. Available options include: ${suggestions.join(', ')}. Which would you like to explore?`;
-    }
-  }
-
-  buildQuerySuggestions(originalQuery, suggestions) {
-    return suggestions.map(suggestion => {
-      // Try to replace the problematic entity with the suggestion
-      const modifiedQuery = originalQuery.replace(/\b\w+\b/gi, (match) => {
-        if (this.findSimilarEntities(match).similarEntities.includes(suggestion)) {
-          return suggestion;
-        }
-        return match;
-      });
-      
-      return `${modifiedQuery.charAt(0).toUpperCase() + modifiedQuery.slice(1)}`;
-    });
-  }
-
-  // Conversation context analysis methods
-  analyzeConversationContext(query, conversationHistory) {
-    const queryLower = query.toLowerCase().trim();
-    const context = {
-      isRejection: false,
-      isMetaConversation: false,
-      recentSuggestions: [],
-      conversationState: 'normal',
-      failureCount: 0,
-      requiresSpecialHandling: false,
-      persistentRequests: new Map(), // Track repeated requests for same entities
-      nonExistentEntityCount: 0 // Count requests for entities that don't exist
-    };
-
-    // Detect rejection patterns
-    const rejectionPatterns = [
-      /^no\b/i,
-      /^nope\b/i, 
-      /^not what i/i,
-      /^that'?s not/i,
-      /^try again/i,
-      /^something else/i,
-      /^different/i
-    ];
-    
-    context.isRejection = rejectionPatterns.some(pattern => pattern.test(queryLower));
-
-    // Detect meta-conversation patterns
-    const metaPatterns = [
-      /provide more (details?|info)/i,
-      /more context/i,
-      /clarify/i,
-      /explain/i,
-      /what do you mean/i,
-      /your (query|question|response)/i,
-      /help me/i,
-      /i don'?t understand/i
-    ];
-    
-    context.isMetaConversation = metaPatterns.some(pattern => pattern.test(queryLower));
-
-    // Extract recent suggestions from conversation history
-    const recentMessages = conversationHistory.slice(-6); // Last 3 exchanges
-    context.recentSuggestions = this.extractRecentSuggestions(recentMessages);
-    
-    // Count recent failures and clarification requests
-    context.failureCount = this.countRecentFailures(recentMessages);
-    
-    // Track persistent requests for the same non-existent entities
-    this.analyzePersistentRequests(query, recentMessages, context);
-    
-    // Determine conversation state and need for special handling
-    if (context.nonExistentEntityCount >= 2) {
-      context.conversationState = 'persistent_non_existent';
-      context.requiresSpecialHandling = true;
-    } else if (context.isRejection) {
-      context.conversationState = 'post_rejection';
-      context.requiresSpecialHandling = true;
-    } else if (context.isMetaConversation) {
-      context.conversationState = 'meta_conversation';
-      context.requiresSpecialHandling = true;
-    } else if (context.failureCount >= 2) {
-      context.conversationState = 'repeated_failure';
-      context.requiresSpecialHandling = true;
-    }
-
-    return context;
-  }
-
-  extractRecentSuggestions(recentMessages) {
-    const suggestions = [];
-    
-    recentMessages.forEach(message => {
-      if (message.type === 'assistant' && message.content) {
-        // Extract entities that were suggested in clarifications
-        const suggestionPatches = [
-          /similar options?:\s*([^.?!]+)/i,
-          /did you mean[^:]*:\s*([^.?!]+)/i,
-          /available options include:\s*([^.?!]+)/i
-        ];
-        
-        suggestionPatches.forEach(pattern => {
-          const match = message.content.match(pattern);
-          if (match && match[1]) {
-            const entities = match[1]
-              .split(/[,&]/)
-              .map(s => s.trim())
-              .filter(s => s && s !== 'and');
-            suggestions.push(...entities);
-          }
-        });
-      }
-    });
-    
-    return [...new Set(suggestions)]; // Remove duplicates
-  }
-
-  countRecentFailures(recentMessages) {
-    let failureCount = 0;
-    
-    recentMessages.forEach(message => {
-      if (message.type === 'assistant' && message.content) {
-        const failureIndicators = [
-          /couldn'?t find/i,
-          /not found/i,
-          /no data/i,
-          /clarification/i,
-          /need more/i
-        ];
-        
-        if (failureIndicators.some(pattern => pattern.test(message.content))) {
-          failureCount++;
-        }
-      }
-    });
-    
-    return failureCount;
-  }
-
-  analyzePersistentRequests(query, recentMessages, context) {
-    // Track repeated requests for the same non-existent entities
-    const queryLower = query.toLowerCase();
-    let nonExistentCount = 0;
-    
-    // Look for patterns of entity not found in recent messages
-    recentMessages.forEach(message => {
-      if (message.type === 'assistant' && message.content) {
-        const notFoundPatterns = [
-          /couldn'?t find "([^"]+)"/gi,
-          /don'?t have "([^"]+)"/gi,
-          /no data found for "([^"]+)"/gi,
-          /"([^"]+)" (?:not found|doesn'?t exist)/gi
-        ];
-        
-        notFoundPatterns.forEach(pattern => {
-          const matches = [...message.content.matchAll(pattern)];
-          nonExistentCount += matches.length;
-        });
-      }
-    });
-    
-    context.nonExistentEntityCount = nonExistentCount;
-    
-    // If user keeps asking for non-existent entities, mark for special handling
-    if (nonExistentCount >= 2) {
-      context.persistentRequests.set('non_existent_entities', nonExistentCount);
-    }
-  }
-
-  async generateContextualPlan(query, conversationContext, conversationHistory) {
-    console.log(`[ExecutionPlanner] Generating contextual plan for state: ${conversationContext.conversationState}`);
-    
-    switch (conversationContext.conversationState) {
-      case 'persistent_non_existent':
-        return this.generatePersistentNonExistentPlan(query, conversationContext);
-        
-      case 'post_rejection':
-        return this.generatePostRejectionPlan(query, conversationContext);
-        
-      case 'meta_conversation':
-        return this.generateMetaConversationPlan(query, conversationContext);
-        
-      case 'repeated_failure':
-        return this.generateEscalationPlan(query, conversationContext);
-        
-      default:
-        // Fallback to normal processing
-        return null;
-    }
-  }
-
-  async generatePersistentNonExistentPlan(query, conversationContext) {
-    console.log(`[ExecutionPlanner] User keeps asking for non-existent entities - providing final answer`);
-    
-    return {
-      plan: [
-        {
-          task_type: 'clarify_with_user',
-          params: {
-            provide_final_answer: true,
-            message: `I notice you've been looking for items that don't exist in our database. Let me show you exactly what IS available so you can find what you need.`,
-            conversation_state: 'persistent_non_existent'
-          },
-          on_failure: 'halt',
-          reasoning: 'User has repeatedly requested non-existent entities - providing comprehensive final answer to break the loop'
-        }
-      ]
-    };
-  }
-
-  async generatePostRejectionPlan(query, conversationContext) {
-    const rejectedSuggestions = conversationContext.recentSuggestions;
-    
-    // Avoid re-suggesting the same entities
-    let message = "I understand that wasn't what you were looking for. ";
-    let suggestions = [];
-    
-    if (rejectedSuggestions.length > 0) {
-      // Offer broader categories or alternatives
-      message += "Let me show you other available options:";
-      suggestions = this.getAlternativeSuggestions(rejectedSuggestions);
-    } else {
-      message += "Let me help you explore what's available in our database:";
-      suggestions = [
-        "Show me all industries",
-        "What sectors are available?",
-        "List all pain points",
-        "Browse all project opportunities"
-      ];
-    }
-    
-    return {
-      plan: [
-        {
-          task_type: 'clarify_with_user',
-          params: {
-            message: message,
-            suggestions: suggestions,
-            conversation_state: 'post_rejection',
-            alternative_approach: true
-          },
-          on_failure: 'halt',
-          reasoning: 'User rejected previous suggestions, offering alternative exploration paths'
-        }
-      ]
-    };
-  }
-
-  async generateMetaConversationPlan(query, conversationContext) {
-    let message = "I can see you're asking for clarification about our conversation. ";
-    let suggestions = [];
-    
-    if (query.toLowerCase().includes('query') || query.toLowerCase().includes('question')) {
-      message += "Instead of searching the database, let me clarify: I can help you find projects, pain points, or explore different industries and sectors. What specifically interests you?";
-      suggestions = [
-        "Show me all available industries",
-        "Find projects in a specific sector", 
-        "Browse pain points by department",
-        "Start over with a new search"
-      ];
-    } else {
-      message += "I'm here to help you explore the graph database. I can search for projects, analyze pain points, or show relationships between different business areas.";
-      suggestions = [
-        "What types of data can I explore?",
-        "Show me example queries",
-        "Start with browsing industries",
-        "Help me find relevant projects"
-      ];
-    }
-    
-    return {
-      plan: [
-        {
-          task_type: 'clarify_with_user',
-          params: {
-            message: message,
-            suggestions: suggestions,
-            conversation_state: 'meta_conversation',
-            helpful_guidance: true
-          },
-          on_failure: 'halt',
-          reasoning: 'User is asking about the conversation itself, providing meta-level guidance'
-        }
-      ]
-    };
-  }
-
-  async generateEscalationPlan(query, conversationContext) {
-    const message = "I notice we're having trouble finding what you're looking for. Let me take a different approach and show you what's actually available in the database so you can find what you need.";
-    
-    const suggestions = [
-      "Show me everything available",
-      "Browse by industry categories", 
-      "Explore all sectors and departments",
-      "Start fresh with a different approach"
-    ];
-    
-    return {
-      plan: [
-        {
-          task_type: 'generate_cypher',
-          params: {
-            goal: "Show overview of all available entities to help user explore",
-            entities: ["Industry", "Sector", "Department"],
-            exploration_mode: true
-          },
-          on_failure: 'continue',
-          reasoning: 'Providing exploratory overview after repeated failures'
-        },
-        {
-          task_type: 'execute_cypher',
-          params: { query: "$step1.output" },
-          on_failure: 'continue',
-          reasoning: 'Execute exploratory query to show available options'
-        },
-        {
-          task_type: 'clarify_with_user', 
-          params: {
-            message: message,
-            suggestions: suggestions,
-            conversation_state: 'escalation',
-            show_exploration_data: true
-          },
-          on_failure: 'halt',
-          reasoning: 'Escalate to guided exploration after repeated failures'
-        }
-      ]
-    };
-  }
-
-  getAlternativeSuggestions(rejectedSuggestions) {
-    const allOptions = [
-      ...this.knownEntities.industries,
-      ...this.knownEntities.sectors
-    ];
-    
-    // Filter out recently suggested items
-    const alternatives = allOptions.filter(option => 
-      !rejectedSuggestions.some(rejected => 
-        option.toLowerCase().includes(rejected.toLowerCase()) ||
-        rejected.toLowerCase().includes(option.toLowerCase())
-      )
-    );
-    
-    // Return a diverse set of alternatives
-    return alternatives.slice(0, 4).map(alt => `Explore ${alt}`);
-  }
-
-  async generateSmartCorrectionPlan(query, entityAnalysis, conversationContext = null) {
-    console.log(`[ExecutionPlanner] Generating smart correction plan for entity issues`);
-    
-    const primaryIssue = entityAnalysis.issues[0];
-    let suggestions = entityAnalysis.suggestions.slice(0, 3);
-    
-    // If we have conversation context, adjust suggestions to avoid repetition
-    if (conversationContext && conversationContext.recentSuggestions.length > 0) {
-      suggestions = suggestions.filter(suggestion => 
-        !conversationContext.recentSuggestions.includes(suggestion)
-      );
-      
-      // If no new suggestions, provide alternatives
-      if (suggestions.length === 0) {
-        suggestions = this.getAlternativeSuggestions(conversationContext.recentSuggestions);
-      }
-    }
-    
-    const clarificationMessage = this.buildClarificationMessage(query, primaryIssue, suggestions);
-    
-    return {
-      plan: [
-        {
-          task_type: 'clarify_with_user',
-          params: {
-            message: clarificationMessage,
-            suggestions: this.buildQuerySuggestions(query, suggestions),
-            entity_issues: entityAnalysis.issues,
-            corrected_entities: suggestions,
-            conversation_aware: conversationContext ? true : false
-          },
-          on_failure: 'halt',
-          reasoning: `Detected entity recognition issue: "${primaryIssue.entity}" not found. Offering conversation-aware corrections and alternatives.`
-        }
-      ]
-    };
   }
 }
 

@@ -1,10 +1,90 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
 import ChatInterface, { ChatInterfaceRef } from './components/ChatInterface';
 import GraphErrorBoundary from './components/GraphErrorBoundary';
 import { api, nodeApi } from './utils/api';
 import './App.css';
+
+// Memoized GraphHeroSection component to prevent unnecessary re-renders
+const GraphHeroSection = memo<{
+  graphLoading: boolean;
+  showGraphSection: boolean;
+  graphData: { nodes: any[], edges: any[] };
+  hasGraphData: boolean;
+  handleGraphNodeSelect: (nodeId: string, nodeData: any) => void;
+  handleGraphNodeEdit: (nodeId: string, nodeData: any) => void;
+  handleNavigateToNode: (nodeId: string) => void;
+  focusedGraphNode: string | null;
+  currentGraphVersion: string;
+  handleGraphDataUpdate: (nodes: any[], edges: any[]) => void;
+  handleExampleQuestionClick: (question: string) => void;
+}>(({ 
+  graphLoading, 
+  showGraphSection, 
+  graphData, 
+  hasGraphData, 
+  handleGraphNodeSelect, 
+  handleGraphNodeEdit, 
+  handleNavigateToNode, 
+  focusedGraphNode, 
+  currentGraphVersion, 
+  handleGraphDataUpdate,
+  handleExampleQuestionClick 
+}) => {
+  return (
+    <div className="graph-hero-section">
+      {graphLoading ? (
+        <div className="builder-loading">
+          <div className="spinner"></div>
+          <p>Loading graph visualization...</p>
+        </div>
+      ) : showGraphSection ? (
+        <GraphErrorBoundary>
+          <GraphViz
+            nodes={graphData.nodes}
+            edges={graphData.edges}
+            nodeType="all"
+            onNodeSelect={handleGraphNodeSelect}
+            onNodeDoubleClick={handleGraphNodeEdit}
+            onNavigateToNode={handleNavigateToNode}
+            focusedNode={focusedGraphNode}
+            height="100%"
+            enableChat={true}
+            graphVersion={currentGraphVersion}
+            onGraphDataUpdate={handleGraphDataUpdate}
+            hasData={hasGraphData}
+          />
+        </GraphErrorBoundary>
+      ) : (
+        <div className="graph-welcome-state">
+          <div className="welcome-content">
+            <div className="welcome-icon">🔍</div>
+            <h3>Ready to Explore</h3>
+            <p>Ask the AI Assistant to explore the data and discover insights about industries, sectors, pain points, and AI project opportunities.</p>
+            <div className="example-queries">
+              <h4>Try asking:</h4>
+              <ul>
+                <li onClick={() => handleExampleQuestionClick("What projects are available for Banking?")}>
+                  "What projects are available for Banking?"
+                </li>
+                <li onClick={() => handleExampleQuestionClick("Show me pain points in Retail Banking")}>
+                  "Show me pain points in Retail Banking"
+                </li>
+                <li onClick={() => handleExampleQuestionClick("Find all Insurance sectors")}>
+                  "Find all Insurance sectors"
+                </li>
+                <li onClick={() => handleExampleQuestionClick("Compare opportunities in Banking and Insurance")}>
+                  "Compare opportunities in Banking and Insurance"
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 const App: React.FC = () => {
   // Chat interface ref for programmatic interaction
@@ -92,9 +172,9 @@ const App: React.FC = () => {
   // Graph visibility control - only show when needed
   const [shouldShowGraph, setShouldShowGraph] = useState(false);
   
-  // Computed state for better UX
+  // Computed state for better UX - More stable approach
   const hasGraphData = graphData.nodes.length > 0;
-  const showGraphSection = shouldShowGraph && hasGraphData;
+  const showGraphSection = shouldShowGraph; // Always show when requested, even with empty data
   
   // Get node count from database stats (not from current graph visualization)
   const getNodeCount = (nodeType: string) => {
@@ -105,6 +185,17 @@ const App: React.FC = () => {
     // Return 0 if stats not loaded yet (instead of counting from visualization)
     // This ensures cards always show database counts, not visualization counts
     return 0;
+  };
+
+  // Get total count of all nodes in database
+  const getTotalNodeCount = () => {
+    if (!builderStats) return 0;
+    
+    // Include all node types that exist in the database
+    const nodeTypes = ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'SubModule'];
+    return nodeTypes.reduce((total, nodeType) => {
+      return total + (builderStats[nodeType] || 0);
+    }, 0);
   };
 
   // Handler for example question clicks
@@ -861,15 +952,20 @@ const App: React.FC = () => {
         if (selectedDepartment) params.append('department', selectedDepartment);
       }
       
-      // For 'all' node type, fetch comprehensive graph data
-      const endpoint = nodeType === 'all' ? 'industries' : nodeType;
+      // For 'all' node type, use the correct endpoint
+      const endpoint = nodeType === 'all' ? 'all' : nodeType;
       const response = await api.get(`/api/admin/graph/${endpoint}?${params.toString()}`);
       
       if (response.ok) {
         const data = await response.json();
+        console.log(`[fetchGraphData] Fetched ${nodeType}:`, { 
+          nodes: data.nodes?.length || 0, 
+          edges: data.edges?.length || 0,
+          endpoint: endpoint
+        });
         setGraphData({
-          nodes: data.nodes,
-          edges: data.edges
+          nodes: data.nodes || [],
+          edges: data.edges || []
         });
       } else {
         const error = await response.json();
@@ -1139,16 +1235,33 @@ const App: React.FC = () => {
   };
 
   // Handle overview card click to navigate to graph view
-  const handleOverviewCardClick = (nodeType: string) => {
+  const handleOverviewCardClick = (nodeType: string, event?: React.MouseEvent) => {
+    // Prevent default behavior and event bubbling
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
+    console.log(`[App] Node card clicked: ${nodeType}`);
+    
     // Store the selected node type and fetch graph data for that type
     setSelectedNodeType(nodeType);
     
     // Show the graph when node card is clicked
     setShouldShowGraph(true);
     
-    // Reset filters and fetch data for the specific node type
-    resetFilters();
-    fetchGraphData(nodeType);
+    // Only reset filters if needed, and don't reset everything
+    // resetFilters(); // This might be causing issues
+    
+    // For projects, we need to handle the fact that ProjectOpportunity is empty
+    // but ProjectBlueprint has data
+    let actualNodeType = nodeType;
+    if (nodeType === 'projects') {
+      // Check if we should show blueprints instead of opportunities
+      actualNodeType = 'blueprints'; // Use blueprints since opportunities are empty
+    }
+    
+    fetchGraphData(actualNodeType);
   };
 
   const navigateToStep = (stepNumber: number) => {
@@ -1545,62 +1658,26 @@ const App: React.FC = () => {
                   </div>
                 )}
                 
-                <div className="graph-hero-section">
-                  
-                  {graphLoading ? (
-                    <div className="builder-loading">
-                      <div className="spinner"></div>
-                      <p>Loading graph visualization...</p>
-                    </div>
-                  ) : showGraphSection ? (
-                    <GraphErrorBoundary>
-                      <GraphViz
-                        nodes={graphData.nodes}
-                        edges={graphData.edges}
-                        nodeType="all"
-                        onNodeSelect={handleGraphNodeSelect}
-                        onNodeDoubleClick={handleGraphNodeEdit}
-                        onNavigateToNode={handleNavigateToNode}
-                        focusedNode={focusedGraphNode}
-                        height="100%"
-                        enableChat={true}
-                        graphVersion={currentGraphVersion}
-                        onGraphDataUpdate={handleGraphDataUpdate}
-                      />
-                    </GraphErrorBoundary>
-                  ) : (
-                    <div className="graph-welcome-state">
-                      <div className="welcome-content">
-                        <div className="welcome-icon">🔍</div>
-                        <h3>Ready to Explore</h3>
-                        <p>Ask the AI Assistant to explore the data and discover insights about industries, sectors, pain points, and AI project opportunities.</p>
-                        <div className="example-queries">
-                          <h4>Try asking:</h4>
-                          <ul>
-                            <li onClick={() => handleExampleQuestionClick("What projects are available for Banking?")}>
-                              "What projects are available for Banking?"
-                            </li>
-                            <li onClick={() => handleExampleQuestionClick("Show me pain points in Retail Banking")}>
-                              "Show me pain points in Retail Banking"
-                            </li>
-                            <li onClick={() => handleExampleQuestionClick("Find all Insurance sectors")}>
-                              "Find all Insurance sectors"
-                            </li>
-                            <li onClick={() => handleExampleQuestionClick("Compare opportunities in Banking and Insurance")}>
-                              "Compare opportunities in Banking and Insurance"
-                            </li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <GraphHeroSection
+                  graphLoading={graphLoading}
+                  showGraphSection={showGraphSection}
+                  graphData={graphData}
+                  hasGraphData={hasGraphData}
+                  handleGraphNodeSelect={handleGraphNodeSelect}
+                  handleGraphNodeEdit={handleGraphNodeEdit}
+                  handleNavigateToNode={handleNavigateToNode}
+                  focusedGraphNode={focusedGraphNode}
+                  currentGraphVersion={currentGraphVersion}
+                  handleGraphDataUpdate={handleGraphDataUpdate}
+                  handleExampleQuestionClick={handleExampleQuestionClick}
+                />
                 
                 {/* Node Cards - Horizontal layout under graph */}
                 <div className="node-cards-horizontal">
-                  <div 
+                  <button
+                    type="button"
                     className="node-card industry-node clickable" 
-                    onClick={() => handleOverviewCardClick('industries')}
+                    onClick={(e) => handleOverviewCardClick('industries', e)}
                   >
                     <div className="node-circle industry-gradient">
                       <span className="node-icon">🏭</span>
@@ -1609,59 +1686,64 @@ const App: React.FC = () => {
                       </span>
                     </div>
                     <span className="node-label">Industries</span>
-                  </div>
-                  <div 
+                  </button>
+                  <button
+                    type="button"
                     className="node-card sector-node clickable" 
-                    onClick={() => handleOverviewCardClick('sectors')}
+                    onClick={(e) => handleOverviewCardClick('sectors', e)}
                   >
                     <div className="node-circle sector-gradient">
                       <span className="node-icon">🏛️</span>
                       <span className="node-count">{getNodeCount('Sector')}</span>
                     </div>
                     <span className="node-label">Sectors</span>
-                  </div>
-                  <div 
+                  </button>
+                  <button
+                    type="button"
                     className="node-card department-node clickable" 
-                    onClick={() => handleOverviewCardClick('departments')}
+                    onClick={(e) => handleOverviewCardClick('departments', e)}
                   >
                     <div className="node-circle department-gradient">
                       <span className="node-icon">🏢</span>
                       <span className="node-count">{getNodeCount('Department')}</span>
                     </div>
                     <span className="node-label">Departments</span>
-                  </div>
-                  <div 
+                  </button>
+                  <button
+                    type="button"
                     className="node-card painpoint-node clickable" 
-                    onClick={() => handleOverviewCardClick('painpoints')}
+                    onClick={(e) => handleOverviewCardClick('painpoints', e)}
                   >
                     <div className="node-circle painpoint-gradient">
                       <span className="node-icon">⚠️</span>
                       <span className="node-count">{getNodeCount('PainPoint')}</span>
                     </div>
                     <span className="node-label">Pain Points</span>
-                  </div>
-                  <div 
+                  </button>
+                  <button
+                    type="button"
                     className="node-card project-node clickable" 
-                    onClick={() => handleOverviewCardClick('projects')}
+                    onClick={(e) => handleOverviewCardClick('projects', e)}
                   >
                     <div className="node-circle project-gradient">
                       <span className="node-icon">🚀</span>
-                      <span className="node-count">{getNodeCount('ProjectOpportunity')}</span>
+                      <span className="node-count">{getNodeCount('ProjectOpportunity') + getNodeCount('ProjectBlueprint')}</span>
                     </div>
                     <span className="node-label">Projects</span>
-                  </div>
-                  <div 
+                  </button>
+                  <button
+                    type="button"
                     className="node-card all-nodes-node clickable" 
-                    onClick={() => handleOverviewCardClick('all')}
+                    onClick={(e) => handleOverviewCardClick('all', e)}
                   >
                     <div className="node-circle all-nodes-gradient">
                       <span className="node-icon">*</span>
                       <span className="node-count">
-                        {graphData.nodes.length}
+                        {getTotalNodeCount()}
                       </span>
                     </div>
                     <span className="node-label">All Nodes</span>
-                  </div>
+                  </button>
                 </div>
               </div>
 

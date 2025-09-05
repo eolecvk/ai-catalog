@@ -263,7 +263,19 @@ class TaskLibrary {
   async generateCypher(params) {
     console.log('[TaskLibrary] Executing generate_cypher:', params);
     
-    const { goal, entities, context, exploration_mode } = params;
+    const { 
+      goal, 
+      entities, 
+      context, 
+      exploration_mode,
+      // New LLM-first parameters
+      query_type,
+      operation_type,
+      cypher_strategy,
+      proxy_context,
+      analysis_type,
+      comparison_goal
+    } = params;
     
     if (!goal) {
       return { success: false, error: 'Missing goal parameter' };
@@ -272,6 +284,19 @@ class TaskLibrary {
     // Handle exploration mode with special query generation
     if (exploration_mode) {
       return this.generateExplorationQuery(goal, entities, context);
+    }
+
+    // Handle different query types with specialized prompts
+    if (query_type === 'company_proxy') {
+      return this.generateCompanyProxyCypher(params);
+    }
+
+    if (operation_type && ['exclusion', 'inclusion'].includes(operation_type)) {
+      return this.generateAnalyticalCypher(params);
+    }
+
+    if (query_type === 'comparison') {
+      return this.generateComparisonCypher(params);
     }
 
     const prompt = `
@@ -328,7 +353,16 @@ JSON format:
         maxTokens: 400
       });
 
-      const result = JSON.parse(response.trim());
+      // Clean LLM response for JSON parsing
+      let cleanResponse = response.trim();
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const result = JSON.parse(cleanResponse);
       
       // Validate and fix common Cypher errors
       const validatedResult = this.validateAndFixCypherQuery(result);
@@ -363,6 +397,204 @@ JSON format:
         success: false,
         error: `Failed to generate Cypher query: ${error.message}`
       };
+    }
+  }
+
+  async generateCompanyProxyCypher(params) {
+    console.log('[TaskLibrary] Generating company proxy Cypher query');
+    
+    const { goal, entities, proxy_context } = params;
+    
+    const prompt = `
+Generate a Cypher query that uses proxy entities to represent a real company.
+
+# Graph Schema
+${this.graphSchema.relationships.join('\n')}
+
+# Query Goal
+${goal}
+
+# Proxy Entities (representing the company)
+${entities ? entities.join(', ') : 'None specified'}
+
+# Proxy Context
+${proxy_context || 'Using closest relevant sectors'}
+
+# Your Task
+Create a Cypher query that finds relevant data for these proxy entities while being transparent about the proxy approach.
+
+⚠️ CRITICAL Cypher Syntax Rules:
+- ALWAYS include relationship variables in RETURN statements
+- For visualization: RETURN node1, relationship, node2 
+- Never use relationships(node) - only relationships(path)
+
+Respond with ONLY pure JSON:
+{
+  "query": "MATCH (sector:Sector)-[r:EXPERIENCES]->(pain:PainPoint) WHERE sector.name IN $proxyEntities RETURN sector, r, pain",
+  "params": {"proxyEntities": ${JSON.stringify(entities || [])}},
+  "explanation": "Finding pain points for proxy sectors representing the company",
+  "connectionStrategy": "proxy_mapping"
+}
+`;
+
+    try {
+      const response = await this.llmManager.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 300
+      });
+
+      // Clean LLM response for JSON parsing
+      let cleanResponse = response.trim();
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const result = JSON.parse(cleanResponse);
+      const validatedResult = this.validateAndFixCypherQuery(result);
+      
+      return { success: true, output: validatedResult };
+    } catch (error) {
+      console.error('Company proxy Cypher generation error:', error);
+      return { success: false, error: `Failed to generate company proxy query: ${error.message}` };
+    }
+  }
+
+  async generateAnalyticalCypher(params) {
+    console.log('[TaskLibrary] Generating analytical Cypher query');
+    
+    const { goal, entities, operation_type, cypher_strategy } = params;
+    
+    const prompt = `
+Generate a Cypher query for analytical operations like exclusions, inclusions, and relationship analysis.
+
+# Graph Schema
+${this.graphSchema.relationships.join('\n')}
+
+# Query Goal
+${goal}
+
+# Primary Entities
+${entities ? entities.join(', ') : 'None specified'}
+
+# Operation Type
+${operation_type}
+
+# Cypher Strategy
+${cypher_strategy || 'NOT_EXISTS'}
+
+# Your Task
+Create an analytical Cypher query based on the operation type.
+
+# Analytical Pattern Examples:
+## Exclusion (NOT EXISTS):
+- "painpoints without projects": MATCH (p:PainPoint) WHERE NOT EXISTS((p)<-[:ADDRESSES]-(:ProjectOpportunity)) RETURN p
+- "sectors without opportunities": MATCH (s:Sector) WHERE NOT EXISTS((s)-[:HAS_OPPORTUNITY]->(:ProjectOpportunity)) RETURN s
+
+## Inclusion (EXISTS):
+- "sectors with pain points": MATCH (s:Sector) WHERE EXISTS((s)-[:EXPERIENCES]->(:PainPoint)) RETURN s
+- "departments having projects": MATCH (d:Department) WHERE EXISTS((d)-[:HAS_OPPORTUNITY]->(:ProjectOpportunity)) RETURN d
+
+⚠️ CRITICAL: For graph visualization, include relationships when possible:
+- MATCH (p:PainPoint) WHERE NOT EXISTS((p)<-[:ADDRESSES]-(:ProjectOpportunity)) OPTIONAL MATCH (p)<-[r:EXPERIENCES]-(entity) RETURN p, r, entity
+
+Respond with ONLY pure JSON:
+{
+  "query": "MATCH... WHERE... RETURN...",
+  "params": {},
+  "explanation": "Brief explanation of the analytical query",
+  "connectionStrategy": "exclusion|inclusion|relationship_analysis"
+}
+`;
+
+    try {
+      const response = await this.llmManager.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 400
+      });
+
+      // Clean LLM response for JSON parsing
+      let cleanResponse = response.trim();
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const result = JSON.parse(cleanResponse);
+      const validatedResult = this.validateAndFixCypherQuery(result);
+      
+      return { success: true, output: validatedResult };
+    } catch (error) {
+      console.error('Analytical Cypher generation error:', error);
+      return { success: false, error: `Failed to generate analytical query: ${error.message}` };
+    }
+  }
+
+  async generateComparisonCypher(params) {
+    console.log('[TaskLibrary] Generating comparison Cypher query');
+    
+    const { goal, entities, comparison_goal } = params;
+    
+    const prompt = `
+Generate a Cypher query for comparing different entities or analyzing relationships between them.
+
+# Graph Schema
+${this.graphSchema.relationships.join('\n')}
+
+# Query Goal
+${goal}
+
+# Entities to Compare
+${entities ? entities.join(', ') : 'None specified'}
+
+# Comparison Goal
+${comparison_goal || 'Compare the specified entities'}
+
+# Your Task
+Create a query that returns data suitable for comparison analysis.
+
+# Comparison Pattern Examples:
+- Compare pain points between sectors: MATCH (s:Sector)-[r1:EXPERIENCES]->(p:PainPoint) RETURN s, r1, p
+- Compare opportunities by department: MATCH (d:Department)-[r1:HAS_OPPORTUNITY]->(o:ProjectOpportunity) RETURN d, r1, o
+- Shared connections: MATCH (a)-[r1]->(shared)<-[r2]-(b) WHERE labels(a) = ["Sector"] AND labels(b) = ["Department"] RETURN a, r1, shared, r2, b
+
+⚠️ CRITICAL: Always include relationships for proper graph visualization.
+
+Respond with ONLY pure JSON:
+{
+  "query": "MATCH... RETURN...",
+  "params": {},
+  "explanation": "Brief explanation of the comparison query",
+  "connectionStrategy": "comparison"
+}
+`;
+
+    try {
+      const response = await this.llmManager.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 350
+      });
+
+      // Clean LLM response for JSON parsing
+      let cleanResponse = response.trim();
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const result = JSON.parse(cleanResponse);
+      const validatedResult = this.validateAndFixCypherQuery(result);
+      
+      return { success: true, output: validatedResult };
+    } catch (error) {
+      console.error('Comparison Cypher generation error:', error);
+      return { success: false, error: `Failed to generate comparison query: ${error.message}` };
     }
   }
 
@@ -418,7 +650,18 @@ JSON format:
   async analyzeAndSummarize(params) {
     console.log('[TaskLibrary] Executing analyze_and_summarize:', params);
     
-    const { dataset1, dataset2, dataset, comparison_type, analysis_goal } = params;
+    const { 
+      dataset1, 
+      dataset2, 
+      dataset, 
+      comparison_type, 
+      analysis_goal,
+      // New LLM-first parameters
+      proxy_explanation,
+      original_company,
+      analysis_type,
+      expected_result
+    } = params;
     
     // Handle both single dataset and comparison scenarios
     let primaryDataset = dataset1 || dataset;
@@ -428,10 +671,67 @@ JSON format:
       return { success: false, error: 'Missing dataset(s) to analyze' };
     }
 
-    // Determine if this is a comparison or single dataset analysis
+    // Determine analysis type (comparison, proxy, analytical, standard)
     const isComparison = secondaryDataset && primaryDataset;
+    const isProxyAnalysis = proxy_explanation && original_company;
+    const isAnalyticalAnalysis = analysis_type && ['exclusion', 'inclusion', 'relationship_analysis'].includes(analysis_type);
     
-    const prompt = isComparison ? `
+    let prompt;
+    
+    if (isProxyAnalysis) {
+      prompt = `
+Analyze graph data that represents company proxy results and provide insights with transparency.
+
+# Dataset
+${JSON.stringify(primaryDataset, null, 2)}
+
+# Company Proxy Context
+Original Company: ${original_company}
+Proxy Explanation: ${proxy_explanation}
+
+# Analysis Goal
+${analysis_goal || 'Provide insights for the original company using proxy data'}
+
+# Your Task
+Analyze the proxy data and provide insights relevant to the original company. Be transparent about the proxy approach.
+
+Structure your response as:
+1. **Proxy Analysis Summary**: Key findings from the proxy sectors
+2. **Relevance to ${original_company}**: How these findings likely apply to the company
+3. **Key Insights**: Specific actionable insights
+4. **Transparency Note**: Clear explanation of the proxy approach used
+
+Focus on making the connection between proxy data and the original company clear and actionable.
+`;
+    } else if (isAnalyticalAnalysis) {
+      prompt = `
+Analyze the results of an analytical query and provide structured insights.
+
+# Dataset
+${JSON.stringify(primaryDataset, null, 2)}
+
+# Analysis Type
+${analysis_type}
+
+# Expected Result Context
+${expected_result || 'Analytical findings'}
+
+# Analysis Goal
+${analysis_goal || 'Provide insights from analytical query results'}
+
+# Your Task
+Analyze the analytical query results and provide clear insights.
+
+For ${analysis_type} analysis, focus on:
+- What entities were found/excluded
+- Patterns in the ${analysis_type} results
+- Implications of these findings
+- Actionable recommendations
+
+Structure your response clearly with specific insights and recommendations.
+`;
+    } else if (isComparison) {
+      prompt = `
 Analyze and compare the following graph data.
 
 # Dataset 1
@@ -453,14 +753,17 @@ Provide a clear, structured analysis with specific insights. Focus on:
 - Actionable insights for decision-making
 
 Keep the analysis concise but comprehensive.
-` : `
+`;
+    } else {
+      // Standard single dataset analysis
+      prompt = `
 Analyze the following graph data and provide insights.
 
 # Dataset
 ${JSON.stringify(primaryDataset, null, 2)}
 
 # Analysis Type
-${comparison_type || 'single_dataset_analysis'}
+${comparison_type || analysis_type || 'single_dataset_analysis'}
 
 # Analysis Goal
 ${analysis_goal || 'Provide insights and summary of the data'}
@@ -473,6 +776,7 @@ Provide a clear, structured analysis with specific insights. Focus on:
 
 Keep the analysis concise but comprehensive.
 `;
+    }
 
     try {
       const response = await this.llmManager.generateText(prompt, {
@@ -484,9 +788,18 @@ Keep the analysis concise but comprehensive.
         success: true,
         output: {
           analysis: response,
-          comparison_type: isComparison ? (comparison_type || 'comparative_analysis') : (comparison_type || 'single_dataset_analysis'),
-          datasets_analyzed: isComparison ? 2 : 1,
-          is_comparison: isComparison
+          analysis_context: {
+            type: isProxyAnalysis ? 'proxy_analysis' : 
+                  isAnalyticalAnalysis ? 'analytical_analysis' : 
+                  isComparison ? 'comparative_analysis' : 'single_dataset_analysis',
+            is_proxy: isProxyAnalysis,
+            is_analytical: isAnalyticalAnalysis,
+            is_comparison: isComparison,
+            original_company: original_company || null,
+            proxy_explanation: proxy_explanation || null,
+            analysis_type: analysis_type || null,
+            datasets_analyzed: isComparison ? 2 : 1
+          }
         }
       };
     } catch (error) {
