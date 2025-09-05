@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { GraphNode, GraphEdge } from './types';
 
 interface GraphVizProps {
@@ -13,6 +13,105 @@ interface GraphVizProps {
   enableChat?: boolean;
   graphVersion?: string;
   onGraphDataUpdate?: (nodes: GraphNode[], edges: GraphEdge[]) => void;
+}
+
+// Quadtree implementation for spatial partitioning
+class QuadTree {
+  private bounds: { x: number; y: number; width: number; height: number };
+  private nodes: GraphNode[];
+  private children: QuadTree[];
+  private maxNodes: number;
+  private divided: boolean;
+
+  constructor(bounds: { x: number; y: number; width: number; height: number }, maxNodes: number = 4) {
+    this.bounds = bounds;
+    this.nodes = [];
+    this.children = [];
+    this.maxNodes = maxNodes;
+    this.divided = false;
+  }
+
+  insert(node: GraphNode): boolean {
+    if (!this.contains(node)) return false;
+
+    if (this.nodes.length < this.maxNodes && !this.divided) {
+      this.nodes.push(node);
+      return true;
+    }
+
+    if (!this.divided) {
+      this.subdivide();
+    }
+
+    return this.children.some(child => child.insert(node));
+  }
+
+  private contains(node: GraphNode): boolean {
+    return node.x! >= this.bounds.x &&
+           node.x! < this.bounds.x + this.bounds.width &&
+           node.y! >= this.bounds.y &&
+           node.y! < this.bounds.y + this.bounds.height;
+  }
+
+  private subdivide(): void {
+    const { x, y, width, height } = this.bounds;
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
+
+    this.children = [
+      new QuadTree({ x, y, width: halfWidth, height: halfHeight }, this.maxNodes),
+      new QuadTree({ x: x + halfWidth, y, width: halfWidth, height: halfHeight }, this.maxNodes),
+      new QuadTree({ x, y: y + halfHeight, width: halfWidth, height: halfHeight }, this.maxNodes),
+      new QuadTree({ x: x + halfWidth, y: y + halfHeight, width: halfWidth, height: halfHeight }, this.maxNodes)
+    ];
+
+    // Redistribute nodes to children
+    for (const node of this.nodes) {
+      this.children.some(child => child.insert(node));
+    }
+    this.nodes = [];
+    this.divided = true;
+  }
+
+  queryRange(range: { x: number; y: number; width: number; height: number }): GraphNode[] {
+    const found: GraphNode[] = [];
+    
+    if (!this.intersects(range)) return found;
+
+    // Add nodes from this quad
+    for (const node of this.nodes) {
+      if (range.x <= node.x! && node.x! < range.x + range.width &&
+          range.y <= node.y! && node.y! < range.y + range.height) {
+        found.push(node);
+      }
+    }
+
+    // Query children if divided
+    if (this.divided) {
+      for (const child of this.children) {
+        found.push(...child.queryRange(range));
+      }
+    }
+
+    return found;
+  }
+
+  private intersects(range: { x: number; y: number; width: number; height: number }): boolean {
+    return !(range.x > this.bounds.x + this.bounds.width ||
+             range.x + range.width < this.bounds.x ||
+             range.y > this.bounds.y + this.bounds.height ||
+             range.y + range.height < this.bounds.y);
+  }
+
+  getAllNodes(): GraphNode[] {
+    const allNodes = [...this.nodes];
+    if (this.divided) {
+      for (const child of this.children) {
+        allNodes.push(...child.getAllNodes());
+      }
+    }
+    return allNodes;
+  }
 }
 
 const GraphViz: React.FC<GraphVizProps> = ({ 
@@ -35,6 +134,19 @@ const GraphViz: React.FC<GraphVizProps> = ({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  
+  // Performance thresholds for progressive rendering
+  const performanceConfig = useMemo(() => {
+    const nodeCount = nodes.length;
+    return {
+      useSimpleRendering: nodeCount > 100,
+      disableShadows: nodeCount > 50,
+      disableGradients: nodeCount > 150,
+      disableAnimations: nodeCount > 200,
+      simplifyForces: nodeCount > 75,
+      reduceVisualEffects: nodeCount > 30
+    };
+  }, [nodes.length]);
 
   // Use props directly - single source of truth from App.tsx
   const currentGraphData = { nodes, edges };
@@ -56,7 +168,26 @@ const GraphViz: React.FC<GraphVizProps> = ({
     console.log('- Sample node IDs from props:', nodes.slice(0, 5).map(n => n.id));
   }, [nodes, edges]);
   const animationRef = useRef<number>();
+  const [isAnimationRunning, setIsAnimationRunning] = useState(false);
+  const [simulationStable, setSimulationStable] = useState(false);
+  const lastFrameTime = useRef<number>(0);
+  const frameInterval = 1000 / 30; // 30fps = ~33.33ms per frame
+  
+  // Performance monitoring
+  const performanceMetrics = useRef({
+    frameCount: 0,
+    totalFrameTime: 0,
+    lastSecond: Date.now(),
+    currentFps: 0,
+    simulationTime: 0,
+    renderTime: 0
+  });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Batched state updates to reduce re-renders
+  const batchedUpdateNodes = useCallback((updater: (prev: GraphNode[]) => GraphNode[]) => {
+    setSimulationNodes(updater);
+  }, []);
 
   // Chat functionality
 
@@ -75,7 +206,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     if (height === "100%") {
       const handleResize = () => {
         // Trigger recalculation of canvas size
-        setSimulationNodes([...simulationNodes]);
+        batchedUpdateNodes(prev => [...prev]);
       };
 
       const resizeObserver = new ResizeObserver(handleResize);
@@ -83,12 +214,16 @@ const GraphViz: React.FC<GraphVizProps> = ({
         resizeObserver.observe(containerRef.current);
       }
 
-      return () => resizeObserver.disconnect();
+      return () => {
+        resizeObserver.disconnect();
+        console.log('🧹 ResizeObserver disconnected');
+      };
     }
-  }, [height, simulationNodes]);
+  }, [height, batchedUpdateNodes]);
 
-  // Calculate adaptive canvas size based on available space and content
-  const getCanvasSize = useCallback(() => {
+  // Memoize expensive calculations
+  const memoizedCanvasSize = useMemo(() => {
+    console.log('🔄 Recalculating canvas size');
     // Base dimensions that work well for most graphs
     const baseWidth = 1200; // Full width since no side panel
     let baseHeight = 700; // Default fallback
@@ -119,8 +254,12 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const heightNum = Math.min(1500, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
     
     return { width, heightNum, combinedScaleFactor };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, edges.length, height]);
+  }, [nodes.length, edges.length, height, containerRef.current?.clientHeight]);
+
+  // Calculate adaptive canvas size based on available space and content
+  const getCanvasSize = useCallback(() => {
+    return memoizedCanvasSize;
+  }, [memoizedCanvasSize]);
 
   const { width, heightNum, combinedScaleFactor } = getCanvasSize();
 
@@ -156,20 +295,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return gradients[group] || getNodeColor(group);
   };
 
-  // Get icon for node type
+  // Get icon for node type - using industry emoji (🏢) for all as requested
   const getNodeIcon = (group: string): string => {
-    const icons: { [key: string]: string } = {
-      'Industry': '🏢',
-      'Sector': '🏛️',
-      'Department': '🏢',
-      'PainPoint': '⚠️',
-      'ProjectBlueprint': '📋',
-      'ProjectOpportunity': '🚀',
-      'Role': '👤',
-      'SubModule': '🔧',
-      'Module': '📦'
-    };
-    return icons[group] || '⭕';
+    // Use industry emoji for all graph nodes as requested
+    return '🏢';
   };
 
   // Get node radius based on type
@@ -187,6 +316,48 @@ const GraphViz: React.FC<GraphVizProps> = ({
     };
     return radii[group] || 20;
   };
+
+  // Memoize connected components calculation
+  const memoizedComponents = useMemo(() => {
+    console.log('🔄 Recalculating connected components');
+    const visited = new Set<string>();
+    const components: GraphNode[][] = [];
+    
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const adjacencyList = new Map<string, string[]>();
+    
+    // Build adjacency list
+    nodes.forEach(node => adjacencyList.set(node.id, []));
+    edges.forEach(edge => {
+      adjacencyList.get(edge.from)?.push(edge.to);
+      adjacencyList.get(edge.to)?.push(edge.from);
+    });
+    
+    const dfs = (nodeId: string, component: GraphNode[]) => {
+      if (visited.has(nodeId)) return;
+      visited.add(nodeId);
+      const node = nodeMap.get(nodeId);
+      if (node) component.push(node);
+      
+      adjacencyList.get(nodeId)?.forEach(neighborId => {
+        if (!visited.has(neighborId)) {
+          dfs(neighborId, component);
+        }
+      });
+    };
+    
+    nodes.forEach(node => {
+      if (!visited.has(node.id)) {
+        const component: GraphNode[] = [];
+        dfs(node.id, component);
+        if (component.length > 0) {
+          components.push(component);
+        }
+      }
+    });
+    
+    return components;
+  }, [nodes, edges]);
 
   // Detect connected components (subgraphs)
   const findConnectedComponents = useCallback((nodes: GraphNode[], edges: GraphEdge[]) => {
@@ -226,18 +397,20 @@ const GraphViz: React.FC<GraphVizProps> = ({
       }
     });
     
-    return components;
-  }, []);
+    return memoizedComponents;
+  }, [memoizedComponents]);
 
   // Advanced force simulation with subgraph separation and hierarchy
   const runSimulation = useCallback(() => {
     if (simulationNodes.length === 0) return;
 
     const activeGraphData = currentGraphData;
-    const repelForce = 2000; // Increased repulsion
-    const linkForce = 0.03;
-    const linkDistance = 150; // Increased link distance
-    const hierarchyForce = 0.008; // Force for vertical hierarchy
+    
+    // Adaptive force parameters based on performance config
+    const repelForce = performanceConfig.simplifyForces ? 1000 : 2000; 
+    const linkForce = performanceConfig.simplifyForces ? 0.02 : 0.03;
+    const linkDistance = performanceConfig.simplifyForces ? 100 : 150;
+    const hierarchyForce = performanceConfig.simplifyForces ? 0.005 : 0.008;
 
     const newNodes = simulationNodes.map(node => ({ ...node }));
     const components = findConnectedComponents(newNodes, activeGraphData.edges);
@@ -326,29 +499,67 @@ const GraphViz: React.FC<GraphVizProps> = ({
       });
     });
 
-    // Enhanced repel force between nodes
-    for (let i = 0; i < newNodes.length; i++) {
-      for (let j = i + 1; j < newNodes.length; j++) {
-        const nodeA = newNodes[i];
-        const nodeB = newNodes[j];
+    // Optimized repel force using spatial partitioning
+    if (newNodes.length > 20) {
+      // Use quadtree for large graphs (O(n log n) complexity)
+      const quadTree = new QuadTree({ x: 0, y: 0, width, height: heightNum });
+      newNodes.forEach(node => quadTree.insert(node));
+      
+      const searchRadius = 300;
+      newNodes.forEach(nodeA => {
+        if (nodeA.fx && nodeA.fy) return; // Skip fixed nodes
         
-        const dx = (nodeB.x || 0) - (nodeA.x || 0);
-        const dy = (nodeB.y || 0) - (nodeA.y || 0);
-        const distance = Math.sqrt(dx * dx + dy * dy);
+        // Query nearby nodes only
+        const range = {
+          x: (nodeA.x || 0) - searchRadius,
+          y: (nodeA.y || 0) - searchRadius,
+          width: searchRadius * 2,
+          height: searchRadius * 2
+        };
         
-        // Increased minimum distance threshold
-        if (distance > 0 && distance < 300) {
-          const force = repelForce / (distance * distance);
-          const forceX = (dx / distance) * force;
-          const forceY = (dy / distance) * force;
+        const nearbyNodes = quadTree.queryRange(range);
+        
+        nearbyNodes.forEach(nodeB => {
+          if (nodeA.id === nodeB.id) return;
           
-          if (!nodeA.fx && !nodeA.fy) {
+          const dx = (nodeB.x || 0) - (nodeA.x || 0);
+          const dy = (nodeB.y || 0) - (nodeA.y || 0);
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance > 0 && distance < searchRadius) {
+            const force = repelForce / (distance * distance);
+            const forceX = (dx / distance) * force * 0.5; // Reduced force for stability
+            const forceY = (dy / distance) * force * 0.5;
+            
             nodeA.vx = (nodeA.vx || 0) - forceX;
             nodeA.vy = (nodeA.vy || 0) - forceY;
           }
-          if (!nodeB.fx && !nodeB.fy) {
-            nodeB.vx = (nodeB.vx || 0) + forceX;
-            nodeB.vy = (nodeB.vy || 0) + forceY;
+        });
+      });
+    } else {
+      // Use simple O(n²) for small graphs
+      for (let i = 0; i < newNodes.length; i++) {
+        for (let j = i + 1; j < newNodes.length; j++) {
+          const nodeA = newNodes[i];
+          const nodeB = newNodes[j];
+          
+          const dx = (nodeB.x || 0) - (nodeA.x || 0);
+          const dy = (nodeB.y || 0) - (nodeA.y || 0);
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance > 0 && distance < 300) {
+            const force = repelForce / (distance * distance);
+            const forceX = (dx / distance) * force;
+            const forceY = (dy / distance) * force;
+            
+            if (!nodeA.fx && !nodeA.fy) {
+              nodeA.vx = (nodeA.vx || 0) - forceX;
+              nodeA.vy = (nodeA.vy || 0) - forceY;
+            }
+            if (!nodeB.fx && !nodeB.fy) {
+              nodeB.vx = (nodeB.vx || 0) + forceX;
+              nodeB.vy = (nodeB.vy || 0) + forceY;
+            }
           }
         }
       }
@@ -397,9 +608,26 @@ const GraphViz: React.FC<GraphVizProps> = ({
       }
     });
 
-    setSimulationNodes(newNodes);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, nodes, edges]);
+    batchedUpdateNodes(() => newNodes);
+  }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, nodes, edges, batchedUpdateNodes, performanceConfig]);
+
+  // Restart animation when graph data changes
+  useEffect(() => {
+    if (simulationNodes.length > 0) {
+      console.log('🔄 Graph data changed - restarting animation');
+      setSimulationStable(false);
+      setIsAnimationRunning(false); // Will be restarted by animation loop effect
+    }
+  }, [nodes, edges]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      console.log('🧹 GraphViz cleanup: stopping animation and clearing timeouts');
+      setIsAnimationRunning(false);
+      setSimulationStable(true);
+    };
+  }, []);
 
   // Initialize node positions with better spacing and hierarchy (smooth updates)
   useEffect(() => {
@@ -524,30 +752,114 @@ const GraphViz: React.FC<GraphVizProps> = ({
       }
     });
     
-    setSimulationNodes(allUpdatedNodes);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, edges, width, heightNum, findConnectedComponents]);
+    batchedUpdateNodes(() => allUpdatedNodes);
+  }, [nodes, edges, width, heightNum, findConnectedComponents, batchedUpdateNodes]);
 
   // Toggle side panel visibility
 
 
-  // Animation loop
+  // Check if simulation is stable (nodes have low velocity)
+  const checkSimulationStability = useCallback(() => {
+    if (simulationNodes.length === 0) return true;
+    
+    const velocityThreshold = 0.5;
+    const totalVelocity = simulationNodes.reduce((sum, node) => {
+      const vx = node.vx || 0;
+      const vy = node.vy || 0;
+      return sum + Math.sqrt(vx * vx + vy * vy);
+    }, 0);
+    
+    const avgVelocity = totalVelocity / simulationNodes.length;
+    return avgVelocity < velocityThreshold;
+  }, [simulationNodes]);
+
+  // 30fps animation loop with intelligent stopping
   useEffect(() => {
-    const animate = () => {
-      runSimulation();
-      animationRef.current = requestAnimationFrame(animate);
+    let timeoutId: number;
+    
+    const animate = (currentTime: number) => {
+      // Throttle to 30fps
+      if (currentTime - lastFrameTime.current >= frameInterval) {
+        lastFrameTime.current = currentTime;
+        
+        // Performance monitoring
+        const frameStart = performance.now();
+        
+        // Check if simulation should stop
+        const stable = checkSimulationStability();
+        if (stable && !simulationStable) {
+          console.log('🎯 Simulation stabilized - stopping animation');
+          console.log('📊 Performance metrics:', {
+            avgFps: Math.round(performanceMetrics.current.currentFps),
+            totalFrames: performanceMetrics.current.frameCount,
+            avgSimulationTime: Math.round(performanceMetrics.current.simulationTime / Math.max(1, performanceMetrics.current.frameCount)),
+            nodeCount: simulationNodes.length,
+            performanceMode: performanceConfig.useSimpleRendering
+          });
+          setSimulationStable(true);
+          setIsAnimationRunning(false);
+          return;
+        }
+        
+        if (!stable && simulationStable) {
+          setSimulationStable(false);
+        }
+        
+        const simulationStart = performance.now();
+        runSimulation();
+        const simulationEnd = performance.now();
+        
+        // Update performance metrics
+        const frameEnd = performance.now();
+        const frameTime = frameEnd - frameStart;
+        const simTime = simulationEnd - simulationStart;
+        
+        performanceMetrics.current.frameCount++;
+        performanceMetrics.current.totalFrameTime += frameTime;
+        performanceMetrics.current.simulationTime += simTime;
+        
+        // Calculate FPS every second
+        const now = Date.now();
+        if (now - performanceMetrics.current.lastSecond >= 1000) {
+          performanceMetrics.current.currentFps = performanceMetrics.current.frameCount;
+          performanceMetrics.current.frameCount = 0;
+          performanceMetrics.current.lastSecond = now;
+          
+          // Log performance warnings
+          if (performanceMetrics.current.currentFps < 20) {
+            console.warn(`⚠️ Low FPS detected: ${performanceMetrics.current.currentFps} (${simulationNodes.length} nodes)`);
+          }
+          if (simTime > 16) { // More than one frame time at 60fps
+            console.warn(`⚠️ Slow simulation: ${Math.round(simTime)}ms per frame`);
+          }
+        }
+      }
+      
+      // Continue animation if still running
+      if (isAnimationRunning) {
+        timeoutId = window.setTimeout(() => {
+          animate(performance.now());
+        }, frameInterval);
+      }
     };
 
-    if (simulationNodes.length > 0) {
-      animationRef.current = requestAnimationFrame(animate);
+    if (simulationNodes.length > 0 && !simulationStable) {
+      if (!isAnimationRunning) {
+        console.log('🏃 Starting animation loop at 30fps');
+        setIsAnimationRunning(true);
+        lastFrameTime.current = performance.now();
+        animate(performance.now());
+      }
     }
 
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
       }
+      // Ensure animation is stopped on cleanup
+      setIsAnimationRunning(false);
     };
-  }, [runSimulation, simulationNodes.length]);
+  }, [runSimulation, simulationNodes.length, checkSimulationStability, simulationStable, isAnimationRunning]);
 
 
   // Handle node interactions
@@ -620,7 +932,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
       const x = (e.clientX - rect.left - transform.x) / transform.k;
       const y = (e.clientY - rect.top - transform.y) / transform.k;
       
-      setSimulationNodes(prev => prev.map(n => 
+      batchedUpdateNodes(prev => prev.map(n => 
         n.id === node.id 
           ? { ...n, x, y, fx: x, fy: y, vx: 0, vy: 0 }
           : n
@@ -629,13 +941,14 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
     const handleMouseUp = () => {
       setDraggedNode(null);
-      setSimulationNodes(prev => prev.map(n => 
+      batchedUpdateNodes(prev => prev.map(n => 
         n.id === node.id 
           ? { ...n, fx: undefined, fy: undefined }
           : n
       ));
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      console.log('🧹 Mouse event listeners removed');
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -683,6 +996,16 @@ const GraphViz: React.FC<GraphVizProps> = ({
                   <strong>{Math.round((1/combinedScaleFactor) * 100)}%</strong> zoom
                 </div>
               )}
+              {performanceConfig.useSimpleRendering && (
+                <div className="graph-stat performance-mode" style={{color: '#e67e22'}}>
+                  <strong>⚡</strong> Performance Mode
+                </div>
+              )}
+              {isAnimationRunning && performanceMetrics.current.currentFps > 0 && (
+                <div className="graph-stat fps-counter" style={{color: performanceMetrics.current.currentFps < 20 ? '#e74c3c' : '#27ae60'}}>
+                  <strong>{Math.round(performanceMetrics.current.currentFps)}</strong> fps
+                </div>
+              )}
             </div>
             <svg
               ref={svgRef}
@@ -702,15 +1025,20 @@ const GraphViz: React.FC<GraphVizProps> = ({
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e9ecef" strokeWidth="0.5"/>
             </pattern>
             
-            {/* Node shadow filter */}
-            <filter id="nodeShadow" x="-50%" y="-50%" width="200%" height="200%">
-              <feDropShadow dx="2" dy="2" stdDeviation="3" floodOpacity="0.3"/>
-            </filter>
-            
-            {/* Connection shadow filter */}
-            <filter id="connectionShadow" x="-50%" y="-50%" width="200%" height="200%">
-              <feDropShadow dx="1" dy="1" stdDeviation="2" floodOpacity="0.2"/>
-            </filter>
+            {/* Conditional filters based on performance config */}
+            {!performanceConfig.disableShadows && (
+              <>
+                {/* Node shadow filter */}
+                <filter id="nodeShadow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="2" dy="2" stdDeviation="3" floodOpacity="0.3"/>
+                </filter>
+                
+                {/* Connection shadow filter */}
+                <filter id="connectionShadow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="1" dy="1" stdDeviation="2" floodOpacity="0.2"/>
+                </filter>
+              </>
+            )}
             
             {/* Connection gradients */}
             <linearGradient id="connectionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -738,11 +1066,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
               <path d="M0,0 L0,7 L8,3.5 z" fill="#bdc3c7" stroke="#95a5a6" strokeWidth="0.3"/>
             </marker>
             
-            {/* Gradients for each node type */}
-            <radialGradient id="industryGradient" cx="30%" cy="30%">
-              <stop offset="0%" stopColor="#3498db"/>
-              <stop offset="100%" stopColor="#2980b9"/>
-            </radialGradient>
+            {/* Conditional gradients for each node type */}
+            {!performanceConfig.disableGradients && (
+              <>
+                <radialGradient id="industryGradient" cx="30%" cy="30%">
+                  <stop offset="0%" stopColor="#3498db"/>
+                  <stop offset="100%" stopColor="#2980b9"/>
+                </radialGradient>
             
             <radialGradient id="sectorGradient" cx="30%" cy="30%">
               <stop offset="0%" stopColor="#e74c3c"/>
@@ -779,10 +1109,12 @@ const GraphViz: React.FC<GraphVizProps> = ({
               <stop offset="100%" stopColor="#7f8c8d"/>
             </radialGradient>
             
-            <radialGradient id="moduleGradient" cx="30%" cy="30%">
-              <stop offset="0%" stopColor="#2ecc71"/>
-              <stop offset="100%" stopColor="#27ae60"/>
-            </radialGradient>
+                <radialGradient id="moduleGradient" cx="30%" cy="30%">
+                  <stop offset="0%" stopColor="#2ecc71"/>
+                  <stop offset="100%" stopColor="#27ae60"/>
+                </radialGradient>
+              </>
+            )}
           </defs>
           <rect 
             width="100%" 
@@ -878,9 +1210,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     opacity={connectionStyle.opacity}
                     markerEnd={connectionStyle.markerEnd}
                     strokeLinecap="round"
-                    filter={isFocused ? "url(#connectionShadow)" : "none"}
+                    filter={isFocused && !performanceConfig.disableShadows ? "url(#connectionShadow)" : "none"}
                     style={{
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      transition: performanceConfig.disableAnimations ? 'none' : 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                       cursor: 'pointer'
                     }}
                   />
@@ -922,7 +1254,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
               if (!node.x || !node.y) return null;
               
               const radius = getNodeRadius(node.group);
-              const gradient = getNodeGradient(node.group);
+              const gradient = performanceConfig.disableGradients ? getNodeColor(node.group) : getNodeGradient(node.group);
               const isDragged = draggedNode === node.id;
               const isFocused = focusedNodeId === node.id;
               const shouldFade = shouldFadeNode(node.id);
@@ -938,10 +1270,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     stroke={isFocused ? '#e74c3c' : '#ffffff'}
                     strokeWidth={isFocused ? 5 : 3}
                     opacity={shouldFade ? 0.25 : (isDragged ? 0.8 : 1)}
-                    filter="url(#nodeShadow)"
+                    filter={performanceConfig.disableShadows ? "none" : "url(#nodeShadow)"}
                     style={{ 
                       cursor: 'pointer',
-                      transition: 'opacity 0.3s ease-in-out, stroke 0.3s ease-in-out, stroke-width 0.3s ease-in-out'
+                      transition: performanceConfig.disableAnimations ? 'none' : 'opacity 0.3s ease-in-out, stroke 0.3s ease-in-out, stroke-width 0.3s ease-in-out'
                     }}
                     onClick={(e) => handleNodeClick(node, e)}
                     onDoubleClick={(e) => handleNodeDoubleClick(node, e)}
@@ -1036,4 +1368,22 @@ const GraphViz: React.FC<GraphVizProps> = ({
   );
 };
 
-export default GraphViz;
+// Memoize the entire component to prevent unnecessary re-renders
+const GraphVizMemoized = memo(GraphViz, (prevProps, nextProps) => {
+  // Custom comparison for better performance
+  return (
+    prevProps.nodes.length === nextProps.nodes.length &&
+    prevProps.edges.length === nextProps.edges.length &&
+    prevProps.nodeType === nextProps.nodeType &&
+    prevProps.height === nextProps.height &&
+    prevProps.focusedNode === nextProps.focusedNode &&
+    prevProps.graphVersion === nextProps.graphVersion &&
+    // Deep compare first few nodes for changes
+    JSON.stringify(prevProps.nodes.slice(0, 5)) === JSON.stringify(nextProps.nodes.slice(0, 5)) &&
+    JSON.stringify(prevProps.edges.slice(0, 10)) === JSON.stringify(nextProps.edges.slice(0, 10))
+  );
+});
+
+GraphVizMemoized.displayName = 'GraphViz';
+
+export default GraphVizMemoized;

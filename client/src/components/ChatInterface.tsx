@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { ChatMessage as ChatMessageType, ChatQueryResult, ChatApiRequest, ChatApiResponse } from '../types';
 import ChatMessage from './ChatMessage';
@@ -14,11 +14,15 @@ interface ChatInterfaceProps {
   };
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
+export interface ChatInterfaceRef {
+  sendExampleQuestion: (question: string) => Promise<void>;
+}
+
+const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({ 
   onApplyQueryResult,
   onNavigateToNode,
   graphContext 
-}) => {
+}, ref) => {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [currentInput, setCurrentInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -38,6 +42,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       inputRef.current.focus();
     }
   }, []);
+
+  // Expose methods to parent component
+  useImperativeHandle(ref, () => ({
+    sendExampleQuestion: handleExampleQuestionClick
+  }));
 
   const generateMessageId = () => {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -317,23 +326,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   return (
     <div className="chat-interface open">
-      <div className="chat-header">
-        <div className="chat-title">
-          <span className="chat-icon">💬</span>
-          <h3>AI Assistant</h3>
-        </div>
-        <div className="chat-actions">
-          <button 
-            className="reset-chat-btn"
-            onClick={resetChat}
-            disabled={messages.length === 1 && !!messages[0]?.exampleQuestions}
-            title="Reset conversation"
-          >
-            🔄
-          </button>
-        </div>
-      </div>
-
       <div className="chat-body">
           <div className="chat-messages">
             {messages.map(message => (
@@ -351,6 +343,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
           <form className="chat-input-form" onSubmit={handleSubmit}>
             <div className="chat-input-container">
+              <button 
+                type="button"
+                className="reset-chat-btn"
+                onClick={resetChat}
+                disabled={messages.length === 1 && !!messages[0]?.exampleQuestions}
+                title="Reset conversation"
+              >
+                🔄
+              </button>
               <input
                 ref={inputRef}
                 type="text"
@@ -373,6 +374,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         </div>
     </div>
   );
-};
+});
+
+ChatInterface.displayName = 'ChatInterface';
 
 export default ChatInterface;

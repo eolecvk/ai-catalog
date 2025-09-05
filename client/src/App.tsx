@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
-import ChatInterface from './components/ChatInterface';
+import ChatInterface, { ChatInterfaceRef } from './components/ChatInterface';
 import GraphErrorBoundary from './components/GraphErrorBoundary';
 import { api, nodeApi } from './utils/api';
 import './App.css';
 
 const App: React.FC = () => {
+  // Chat interface ref for programmatic interaction
+  const chatInterfaceRef = useRef<ChatInterfaceRef>(null);
+  
   const [industries, setIndustries] = useState<Industry[]>([]);
   const [sectors, setSectors] = useState<{[key: string]: Sector[]}>({});
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -92,6 +95,37 @@ const App: React.FC = () => {
   // Computed state for better UX
   const hasGraphData = graphData.nodes.length > 0;
   const showGraphSection = shouldShowGraph && hasGraphData;
+  
+  // Fallback node counts from current graph data when builderStats is null
+  const getNodeCount = (nodeType: string) => {
+    if (builderStats && builderStats[nodeType] !== undefined) {
+      return builderStats[nodeType];
+    }
+    
+    // Fallback: count from current graphData
+    const count = graphData.nodes.filter(node => node.group === nodeType).length;
+    console.log(`[App] Using fallback count for ${nodeType}: ${count} (from ${graphData.nodes.length} total nodes)`);
+    return count;
+  };
+
+  // Handler for example question clicks
+  const handleExampleQuestionClick = async (question: string) => {
+    console.log('[App] Example question clicked:', question);
+    
+    // Switch to assistant tab if not already there
+    setActiveRightTab('assistant');
+    
+    // Send the question to the chat interface
+    if (chatInterfaceRef.current) {
+      try {
+        await chatInterfaceRef.current.sendExampleQuestion(question);
+      } catch (error) {
+        console.error('Error sending example question:', error);
+      }
+    } else {
+      console.warn('Chat interface ref not available');
+    }
+  };
 
 
   // Chat interface state (always open)
@@ -462,11 +496,20 @@ const App: React.FC = () => {
   const fetchBuilderStats = async (version = currentGraphVersion) => {
     setBuilderLoading(true);
     try {
+      console.log(`[App] Fetching builder stats for version: ${version}`);
       const response = await fetch(`/api/admin/stats?version=${version}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const stats = await response.json();
+      console.log('[App] Received builder stats:', stats);
       setBuilderStats(stats);
     } catch (error) {
       console.error('Error fetching admin stats:', error);
+      // Set empty stats object so the UI knows the fetch was attempted
+      setBuilderStats({});
     } finally {
       setBuilderLoading(false);
     }
@@ -1586,10 +1629,18 @@ const App: React.FC = () => {
                         <div className="example-queries">
                           <h4>Try asking:</h4>
                           <ul>
-                            <li>"Show me all healthcare sectors"</li>
-                            <li>"What are the main pain points in finance?"</li>
-                            <li>"Find AI projects for retail departments"</li>
-                            <li>"Show connections between industries and sectors"</li>
+                            <li onClick={() => handleExampleQuestionClick("What projects are available for Banking?")}>
+                              "What projects are available for Banking?"
+                            </li>
+                            <li onClick={() => handleExampleQuestionClick("Show me pain points in Retail Banking")}>
+                              "Show me pain points in Retail Banking"
+                            </li>
+                            <li onClick={() => handleExampleQuestionClick("Find all Insurance sectors")}>
+                              "Find all Insurance sectors"
+                            </li>
+                            <li onClick={() => handleExampleQuestionClick("Compare opportunities in Banking and Insurance")}>
+                              "Compare opportunities in Banking and Insurance"
+                            </li>
                           </ul>
                         </div>
                       </div>
@@ -1603,9 +1654,11 @@ const App: React.FC = () => {
                     className="node-card industry-node clickable" 
                     onClick={() => handleOverviewCardClick('industries')}
                   >
-                    <div className="node-circle">
-                      <span className="node-icon">🏭</span>
-                      <span className="node-count">{builderStats?.Industry || 0}</span>
+                    <div className="node-circle industry-gradient">
+                      <span className="node-icon">🏢</span>
+                      <span className="node-count">
+                        {getNodeCount('Industry')}
+                      </span>
                     </div>
                     <span className="node-label">Industries</span>
                   </div>
@@ -1613,9 +1666,9 @@ const App: React.FC = () => {
                     className="node-card sector-node clickable" 
                     onClick={() => handleOverviewCardClick('sectors')}
                   >
-                    <div className="node-circle">
-                      <span className="node-icon">🎯</span>
-                      <span className="node-count">{builderStats?.Sector || 0}</span>
+                    <div className="node-circle sector-gradient">
+                      <span className="node-icon">🏛️</span>
+                      <span className="node-count">{getNodeCount('Sector')}</span>
                     </div>
                     <span className="node-label">Sectors</span>
                   </div>
@@ -1623,9 +1676,9 @@ const App: React.FC = () => {
                     className="node-card department-node clickable" 
                     onClick={() => handleOverviewCardClick('departments')}
                   >
-                    <div className="node-circle">
+                    <div className="node-circle department-gradient">
                       <span className="node-icon">🏢</span>
-                      <span className="node-count">{builderStats?.Department || 0}</span>
+                      <span className="node-count">{getNodeCount('Department')}</span>
                     </div>
                     <span className="node-label">Departments</span>
                   </div>
@@ -1633,9 +1686,9 @@ const App: React.FC = () => {
                     className="node-card painpoint-node clickable" 
                     onClick={() => handleOverviewCardClick('painpoints')}
                   >
-                    <div className="node-circle">
+                    <div className="node-circle painpoint-gradient">
                       <span className="node-icon">⚠️</span>
-                      <span className="node-count">{builderStats?.PainPoint || 0}</span>
+                      <span className="node-count">{getNodeCount('PainPoint')}</span>
                     </div>
                     <span className="node-label">Pain Points</span>
                   </div>
@@ -1643,11 +1696,23 @@ const App: React.FC = () => {
                     className="node-card project-node clickable" 
                     onClick={() => handleOverviewCardClick('projects')}
                   >
-                    <div className="node-circle">
+                    <div className="node-circle project-gradient">
                       <span className="node-icon">🚀</span>
-                      <span className="node-count">{builderStats?.ProjectOpportunity || 0}</span>
+                      <span className="node-count">{getNodeCount('ProjectOpportunity')}</span>
                     </div>
                     <span className="node-label">Projects</span>
+                  </div>
+                  <div 
+                    className="node-card all-nodes-node clickable" 
+                    onClick={() => handleOverviewCardClick('all')}
+                  >
+                    <div className="node-circle all-nodes-gradient">
+                      <span className="node-icon">*</span>
+                      <span className="node-count">
+                        {graphData.nodes.length}
+                      </span>
+                    </div>
+                    <span className="node-label">All Nodes</span>
                   </div>
                 </div>
               </div>
@@ -1675,6 +1740,7 @@ const App: React.FC = () => {
                   {activeRightTab === 'assistant' && (
                     <div className="chat-window">
                       <ChatInterface
+                        ref={chatInterfaceRef}
                         onApplyQueryResult={handleApplyQueryResult}
                         onNavigateToNode={handleNavigateToNode}
                         graphContext={{

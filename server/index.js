@@ -3302,7 +3302,8 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
       'blueprints': 'ProjectBlueprint',
       'roles': 'Role',
       'modules': 'Module',
-      'submodules': 'SubModule'
+      'submodules': 'SubModule',
+      'all': 'ALL' // Special case for all nodes
     };
     
     const primaryLabel = nodeTypeMap[nodeType.toLowerCase()];
@@ -3313,8 +3314,74 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
     const nodeMap = new Map();
     const edgeMap = new Map();
     
-    switch (primaryLabel) {
-      case 'Industry':
+    // Special case for 'all' nodes - show everything
+    if (nodeType.toLowerCase() === 'all') {
+      // Comprehensive query to get all nodes and relationships
+      const allNodesQuery = `
+        MATCH (n) 
+        WHERE n:Industry OR n:Sector OR n:Department OR n:PainPoint OR n:ProjectOpportunity OR n:ProjectBlueprint OR n:Role OR n:Module OR n:SubModule
+        OPTIONAL MATCH (n)-[r]-(m) 
+        WHERE m:Industry OR m:Sector OR m:Department OR m:PainPoint OR m:ProjectOpportunity OR m:ProjectBlueprint OR m:Role OR m:Module OR m:SubModule
+        RETURN n, r, m
+      `;
+      
+      const allResult = await session.run(allNodesQuery);
+      
+      allResult.records.forEach(record => {
+        const node = record.get('n');
+        const rel = record.get('r');
+        const connectedNode = record.get('m');
+        
+        // Add the primary node
+        const nodeId = node.identity.toString();
+        if (!nodeMap.has(nodeId)) {
+          const nodeLabels = node.labels;
+          const primaryNodeLabel = nodeLabels.find(label => 
+            ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'Module', 'SubModule'].includes(label)
+          ) || nodeLabels[0];
+          
+          nodeMap.set(nodeId, {
+            id: nodeId,
+            label: node.properties.name || node.properties.title || 'Unnamed',
+            group: primaryNodeLabel,
+            properties: node.properties
+          });
+        }
+        
+        // Add connected node and relationship if they exist
+        if (connectedNode && rel) {
+          const connectedId = connectedNode.identity.toString();
+          if (!nodeMap.has(connectedId)) {
+            const connectedLabels = connectedNode.labels;
+            const primaryConnectedLabel = connectedLabels.find(label => 
+              ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'Module', 'SubModule'].includes(label)
+            ) || connectedLabels[0];
+            
+            nodeMap.set(connectedId, {
+              id: connectedId,
+              label: connectedNode.properties.name || connectedNode.properties.title || 'Unnamed',
+              group: primaryConnectedLabel,
+              properties: connectedNode.properties
+            });
+          }
+          
+          // Add relationship
+          const relId = `${nodeId}-${connectedId}-${rel.type}`;
+          if (!edgeMap.has(relId)) {
+            edgeMap.set(relId, {
+              id: relId,
+              from: nodeId,
+              to: connectedId,
+              label: rel.type,
+              type: rel.type,
+              properties: rel.properties
+            });
+          }
+        }
+      });
+    } else {
+      switch (primaryLabel) {
+        case 'Industry':
         // Industries: Show only Industry nodes
         const industryQuery = `MATCH (i:Industry) RETURN i`;
         const industryResult = await session.run(industryQuery);
@@ -3574,6 +3641,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
           };
           nodeMap.set(nodeData.id, nodeData);
         });
+      }
     }
     
     const finalNodes = Array.from(nodeMap.values());
