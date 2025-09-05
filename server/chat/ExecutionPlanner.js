@@ -640,10 +640,43 @@ Generate an appropriate execution plan for the given query.
     return failureCount;
   }
 
+  analyzePersistentRequests(query, recentMessages, context) {
+    // Track repeated requests for the same non-existent entities
+    const queryLower = query.toLowerCase();
+    let nonExistentCount = 0;
+    
+    // Look for patterns of entity not found in recent messages
+    recentMessages.forEach(message => {
+      if (message.type === 'assistant' && message.content) {
+        const notFoundPatterns = [
+          /couldn'?t find "([^"]+)"/gi,
+          /don'?t have "([^"]+)"/gi,
+          /no data found for "([^"]+)"/gi,
+          /"([^"]+)" (?:not found|doesn'?t exist)/gi
+        ];
+        
+        notFoundPatterns.forEach(pattern => {
+          const matches = [...message.content.matchAll(pattern)];
+          nonExistentCount += matches.length;
+        });
+      }
+    });
+    
+    context.nonExistentEntityCount = nonExistentCount;
+    
+    // If user keeps asking for non-existent entities, mark for special handling
+    if (nonExistentCount >= 2) {
+      context.persistentRequests.set('non_existent_entities', nonExistentCount);
+    }
+  }
+
   async generateContextualPlan(query, conversationContext, conversationHistory) {
     console.log(`[ExecutionPlanner] Generating contextual plan for state: ${conversationContext.conversationState}`);
     
     switch (conversationContext.conversationState) {
+      case 'persistent_non_existent':
+        return this.generatePersistentNonExistentPlan(query, conversationContext);
+        
       case 'post_rejection':
         return this.generatePostRejectionPlan(query, conversationContext);
         
@@ -657,6 +690,25 @@ Generate an appropriate execution plan for the given query.
         // Fallback to normal processing
         return null;
     }
+  }
+
+  async generatePersistentNonExistentPlan(query, conversationContext) {
+    console.log(`[ExecutionPlanner] User keeps asking for non-existent entities - providing final answer`);
+    
+    return {
+      plan: [
+        {
+          task_type: 'clarify_with_user',
+          params: {
+            provide_final_answer: true,
+            message: `I notice you've been looking for items that don't exist in our database. Let me show you exactly what IS available so you can find what you need.`,
+            conversation_state: 'persistent_non_existent'
+          },
+          on_failure: 'halt',
+          reasoning: 'User has repeatedly requested non-existent entities - providing comprehensive final answer to break the loop'
+        }
+      ]
+    };
   }
 
   async generatePostRejectionPlan(query, conversationContext) {

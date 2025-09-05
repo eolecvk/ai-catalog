@@ -108,28 +108,70 @@ class Orchestrator {
             };
           }
           
-          // Early halt for entity validation failures with smart suggestions
+          // Smart entity validation failure handling with loop detection
           if (step.task_type === 'validate_entity' && taskResult.output && !taskResult.output.valid) {
             const confidence = taskResult.output.confidence || 0;
             const suggestedEntities = taskResult.output.suggested_entities || [];
+            const entityType = taskResult.output.entity_type;
             
-            // If we have good suggestions and low confidence, halt early
-            if (confidence < 0.5 && suggestedEntities.length > 0) {
-              return {
-                success: false,
-                needsClarification: true,
-                message: `I couldn't find "${taskResult.output.entity_type}" in the database. Did you mean: ${suggestedEntities.slice(0, 3).join(', ')}?`,
-                suggestions: suggestedEntities.slice(0, 3).map(entity => 
-                  `What projects are available for ${entity}?`
-                ),
+            // Check if we've been through validation failures before in this session
+            const validationFailureCount = executionLog.filter(log => 
+              log.taskType === 'validate_entity' && 
+              log.result.output && 
+              !log.result.output.valid
+            ).length;
+            
+            // If we have multiple validation failures or very low confidence, provide final answer
+            if (validationFailureCount >= 2 || confidence === 0.0) {
+              console.log(`[Orchestrator] Detected potential clarification loop - providing final answer`);
+              
+              // Generate final answer instead of more clarification
+              const finalAnswerTask = await this.executeTask('clarify_with_user', {
+                provide_final_answer: true,
                 entity_issues: [{
-                  entity: taskResult.output.entity_type,
+                  entity: entityType,
                   issue: 'not_found',
                   suggestions: suggestedEntities
                 }],
                 corrected_entities: suggestedEntities,
+                conversation_state: 'provide_final_answer'
+              });
+              
+              if (finalAnswerTask.success && finalAnswerTask.output.isFinalAnswer) {
+                return {
+                  success: true,
+                  message: finalAnswerTask.output.message,
+                  suggestions: finalAnswerTask.output.suggestions,
+                  queryResult: {
+                    type: 'final_answer',
+                    summary: finalAnswerTask.output.message,
+                    availableData: finalAnswerTask.output.availableData,
+                    terminatesLoop: true
+                  },
+                  executionLog,
+                  clarification_loop_terminated: true
+                };
+              }
+            }
+            
+            // If we have good suggestions and moderate confidence, offer clarification (but only once)
+            if (confidence > 0.0 && confidence < 0.5 && suggestedEntities.length > 0 && validationFailureCount < 2) {
+              return {
+                success: false,
+                needsClarification: true,
+                message: `I couldn't find "${entityType}" in the database. Did you mean: ${suggestedEntities.slice(0, 3).join(', ')}?`,
+                suggestions: suggestedEntities.slice(0, 3).map(entity => 
+                  `What projects are available for ${entity}?`
+                ),
+                entity_issues: [{
+                  entity: entityType,
+                  issue: 'not_found', 
+                  suggestions: suggestedEntities
+                }],
+                corrected_entities: suggestedEntities,
                 executionLog,
-                early_halt_reason: 'entity_validation_failure'
+                early_halt_reason: 'entity_validation_failure',
+                validation_attempt: validationFailureCount + 1
               };
             }
           }
@@ -150,27 +192,40 @@ class Orchestrator {
                 summary: this.generateExecutionSummary(executionLog, taskResult.output)
               };
             } else if (nodeCount === 0 && step.task_type === 'execute_cypher') {
-              // Empty result from cypher execution - check if we should suggest corrections
+              // Empty result from cypher execution - provide final answer instead of more clarification
               const lastCypherQuery = this.getLastCypherQuery();
               const entityHints = this.extractEntityHintsFromQuery(lastCypherQuery);
               
               if (entityHints.length > 0) {
-                console.log(`[Orchestrator] Empty result detected for entities: ${entityHints.join(', ')}`);
+                console.log(`[Orchestrator] Empty result detected for entities: ${entityHints.join(', ')} - providing final answer`);
                 
-                // Early halt with entity suggestions for empty results
-                return {
-                  success: false,
-                  needsClarification: true,
-                  message: `No data found for "${entityHints.join(', ')}". This might be because the entity doesn't exist in our database.`,
-                  suggestions: this.generateEntitySuggestions(entityHints),
+                // Generate final answer for empty results instead of more clarification
+                const finalAnswerTask = await this.executeTask('clarify_with_user', {
+                  provide_final_answer: true,
                   entity_issues: entityHints.map(entity => ({
                     entity,
                     issue: 'empty_result',
                     suggestions: this.getContextualSuggestions(entity)
                   })),
-                  executionLog,
-                  early_halt_reason: 'empty_query_result'
-                };
+                  corrected_entities: entityHints.flatMap(entity => this.getContextualSuggestions(entity)),
+                  conversation_state: 'provide_final_answer'
+                });
+                
+                if (finalAnswerTask.success && finalAnswerTask.output.isFinalAnswer) {
+                  return {
+                    success: true,
+                    message: finalAnswerTask.output.message,
+                    suggestions: finalAnswerTask.output.suggestions,
+                    queryResult: {
+                      type: 'final_answer',
+                      summary: finalAnswerTask.output.message,
+                      availableData: finalAnswerTask.output.availableData,
+                      terminatesLoop: true
+                    },
+                    executionLog,
+                    clarification_loop_terminated: true
+                  };
+                }
               }
             }
           }

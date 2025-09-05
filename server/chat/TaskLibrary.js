@@ -557,8 +557,14 @@ Provide 3-5 specific, implementable suggestions or ideas.
       helpful_guidance,
       entity_issues,
       corrected_entities,
-      show_exploration_data
+      show_exploration_data,
+      provide_final_answer
     } = params;
+    
+    // Check if we should provide a final answer instead of more clarification
+    if (provide_final_answer || conversation_state === 'persistent_non_existent') {
+      return await this.provideFinalAnswer(params);
+    }
     
     // Enhance message based on conversation state
     let enhancedMessage = message || 'I need more information to help you better.';
@@ -596,6 +602,126 @@ Provide 3-5 specific, implementable suggestions or ideas.
         conversation_aware: true
       }
     };
+  }
+
+  // NEW METHOD: Provide definitive final answer when clarification loops occur
+  async provideFinalAnswer(params) {
+    console.log('[TaskLibrary] Providing final answer to break clarification loop');
+    
+    const { entity_issues, corrected_entities, message } = params;
+    
+    // Generate a comprehensive view of what IS available
+    const session = this.driver.session();
+    try {
+      // Get all available entities from the database
+      const availableEntitiesQuery = `
+        MATCH (i:Industry)
+        OPTIONAL MATCH (i)-[:HAS_SECTOR]->(s:Sector)
+        WITH i, collect(DISTINCT s.name) as sectors
+        RETURN {
+          industry: i.name,
+          sectors: sectors
+        } as industryData
+        ORDER BY i.name
+        UNION
+        MATCH (s:Sector)
+        WHERE NOT exists((:Industry)-[:HAS_SECTOR]->(s))
+        RETURN {
+          industry: null,
+          sectors: [s.name]
+        } as industryData
+      `;
+      
+      const result = await session.run(availableEntitiesQuery);
+      const availableData = result.records.map(r => r.get('industryData'));
+      
+      // Format the final answer
+      let finalMessage = '';
+      
+      if (entity_issues && entity_issues.length > 0) {
+        const missingEntity = entity_issues[0].entity;
+        finalMessage = `I don't have "${missingEntity}" in our database. `;
+      }
+      
+      finalMessage += "Here's what IS available in our AI project catalog:\n\n";
+      
+      // List all industries and sectors clearly
+      const industries = availableData.filter(data => data.industry);
+      const standaloneSectors = availableData.filter(data => !data.industry);
+      
+      if (industries.length > 0) {
+        finalMessage += "**Industries and their Sectors:**\n";
+        industries.forEach(data => {
+          finalMessage += `• ${data.industry}`;
+          if (data.sectors && data.sectors.length > 0) {
+            finalMessage += `: ${data.sectors.join(', ')}`;
+          }
+          finalMessage += '\n';
+        });
+      }
+      
+      if (standaloneSectors.length > 0) {
+        finalMessage += "\n**Additional Sectors:**\n";
+        standaloneSectors.forEach(data => {
+          if (data.sectors && data.sectors.length > 0) {
+            data.sectors.forEach(sector => {
+              finalMessage += `• ${sector}\n`;
+            });
+          }
+        });
+      }
+      
+      finalMessage += "\n**What you can ask:**\n";
+      finalMessage += "• 'What projects are available for [Sector Name]?'\n";
+      finalMessage += "• 'Show me pain points in [Sector Name]'\n";
+      finalMessage += "• 'What AI opportunities exist in [Industry Name]?'\n";
+      finalMessage += "• 'Browse all projects'\n";
+      
+      // Create exploration suggestions based on actual data
+      const exploratorySuggestions = [];
+      if (industries.length > 0) {
+        exploratorySuggestions.push(`Show me projects in ${industries[0].industry}`);
+        if (industries[0].sectors && industries[0].sectors.length > 0) {
+          exploratorySuggestions.push(`Find opportunities in ${industries[0].sectors[0]}`);
+        }
+      }
+      exploratorySuggestions.push('Browse all available projects');
+      exploratorySuggestions.push('Show me the complete project catalog');
+      
+      return {
+        success: true,
+        output: {
+          needsClarification: false, // This is the key change - no more clarification needed
+          isFinalAnswer: true,
+          message: finalMessage,
+          suggestions: exploratorySuggestions,
+          availableData: availableData,
+          terminates_clarification_loop: true
+        }
+      };
+      
+    } catch (error) {
+      console.error('Error generating final answer:', error);
+      
+      // Fallback final answer if database query fails
+      return {
+        success: true,
+        output: {
+          needsClarification: false,
+          isFinalAnswer: true,
+          message: "I couldn't find that specific item in our database. Our AI project catalog contains opportunities in Banking and Insurance industries, covering sectors like Retail Banking, Commercial Banking, Investment Banking, and various insurance sectors. You can ask about projects, pain points, or opportunities in any of these areas.",
+          suggestions: [
+            'Show me all Banking projects',
+            'Find Insurance opportunities', 
+            'Browse available sectors',
+            'What AI projects exist in Retail Banking?'
+          ],
+          terminates_clarification_loop: true
+        }
+      };
+    } finally {
+      await session.close();
+    }
   }
 
   // Helper methods
