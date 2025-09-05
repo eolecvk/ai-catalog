@@ -5,17 +5,21 @@ module.exports = function(app) {
   const backendPort = process.env.REACT_APP_BACKEND_PORT || '5002';
   const target = `http://localhost:${backendPort}`;
   
-  console.log(`🔗 [PROXY] Setting up proxy to backend: ${target}`);
-  console.log(`🔗 [PROXY] Environment: REACT_APP_BACKEND_PORT=${process.env.REACT_APP_BACKEND_PORT}`);
+  // Only show essential proxy setup info in clean mode
+  const isCleanMode = process.env.REACT_APP_CLEAN_OUTPUT !== 'false';
+  
+  if (!isCleanMode) {
+    console.log(`🔗 [PROXY] Setting up proxy to backend: ${target}`);
+    console.log(`🔗 [PROXY] Environment: REACT_APP_BACKEND_PORT=${process.env.REACT_APP_BACKEND_PORT}`);
+  }
   
   const proxyMiddleware = createProxyMiddleware({
     target: target,
     changeOrigin: true,
     secure: false,
-    logLevel: 'info',
+    logLevel: 'silent', // Reduce proxy middleware verbosity
     onError: (err, req, res) => {
-      console.error(`❌ [PROXY] Error for ${req.url}:`, err.message);
-      console.log(`💡 [PROXY] Make sure backend is running on ${target}`);
+      console.error(`❌ [PROXY] Backend connection failed:`, err.message);
       
       // Send a proper error response instead of leaving hanging
       if (!res.headersSent) {
@@ -25,16 +29,13 @@ module.exports = function(app) {
           message: err.message
         });
       }
-    },
-    onProxyReq: (proxyReq, req, res) => {
-      console.log(`→ [PROXY] ${req.method} ${req.url} → ${target}${req.url}`);
-    },
-    onProxyRes: (proxyRes, req, res) => {
-      console.log(`← [PROXY] ${proxyRes.statusCode} ${req.method} ${req.url}`);
     }
+    // Remove verbose onProxyReq and onProxyRes logging for cleaner output
   });
   
   app.use('/api', proxyMiddleware);
   
-  console.log(`✅ [PROXY] Configured /api/* → ${target}/api/*`);
+  if (!isCleanMode) {
+    console.log(`✅ [PROXY] Configured /api/* → ${target}/api/*`);
+  }
 };
