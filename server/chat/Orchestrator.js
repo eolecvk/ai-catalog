@@ -59,6 +59,29 @@ class Orchestrator {
         if (!taskResult.success) {
           console.log(`[Orchestrator] Step ${stepNumber} failed:`, taskResult.error);
           
+          // Check if this was a Cypher execution error that could benefit from intelligent handling
+          const isRecoverableError = step.task_type === 'execute_cypher' && 
+                                    taskResult.recoveryAttempted && 
+                                    taskResult.errorType === 'execution_error';
+                                    
+          if (isRecoverableError) {
+            // Provide meaningful user feedback instead of cascading failure
+            console.log(`[Orchestrator] Cypher execution failed but recovery was attempted, providing graceful fallback`);
+            return {
+              success: true,
+              message: `I encountered a query syntax issue but I'm working on improving these queries. Here's what's available in our database:`,
+              queryResult: {
+                type: 'error_recovery',
+                error: taskResult.error,
+                originalQuery: taskResult.originalQuery,
+                recoveryAttempted: true,
+                fallbackMessage: "Let me help you with what we have available instead."
+              },
+              executionLog,
+              requiresFallback: true
+            };
+          }
+          
           // Handle failure based on on_failure strategy
           const failureAction = step.on_failure || 'halt';
           

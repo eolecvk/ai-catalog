@@ -8,7 +8,7 @@ class ChatProcessor {
     // Initialize new V2 architecture components
     const ExecutionPlanner = require('./ExecutionPlanner');
     const Orchestrator = require('./Orchestrator');
-    this.executionPlanner = new ExecutionPlanner();
+    this.executionPlanner = new ExecutionPlanner(driver);
     this.orchestrator = new Orchestrator(driver);
     
     // Keep legacy components for fallback

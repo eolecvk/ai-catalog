@@ -321,12 +321,22 @@ ${context ? JSON.stringify(context, null, 2) : 'None'}
 ❌ RETURN industry, relationships(industry)           // ERROR: relationships() needs Path, not Node
 ❌ RETURN nodes(sector)                              // ERROR: nodes() needs Path, not Node
 ❌ RETURN industry, sector, painPoint                // ERROR: Missing relationships - shows 0 connections!
+❌ {name: 'Commercial Banking'}                      // ERROR: Single quotes in property values cause parsing errors
+❌ {name: 'Retail Banking'}                          // ERROR: Single quotes are invalid in Cypher string literals
 
 ✅ CORRECT PATTERNS - Use these instead:
 ✅ MATCH path = (industry:Industry)-[:HAS_SECTOR]->(sector:Sector) RETURN path
 ✅ MATCH (industry:Industry)-[r:HAS_SECTOR]->(sector:Sector) RETURN industry, r, sector
 ✅ MATCH path = (a)-[*1..3]->(b) RETURN nodes(path), relationships(path)
 ✅ MATCH (a:Sector)-[r1:EXPERIENCES]->(shared:PainPoint)<-[r2:EXPERIENCES]-(b:Department) RETURN a, r1, shared, r2, b
+✅ {name: "Commercial Banking"}                      // CORRECT: Double quotes for string literals
+✅ {name: "Retail Banking"}                          // CORRECT: Double quotes for string literals
+
+📝 STRING LITERAL FORMATTING RULES:
+- ALWAYS use double quotes ("") for string literals in property values
+- NEVER use single quotes ('') - they cause parsing errors
+- Example: MATCH (s:Sector {name: "Commercial Banking"}) - CORRECT
+- Example: MATCH (s:Sector {name: 'Commercial Banking'}) - WRONG, will fail!
 
 🔥 CRITICAL FOR GRAPH VISUALIZATION:
 - Graph visualization REQUIRES both nodes AND relationships to display connections
@@ -364,8 +374,11 @@ JSON format:
       
       const result = JSON.parse(cleanResponse);
       
-      // Validate and fix common Cypher errors
-      const validatedResult = this.validateAndFixCypherQuery(result);
+      // LLM-based self-validation and correction
+      const llmValidatedResult = await this.llmValidateCypherQuery(result);
+      
+      // Traditional validation and fixing
+      const validatedResult = this.validateAndFixCypherQuery(llmValidatedResult);
       
       return {
         success: true,
@@ -453,7 +466,12 @@ Respond with ONLY pure JSON:
       }
       
       const result = JSON.parse(cleanResponse);
-      const validatedResult = this.validateAndFixCypherQuery(result);
+      
+      // LLM-based self-validation and correction
+      const llmValidatedResult = await this.llmValidateCypherQuery(result);
+      
+      // Traditional validation and fixing
+      const validatedResult = this.validateAndFixCypherQuery(llmValidatedResult);
       
       return { success: true, output: validatedResult };
     } catch (error) {
@@ -525,7 +543,12 @@ Respond with ONLY pure JSON:
       }
       
       const result = JSON.parse(cleanResponse);
-      const validatedResult = this.validateAndFixCypherQuery(result);
+      
+      // LLM-based self-validation and correction
+      const llmValidatedResult = await this.llmValidateCypherQuery(result);
+      
+      // Traditional validation and fixing
+      const validatedResult = this.validateAndFixCypherQuery(llmValidatedResult);
       
       return { success: true, output: validatedResult };
     } catch (error) {
@@ -589,7 +612,12 @@ Respond with ONLY pure JSON:
       }
       
       const result = JSON.parse(cleanResponse);
-      const validatedResult = this.validateAndFixCypherQuery(result);
+      
+      // LLM-based self-validation and correction
+      const llmValidatedResult = await this.llmValidateCypherQuery(result);
+      
+      // Traditional validation and fixing
+      const validatedResult = this.validateAndFixCypherQuery(llmValidatedResult);
       
       return { success: true, output: validatedResult };
     } catch (error) {
@@ -628,7 +656,15 @@ Respond with ONLY pure JSON:
     } catch (error) {
       console.error('Cypher execution error:', error);
       
-      // Check for common Path/Node type mismatch errors and suggest fixes
+      // Try LLM-powered error analysis and auto-correction
+      const recoveryResult = await this.attemptQueryRecovery(query, error.message, queryParams);
+      
+      if (recoveryResult.success) {
+        console.log(`[TaskLibrary] 🔧 Auto-recovered from Cypher error using LLM correction`);
+        return recoveryResult;
+      }
+      
+      // Fall back to traditional error handling
       const isPathNodeError = error.message && (
         error.message.includes('expected Path but was Node') ||
         error.message.includes('Invalid input \'Node\' for argument at index 0 of function relationships()') ||
@@ -640,7 +676,9 @@ Respond with ONLY pure JSON:
         error: isPathNodeError 
           ? 'Query syntax error: relationships() and nodes() functions require Path variables, not Node variables'
           : `Query execution failed: ${error.message}`,
-        errorType: isPathNodeError ? 'path_node_mismatch' : 'execution_error'
+        errorType: isPathNodeError ? 'path_node_mismatch' : 'execution_error',
+        originalQuery: query,
+        recoveryAttempted: true
       };
     } finally {
       await session.close();
@@ -656,9 +694,12 @@ Respond with ONLY pure JSON:
       dataset, 
       comparison_type, 
       analysis_goal,
-      // New LLM-first parameters
+      // Enhanced business context parameters
+      business_context,
+      consultant_response,
       proxy_explanation,
       original_company,
+      proxy_sectors,
       analysis_type,
       expected_result
     } = params;
@@ -673,35 +714,39 @@ Respond with ONLY pure JSON:
 
     // Determine analysis type (comparison, proxy, analytical, standard)
     const isComparison = secondaryDataset && primaryDataset;
-    const isProxyAnalysis = proxy_explanation && original_company;
+    const isProxyAnalysis = (proxy_explanation || consultant_response || business_context) && original_company;
     const isAnalyticalAnalysis = analysis_type && ['exclusion', 'inclusion', 'relationship_analysis'].includes(analysis_type);
     
     let prompt;
     
     if (isProxyAnalysis) {
       prompt = `
-Analyze graph data that represents company proxy results and provide insights with transparency.
+You are an AI consultant providing analysis for ${original_company}. Analyze graph database results using proxy sectors with business intelligence and full transparency.
 
-# Dataset
+# Dataset from Database
 ${JSON.stringify(primaryDataset, null, 2)}
 
-# Company Proxy Context
-Original Company: ${original_company}
-Proxy Explanation: ${proxy_explanation}
+# Business Intelligence Context
+Company: ${original_company}
+Business Context: ${business_context || 'Major company in relevant industry'}
+Proxy Sectors Used: ${proxy_sectors || 'Database sectors representing similar business challenges'}
+
+# Consultant Approach
+${consultant_response || proxy_explanation || 'Using proxy sectors for analysis'}
 
 # Analysis Goal
-${analysis_goal || 'Provide insights for the original company using proxy data'}
+${analysis_goal || 'Provide strategic insights for the client using proxy data and business intelligence'}
 
-# Your Task
-Analyze the proxy data and provide insights relevant to the original company. Be transparent about the proxy approach.
+# Your Consultant Response
+Provide a professional analysis combining database insights with business knowledge. Structure your response as:
 
-Structure your response as:
-1. **Proxy Analysis Summary**: Key findings from the proxy sectors
-2. **Relevance to ${original_company}**: How these findings likely apply to the company
-3. **Key Insights**: Specific actionable insights
-4. **Transparency Note**: Clear explanation of the proxy approach used
+1. **Business Context**: Brief overview of ${original_company} and its market position (using business intelligence)
+2. **Proxy Analysis**: Key findings from the database sectors that represent similar operational challenges
+3. **Strategic Insights**: How these findings apply to ${original_company}'s business challenges and opportunities
+4. **Recommendations**: Actionable recommendations based on both database patterns and business knowledge
+5. **Methodology**: Clear explanation of the proxy approach and knowledge sources used
 
-Focus on making the connection between proxy data and the original company clear and actionable.
+Be transparent about what comes from the database vs. business intelligence while providing valuable consultant-level insights.
 `;
     } else if (isAnalyticalAnalysis) {
       prompt = `
@@ -1034,6 +1079,170 @@ Provide 3-5 specific, implementable suggestions or ideas.
       };
     } finally {
       await session.close();
+    }
+  }
+
+  // LLM-based Cypher validation and self-correction
+  async llmValidateCypherQuery(cypherResult) {
+    if (!cypherResult || !cypherResult.query) {
+      return cypherResult;
+    }
+
+    const validationPrompt = `
+Review this Cypher query for syntax errors and correct any issues found.
+
+# Original Query
+${cypherResult.query}
+
+# Common Issues to Check:
+1. String literals - MUST use double quotes ("") not single quotes ('')
+2. Property matching syntax - {name: "value"} not {name: 'value'}
+3. Relationship patterns - ensure proper syntax
+4. Variable naming - check for consistency
+
+# Your Task
+If you find syntax errors, provide a corrected version. If the query is correct, return it unchanged.
+
+Respond with ONLY JSON in this format:
+{
+  "query": "corrected or original query",
+  "wasChanged": true/false,
+  "corrections": ["list of changes made"],
+  "explanation": "brief explanation of what this query does",
+  "connectionStrategy": "direct|indirect|both"
+}
+`;
+
+    try {
+      const response = await this.llmManager.generateText(validationPrompt, {
+        temperature: 0.1,
+        maxTokens: 300
+      });
+
+      // Clean LLM response for JSON parsing
+      let cleanResponse = response.trim();
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const validationResult = JSON.parse(cleanResponse);
+      
+      if (validationResult.wasChanged) {
+        console.log(`[TaskLibrary] 🔧 LLM auto-corrected Cypher query:`, validationResult.corrections);
+        return {
+          ...cypherResult,
+          query: validationResult.query,
+          explanation: validationResult.explanation || cypherResult.explanation,
+          connectionStrategy: validationResult.connectionStrategy || cypherResult.connectionStrategy,
+          _wasLLMCorrected: true,
+          _llmCorrections: validationResult.corrections
+        };
+      }
+      
+      return cypherResult;
+    } catch (error) {
+      console.error('LLM Cypher validation error:', error);
+      // Fall back to original result if LLM validation fails
+      return cypherResult;
+    }
+  }
+
+  // LLM-powered query error recovery
+  async attemptQueryRecovery(originalQuery, errorMessage, queryParams = {}) {
+    console.log(`[TaskLibrary] 🔍 Attempting LLM-powered query recovery for error: ${errorMessage}`);
+    
+    const recoveryPrompt = `
+Analyze this Cypher query error and provide a corrected version.
+
+# Failed Query
+${originalQuery}
+
+# Error Message
+${errorMessage}
+
+# Query Parameters
+${JSON.stringify(queryParams, null, 2)}
+
+# Graph Schema
+${this.graphSchema.relationships.join('\n')}
+
+# Your Task
+1. Analyze the error message to understand what went wrong
+2. Provide a corrected Cypher query that fixes the issue
+3. Ensure the corrected query follows Neo4j syntax rules
+4. Keep the query's original intent intact
+
+# Common Error Fixes:
+- Single quotes → Double quotes in string literals
+- Missing relationship variables for graph visualization
+- Invalid property matching syntax
+- Node label formatting issues
+
+Respond with ONLY JSON:
+{
+  "correctedQuery": "FIXED CYPHER QUERY HERE",
+  "errorAnalysis": "Brief explanation of what was wrong",
+  "changesMade": ["list of specific changes"],
+  "confidence": 0.0-1.0
+}
+`;
+
+    try {
+      const response = await this.llmManager.generateText(recoveryPrompt, {
+        temperature: 0.1,
+        maxTokens: 400
+      });
+
+      // Clean LLM response for JSON parsing
+      let cleanResponse = response.trim();
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const recoveryResult = JSON.parse(cleanResponse);
+      
+      if (recoveryResult.confidence >= 0.7 && recoveryResult.correctedQuery) {
+        // Attempt to execute the corrected query
+        const session = this.driver.session();
+        try {
+          console.log(`[TaskLibrary] 🔄 Retrying with corrected query: ${recoveryResult.correctedQuery}`);
+          const result = await session.run(recoveryResult.correctedQuery, queryParams);
+          
+          const graphData = this.formatGraphData(result);
+          
+          return {
+            success: true,
+            output: {
+              graphData,
+              recordCount: result.records.length,
+              nodeCount: graphData.nodes.length,
+              edgeCount: graphData.edges.length
+            },
+            wasAutoRecovered: true,
+            originalQuery: originalQuery,
+            correctedQuery: recoveryResult.correctedQuery,
+            errorAnalysis: recoveryResult.errorAnalysis,
+            changesMade: recoveryResult.changesMade
+          };
+        } catch (retryError) {
+          console.log(`[TaskLibrary] ❌ Retry with corrected query also failed: ${retryError.message}`);
+          return { success: false, error: `Recovery attempt failed: ${retryError.message}` };
+        } finally {
+          await session.close();
+        }
+      } else {
+        console.log(`[TaskLibrary] ⚠️  Low confidence recovery (${recoveryResult.confidence}), not attempting retry`);
+        return { success: false, error: 'Low confidence in error recovery' };
+      }
+    } catch (error) {
+      console.error('Query recovery analysis error:', error);
+      return { success: false, error: `Recovery analysis failed: ${error.message}` };
     }
   }
 

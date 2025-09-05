@@ -1,8 +1,9 @@
 const llmManager = require('../llm/LLMManager');
 
 class ExecutionPlanner {
-  constructor() {
+  constructor(driver = null) {
     this.llmManager = llmManager;
+    this.driver = driver;
     
     // Available tasks that can be used in execution plans
     this.availableTasks = [
@@ -177,38 +178,42 @@ Focus on intent understanding, not exact entity matching.
     console.log(`[ExecutionPlanner] LLM Call #2: Company-to-Graph Mapping for "${companyName}"`);
     
     const prompt = `
-You need to map a real-world company to relevant entities in our graph database for proxy analysis.
+You are an AI consultant helping analyze project opportunities. A user has asked about "${companyName}" which is not in our project database, but you can provide business intelligence and map it to relevant database entities.
 
-# Graph Database Schema
-Available Industries and Sectors:
+# Available Database Industries and Sectors:
 - Banking: Retail Banking, Commercial Banking, Investment Banking, Private Banking, Credit Unions, Online Banking
 - Insurance: Life Insurance, Health Insurance, Property Insurance, Casualty Insurance
 
-# Company to Map
+# Company to Analyze
 "${companyName}"
 
 # Original Query Context
 "${intentAnalysis.reasoning}"
 
-# Your Task
-Based on your knowledge of this company, identify which industries/sectors would be most relevant as proxies.
+# Your Consultant Role
+1. Provide business intelligence about this company (market position, size, key business areas)
+2. Map it to the most relevant database sectors for project opportunity analysis
+3. Be transparent about what's business knowledge vs. what's in our database
 
 Respond with ONLY a JSON object:
 {
   "company": "${companyName}",
-  "primary_industries": ["Industry1", "Industry2"],
+  "business_context": "Brief description of company's market position, size, and key business areas",
+  "primary_industries": ["Banking", "Insurance"],
   "relevant_sectors": ["Sector1", "Sector2", "Sector3"],
-  "reasoning": "Brief explanation of why these sectors represent the company",
+  "reasoning": "Why these specific sectors represent similar business challenges and opportunities",
   "confidence": 0.0-1.0,
-  "mapping_strategy": "use_closest_sectors|use_industry_broad|use_specific_match"
+  "mapping_strategy": "use_closest_sectors|use_industry_broad|use_specific_match",
+  "knowledge_source": "business_intelligence",
+  "transparency_note": "Clear statement about using business knowledge for proxy mapping"
 }
 
-# Examples
-- Tesla → ["Technology", "Manufacturing"] + ["Electric Vehicles", "Battery Technology"] 
-- Netflix → ["Technology", "Media"] + ["Streaming Services", "Digital Content"]
-- Amazon → ["Technology", "Retail"] + ["E-commerce", "Cloud Services"]
+# Example Business Intelligence Responses:
+- ANZ Bank → business_context: "One of Australia's 'Big Four' banks, major retail and commercial banking operations" + ["Banking"] + ["Retail Banking", "Commercial Banking"]
+- Tesla → business_context: "Leading electric vehicle manufacturer with energy storage business" + map to closest available sectors
+- Amazon → business_context: "Global e-commerce and cloud services leader" + map to closest available sectors
 
-Focus on the most relevant sectors that would have similar pain points and project opportunities.
+Focus on providing valuable business context while mapping to sectors with similar operational challenges and project opportunities.
 `;
 
     const response = await this.llmManager.generateText(prompt, {
@@ -240,34 +245,39 @@ Focus on the most relevant sectors that would have similar pain points and proje
     console.log('[ExecutionPlanner] LLM Call #3: Query Transformation with Proxies');
     
     const prompt = `
-Transform the original query to use proxy entities from our graph database, replacing the unknown company with relevant sectors.
+As an AI consultant, transform the query to use database entities as proxies for the company, providing transparent business context.
 
 # Original Query
 "${originalQuery}"
 
-# Company Mapping
+# Company Business Intelligence
 Company: ${companyMapping.company}
+Business Context: ${companyMapping.business_context || 'Business context available'}
 Proxy Sectors: ${companyMapping.relevant_sectors.join(', ')}
 Reasoning: ${companyMapping.reasoning}
 
-# Your Task
-Rewrite the query to use the proxy sectors while maintaining the original intent. Also create a user-friendly explanation.
+# Consultant Approach
+1. Acknowledge the company and provide business context
+2. Explain the proxy approach transparently
+3. Transform the query to use database entities
+4. Maintain consultant-level insight and analysis
 
 Respond with ONLY a JSON object:
 {
   "transformed_query": "Rewritten query using proxy entities",
-  "proxy_explanation": "Clear explanation for the user about the proxy approach",
-  "execution_strategy": "lookup|analytical|comparison",
+  "consultant_response": "Professional response with business context and transparent proxy explanation",
+  "business_context": "Business intelligence about the company",
+  "proxy_explanation": "Clear explanation of why these sectors are relevant proxies",
+  "execution_strategy": "lookup|analytical|comparison", 
   "target_entities": ["Entity1", "Entity2"],
-  "transparency_message": "I don't have [Company] specifically, but I'm using [sectors] as proxies because..."
+  "transparency_message": "Note that [Company] isn't in our project database, but based on business knowledge..."
 }
 
-# Examples
-- "Tesla pain points" → "Find pain points in Electric Vehicles and Battery Technology sectors"
-- "Amazon projects" → "Show projects for E-commerce and Cloud Services sectors" 
-- "Netflix challenges" → "Analyze challenges in Streaming Services and Digital Content sectors"
+# Consultant Response Examples:
+- ANZ Bank → "ANZ is one of Australia's 'Big Four' banks with major retail and commercial operations. While not in our project database, I'll analyze similar banking sectors..."
+- Tesla → "Tesla is a leading EV manufacturer. I'll use closest available sectors to analyze similar operational challenges..."
 
-Maintain the analytical intent while making it clear we're using proxies.
+Provide business intelligence while being transparent about database limitations and proxy approach.
 `;
 
     const response = await this.llmManager.generateText(prompt, {
@@ -433,10 +443,18 @@ Focus on the logical structure of the analytical operation.
     console.log('[ExecutionPlanner] LLM Call #4: Generate Final Execution Plan');
     
     const prompt = `
-Create an execution plan for this transformed query that uses company proxy entities.
+Create a consultant-level execution plan for this company proxy analysis, integrating business intelligence with database queries.
 
 # Transformed Query
 ${transformedQuery.transformed_query}
+
+# Business Intelligence Context
+Company: ${companyMapping.company}
+Business Context: ${companyMapping.business_context || 'Business context available'}
+Proxy Entities: ${companyMapping.relevant_sectors.join(', ')}
+
+# Consultant Response Template
+${transformedQuery.consultant_response || transformedQuery.proxy_explanation}
 
 # Execution Strategy  
 ${transformedQuery.execution_strategy}
@@ -444,13 +462,8 @@ ${transformedQuery.execution_strategy}
 # Available Tasks
 ${this.availableTasks.join(', ')}
 
-# Proxy Context
-Company: ${companyMapping.company}
-Proxy Entities: ${companyMapping.relevant_sectors.join(', ')}
-Transparency Message: ${transformedQuery.transparency_message}
-
 # Your Task
-Generate a structured execution plan that handles the proxy query and includes transparent messaging.
+Generate an execution plan that provides consultant-level insights with transparent business context and database analysis.
 
 Respond with ONLY a JSON object:
 {
@@ -475,11 +488,13 @@ Respond with ONLY a JSON object:
       "task_type": "analyze_and_summarize",
       "params": {
         "dataset": "$step2.output",
-        "proxy_explanation": "${transformedQuery.proxy_explanation}",
-        "original_company": "${companyMapping.company}"
+        "business_context": "${companyMapping.business_context}",
+        "consultant_response": "${transformedQuery.consultant_response}",
+        "original_company": "${companyMapping.company}",
+        "proxy_sectors": "${companyMapping.relevant_sectors.join(', ')}"
       },
       "on_failure": "continue", 
-      "reasoning": "Provide results with proxy context"
+      "reasoning": "Provide consultant-level analysis with business intelligence and transparency"
     }
   ]
 }
