@@ -480,7 +480,7 @@ const App: React.FC = () => {
     setBuilderLoading(true);
     try {
       console.log(`[App] Fetching builder stats for version: ${version}`);
-      const response = await api.get(`/admin/stats?version=${version}`);
+      const response = await api.get(`/api/admin/stats?version=${version}`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -863,7 +863,7 @@ const App: React.FC = () => {
       
       // For 'all' node type, fetch comprehensive graph data
       const endpoint = nodeType === 'all' ? 'industries' : nodeType;
-      const response = await api.get(`/admin/graph/${endpoint}?${params.toString()}`);
+      const response = await api.get(`/api/admin/graph/${endpoint}?${params.toString()}`);
       
       if (response.ok) {
         const data = await response.json();
