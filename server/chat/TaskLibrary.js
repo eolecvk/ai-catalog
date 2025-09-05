@@ -777,7 +777,7 @@ Structure your response clearly with specific insights and recommendations.
 `;
     } else if (isComparison) {
       prompt = `
-Analyze and compare the following graph data.
+You are an AI consultant providing comparative analysis to support strategic decision-making. Analyze the following business intelligence data.
 
 # Dataset 1
 ${JSON.stringify(primaryDataset, null, 2)}
@@ -785,41 +785,43 @@ ${JSON.stringify(primaryDataset, null, 2)}
 # Dataset 2
 ${JSON.stringify(secondaryDataset, null, 2)}
 
-# Analysis Type
-${comparison_type || 'comparative_analysis'}
+# Analysis Framework
+Comparison Type: ${comparison_type || 'Strategic Comparative Analysis'}
+Business Objective: ${analysis_goal || 'Identify strategic patterns and opportunities across domains'}
 
-# Analysis Goal
-${analysis_goal || 'Compare and contrast the two datasets'}
+# Your Consultant Analysis
+Provide a professional comparative analysis structured as:
 
-Provide a clear, structured analysis with specific insights. Focus on:
-- Key patterns and trends in each dataset
-- Differences and similarities between the datasets
-- Notable findings or outliers
-- Actionable insights for decision-making
+1. **Executive Summary**: Key strategic differences and similarities at a glance
+2. **Detailed Comparison**: Specific patterns, trends, and variations between the datasets
+3. **Strategic Insights**: Business implications and opportunities identified from the comparison
+4. **Recommendations**: Actionable recommendations based on the comparative findings
+5. **Risk Assessment**: Potential challenges or limitations revealed by the analysis
 
-Keep the analysis concise but comprehensive.
+Focus on strategic value and actionable insights that support business decision-making.
 `;
     } else {
       // Standard single dataset analysis
       prompt = `
-Analyze the following graph data and provide insights.
+You are an AI consultant providing strategic analysis to support business decision-making. Analyze the following project opportunity data.
 
-# Dataset
+# Dataset from Database
 ${JSON.stringify(primaryDataset, null, 2)}
 
-# Analysis Type
-${comparison_type || analysis_type || 'single_dataset_analysis'}
+# Analysis Framework
+Analysis Type: ${comparison_type || analysis_type || 'Strategic Business Analysis'}
+Business Objective: ${analysis_goal || 'Identify patterns, opportunities, and strategic insights'}
 
-# Analysis Goal
-${analysis_goal || 'Provide insights and summary of the data'}
+# Your Consultant Analysis
+Provide a professional business analysis structured as:
 
-Provide a clear, structured analysis with specific insights. Focus on:
-- Key patterns and trends in the data
-- Notable findings, outliers, or important relationships
-- Distribution and characteristics of the nodes and connections
-- Actionable insights and recommendations
+1. **Executive Summary**: Key findings and strategic implications at a glance
+2. **Pattern Analysis**: Important trends, relationships, and business patterns identified
+3. **Opportunity Assessment**: Potential business opportunities and areas for development
+4. **Strategic Insights**: Business implications and strategic considerations
+5. **Recommendations**: Actionable recommendations for stakeholders
 
-Keep the analysis concise but comprehensive.
+Focus on translating data patterns into strategic business insights and actionable recommendations.
 `;
     }
 
