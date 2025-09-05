@@ -96,16 +96,15 @@ const App: React.FC = () => {
   const hasGraphData = graphData.nodes.length > 0;
   const showGraphSection = shouldShowGraph && hasGraphData;
   
-  // Fallback node counts from current graph data when builderStats is null
+  // Get node count from database stats (not from current graph visualization)
   const getNodeCount = (nodeType: string) => {
     if (builderStats && builderStats[nodeType] !== undefined) {
       return builderStats[nodeType];
     }
     
-    // Fallback: count from current graphData
-    const count = graphData.nodes.filter(node => node.group === nodeType).length;
-    console.log(`[App] Using fallback count for ${nodeType}: ${count} (from ${graphData.nodes.length} total nodes)`);
-    return count;
+    // Return 0 if stats not loaded yet (instead of counting from visualization)
+    // This ensures cards always show database counts, not visualization counts
+    return 0;
   };
 
   // Handler for example question clicks
@@ -234,7 +233,7 @@ const App: React.FC = () => {
   const fetchIndustries = async () => {
     try {
       const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
-      const response = await fetch(`/api/industries${versionParam}`);
+      const response = await api.get(`/api/industries${versionParam}`);
       const data = await response.json();
       setIndustries(data);
     } catch (error) {
@@ -249,11 +248,7 @@ const App: React.FC = () => {
     }
     
     try {
-      const response = await fetch('/api/sectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ industries: selectedIndustries })
-      });
+      const response = await api.post('/api/sectors', { industries: selectedIndustries });
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -270,7 +265,7 @@ const App: React.FC = () => {
   const fetchDepartments = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/departments');
+      const response = await api.get('/api/departments');
       const data = await response.json();
       setDepartments(data);
     } catch (error) {
@@ -283,11 +278,7 @@ const App: React.FC = () => {
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(selections)
-      });
+      const response = await api.post('/api/projects', selections);
       const data = await response.json();
       setProjects(data);
       setCurrentStep(4); // Go to step 4 for projects
@@ -340,11 +331,7 @@ const App: React.FC = () => {
     // If at least one department has been selected, show only pain points connected to selected departments
     if (departments.length > 0) {
       try {
-        const response = await fetch('/api/department-painpoints', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ departments })
-        });
+        const response = await api.post('/api/department-painpoints', { departments });
         const deptPainPoints = await response.json();
         setPainPoints(deptPainPoints);
       } catch (error) {
@@ -353,11 +340,7 @@ const App: React.FC = () => {
     } else if (sectors.length > 0) {
       // If no departments selected, fall back to sector pain points
       try {
-        const response = await fetch('/api/sector-painpoints', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sectors })
-        });
+        const response = await api.post('/api/sector-painpoints', { sectors });
         const sectorPainPoints = await response.json();
         setPainPoints(sectorPainPoints);
       } catch (error) {
@@ -497,7 +480,7 @@ const App: React.FC = () => {
     setBuilderLoading(true);
     try {
       console.log(`[App] Fetching builder stats for version: ${version}`);
-      const response = await fetch(`/api/admin/stats?version=${version}`);
+      const response = await api.get(`/admin/stats?version=${version}`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -519,7 +502,7 @@ const App: React.FC = () => {
   const fetchBuilderNodes = async (nodeType: string, version = currentGraphVersion) => {
     setBuilderLoading(true);
     try {
-      const response = await fetch(`/api/admin/nodes/${nodeType}?version=${version}`);
+      const response = await api.get(`/api/admin/nodes/${nodeType}?version=${version}`);
       const nodes = await response.json();
       // setBuilderNodes(nodes); // Removed builderNodes state
       console.log('Fetched builder nodes:', nodes);
@@ -533,9 +516,7 @@ const App: React.FC = () => {
   const createDraftVersion = async () => {
     setBuilderLoading(true);
     try {
-      const response = await fetch('/api/admin/versions/create-draft', {
-        method: 'POST'
-      });
+      const response = await api.post('/api/admin/versions/create-draft');
       const result = await response.json();
       if (response.ok) {
         alert('Draft version created successfully!');
@@ -560,13 +541,9 @@ const App: React.FC = () => {
     setBuilderLoading(true);
     
     try {
-      const response = await fetch(`/api/admin/nodes/${builderNodeForm.type}?version=${currentGraphVersion}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: builderNodeForm.name,
-          impact: builderNodeForm.impact
-        })
+      const response = await api.post(`/api/admin/nodes/${builderNodeForm.type}?version=${currentGraphVersion}`, {
+        name: builderNodeForm.name,
+        impact: builderNodeForm.impact
       });
       
       if (response.ok) {
@@ -591,13 +568,9 @@ const App: React.FC = () => {
     setBuilderLoading(true);
     
     try {
-      const response = await fetch(`/api/admin/nodes/${'nodes'}/${editingNode.id}?version=${currentGraphVersion}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: builderNodeForm.name,
-          impact: builderNodeForm.impact
-        })
+      const response = await api.put(`/api/admin/nodes/${'nodes'}/${editingNode.id}?version=${currentGraphVersion}`, {
+        name: builderNodeForm.name,
+        impact: builderNodeForm.impact
       });
       
       if (response.ok) {
@@ -632,7 +605,7 @@ const App: React.FC = () => {
   const handleExportGraph = async () => {
     setExportLoading(true);
     try {
-      const response = await fetch(`/api/admin/export?version=${currentGraphVersion}`);
+      const response = await api.get(`/api/admin/export?version=${currentGraphVersion}`);
       
       if (response.ok) {
         // Get the filename from the Content-Disposition header
@@ -686,13 +659,7 @@ const App: React.FC = () => {
     try {
       const fileContent = await importFile.text();
       
-      const response = await fetch(`/api/admin/import?versionName=${encodeURIComponent(importVersionName.trim())}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain',
-        },
-        body: fileContent,
-      });
+      const response = await api.post(`/api/admin/import?versionName=${encodeURIComponent(importVersionName.trim())}`, fileContent);
 
       const result = await response.json();
 
@@ -796,9 +763,7 @@ const App: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`/api/admin/promote/${encodeURIComponent(versionName)}`, {
-        method: 'POST',
-      });
+      const response = await api.post(`/api/admin/promote/${encodeURIComponent(versionName)}`);
 
       const result = await response.json();
 
@@ -828,9 +793,7 @@ const App: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`/api/admin/versions/${encodeURIComponent(versionName)}`, {
-        method: 'DELETE',
-      });
+      const response = await api.delete(`/api/admin/versions/${encodeURIComponent(versionName)}`);
 
       const result = await response.json();
 
@@ -900,7 +863,7 @@ const App: React.FC = () => {
       
       // For 'all' node type, fetch comprehensive graph data
       const endpoint = nodeType === 'all' ? 'industries' : nodeType;
-      const response = await fetch(`/api/admin/graph/${endpoint}?${params.toString()}`);
+      const response = await api.get(`/admin/graph/${endpoint}?${params.toString()}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -961,7 +924,7 @@ const App: React.FC = () => {
   const handleNavigateToNode = async (nodeId: string) => {
     setGraphLoading(true);
     try {
-      const response = await fetch(`/api/admin/node/${nodeId}/graph?version=${currentGraphVersion}`);
+      const response = await api.get(`/api/admin/node/${nodeId}/graph?version=${currentGraphVersion}`);
       if (response.ok) {
         const data = await response.json();
         setGraphData({
@@ -1059,7 +1022,7 @@ const App: React.FC = () => {
   const loadFilterOptions = async () => {
     try {
       // Load industries
-      const industriesResponse = await fetch('/api/industries');
+      const industriesResponse = await api.get('/api/industries');
       if (industriesResponse.ok) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const industriesData = await industriesResponse.json();
@@ -1067,7 +1030,7 @@ const App: React.FC = () => {
       }
 
       // Load departments
-      const departmentsResponse = await fetch('/api/departments');
+      const departmentsResponse = await api.get('/api/departments');
       if (departmentsResponse.ok) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const departmentsData = await departmentsResponse.json();
@@ -1076,11 +1039,7 @@ const App: React.FC = () => {
 
       // Load sectors (all sectors initially)
       if (industries.length > 0) {
-        const sectorsResponse = await fetch('/api/sectors', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ industries: industries.map(i => i.name) })
-        });
+        const sectorsResponse = await api.post('/api/sectors', { industries: industries.map(i => i.name) });
         if (sectorsResponse.ok) {
           const sectorsData = await sectorsResponse.json();
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1100,6 +1059,11 @@ const App: React.FC = () => {
     setSelectedDepartment('');
   };
 
+
+  // Load database stats on app startup (always needed for node cards)
+  useEffect(() => {
+    fetchBuilderStats();
+  }, []);
 
   // Load builder data when entering builder mode
   useEffect(() => {
@@ -1278,13 +1242,9 @@ const App: React.FC = () => {
     setSuggestingPainPoints(true);
     
     try {
-      const response = await fetch('/api/suggest-painpoint-names', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sectors: newPainPointForm.sectors,
-          departments: newPainPointForm.departments
-        })
+      const response = await api.post('/api/suggest-painpoint-names', {
+        sectors: newPainPointForm.sectors,
+        departments: newPainPointForm.departments
       });
       
       if (response.ok) {
@@ -1317,14 +1277,10 @@ const App: React.FC = () => {
     setSuggestingImpact(true);
     
     try {
-      const response = await fetch('/api/suggest-impact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          painPointName: newPainPointForm.name,
-          sectors: newPainPointForm.sectors,
-          departments: newPainPointForm.departments
-        })
+      const response = await api.post('/api/suggest-impact', {
+        painPointName: newPainPointForm.name,
+        sectors: newPainPointForm.sectors,
+        departments: newPainPointForm.departments
       });
       
       if (response.ok) {
@@ -1356,11 +1312,7 @@ const App: React.FC = () => {
         sectors: newPainPointForm.sectors.length > 0 ? newPainPointForm.sectors : undefined
       };
       
-      const response = await fetch('/api/painpoints', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await api.post('/api/painpoints', payload);
       
       if (response.ok) {
         const newPainPoint = await response.json();
@@ -1394,11 +1346,7 @@ const App: React.FC = () => {
         painPoint: selections.painPoints.length > 0 ? selections.painPoints[0] : newProjectForm.painPoint
       };
       
-      const response = await fetch('/api/projects/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await api.post('/api/projects/create', payload);
       
       if (response.ok) {
         await fetchProjects();
@@ -1655,7 +1603,7 @@ const App: React.FC = () => {
                     onClick={() => handleOverviewCardClick('industries')}
                   >
                     <div className="node-circle industry-gradient">
-                      <span className="node-icon">🏢</span>
+                      <span className="node-icon">🏭</span>
                       <span className="node-count">
                         {getNodeCount('Industry')}
                       </span>
@@ -1873,7 +1821,7 @@ const App: React.FC = () => {
                     onClick={() => handleIndustrySelection(industry.name)}
                   >
                     <div className="card-content">
-                      <div className="card-icon">🏦</div>
+                      <div className="card-icon">🏭</div>
                       <h3>{industry.name}</h3>
                     </div>
                   </button>

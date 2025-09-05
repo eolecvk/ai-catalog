@@ -295,10 +295,20 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return gradients[group] || getNodeColor(group);
   };
 
-  // Get icon for node type - using industry emoji (🏢) for all as requested
+  // Get icon for node type - using factory emoji for Industry nodes
   const getNodeIcon = (group: string): string => {
-    // Use industry emoji for all graph nodes as requested
-    return '🏢';
+    const icons: { [key: string]: string } = {
+      'Industry': '🏭',        // Factory emoji for Industry nodes
+      'Sector': '🏢',          // Office building for sectors
+      'Department': '🏛️',      // Classical building for departments
+      'PainPoint': '⚠️',       // Warning sign for pain points
+      'ProjectOpportunity': '💡', // Light bulb for opportunities
+      'ProjectBlueprint': '📋', // Clipboard for blueprints
+      'Role': '👤',            // Person for roles
+      'Module': '🧩',          // Puzzle piece for modules
+      'SubModule': '🔧'        // Wrench for submodules
+    };
+    return icons[group] || '🔵'; // Default blue circle
   };
 
   // Get node radius based on type
