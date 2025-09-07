@@ -135,6 +135,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
   const [componentCount, setComponentCount] = useState<number>(1);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
+  const [manualZoom, setManualZoom] = useState<number>(1); // User-controlled zoom
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 }); // User-controlled pan
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   
   // Performance thresholds for progressive rendering
@@ -455,10 +457,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
     const activeGraphData = currentGraphData;
     
-    // Adaptive force parameters based on performance config
-    const repelForce = performanceConfig.simplifyForces ? 1000 : 2000; 
+    // Adaptive force parameters based on performance config and node overlap prevention
+    const repelForce = performanceConfig.simplifyForces ? 1500 : 3000; // Increased for better separation
     const linkForce = performanceConfig.simplifyForces ? 0.02 : 0.03;
-    const linkDistance = performanceConfig.simplifyForces ? 100 : 150;
+    const linkDistance = performanceConfig.simplifyForces ? 120 : 180; // Increased distance to reduce overlap
     const hierarchyForce = performanceConfig.simplifyForces ? 0.005 : 0.008;
 
     const newNodes = simulationNodes.map(node => ({ ...node }));
@@ -575,13 +577,20 @@ const GraphViz: React.FC<GraphVizProps> = ({
           const dy = (nodeB.y || 0) - (nodeA.y || 0);
           const distance = Math.sqrt(dx * dx + dy * dy);
           
-          if (distance > 0 && distance < searchRadius) {
-            const force = repelForce / (distance * distance);
-            const forceX = (dx / distance) * force * 0.5; // Reduced force for stability
-            const forceY = (dy / distance) * force * 0.5;
+          if (distance > 0) {
+            // Calculate minimum distance based on node sizes to prevent overlap
+            const radiusA = getNodeRadius(nodeA.group);
+            const radiusB = getNodeRadius(nodeB.group);
+            const minDistance = radiusA + radiusB + 40; // 40px padding between nodes
             
-            nodeA.vx = (nodeA.vx || 0) - forceX;
-            nodeA.vy = (nodeA.vy || 0) - forceY;
+            if (distance < Math.max(searchRadius, minDistance)) {
+              const force = repelForce / (distance * distance);
+              const forceX = (dx / distance) * force * 0.5;
+              const forceY = (dy / distance) * force * 0.5;
+              
+              nodeA.vx = (nodeA.vx || 0) - forceX;
+              nodeA.vy = (nodeA.vy || 0) - forceY;
+            }
           }
         });
       });
@@ -596,18 +605,25 @@ const GraphViz: React.FC<GraphVizProps> = ({
           const dy = (nodeB.y || 0) - (nodeA.y || 0);
           const distance = Math.sqrt(dx * dx + dy * dy);
           
-          if (distance > 0 && distance < 300) {
-            const force = repelForce / (distance * distance);
-            const forceX = (dx / distance) * force;
-            const forceY = (dy / distance) * force;
+          if (distance > 0) {
+            // Calculate minimum distance based on node sizes to prevent overlap
+            const radiusA = getNodeRadius(nodeA.group);
+            const radiusB = getNodeRadius(nodeB.group);
+            const minDistance = radiusA + radiusB + 40; // 40px padding between nodes
             
-            if (!nodeA.fx && !nodeA.fy) {
-              nodeA.vx = (nodeA.vx || 0) - forceX;
-              nodeA.vy = (nodeA.vy || 0) - forceY;
-            }
-            if (!nodeB.fx && !nodeB.fy) {
-              nodeB.vx = (nodeB.vx || 0) + forceX;
-              nodeB.vy = (nodeB.vy || 0) + forceY;
+            if (distance < Math.max(300, minDistance)) {
+              const force = repelForce / (distance * distance);
+              const forceX = (dx / distance) * force;
+              const forceY = (dy / distance) * force;
+              
+              if (!nodeA.fx && !nodeA.fy) {
+                nodeA.vx = (nodeA.vx || 0) - forceX;
+                nodeA.vy = (nodeA.vy || 0) - forceY;
+              }
+              if (!nodeB.fx && !nodeB.fy) {
+                nodeB.vx = (nodeB.vx || 0) + forceX;
+                nodeB.vy = (nodeB.vy || 0) + forceY;
+              }
             }
           }
         }
@@ -931,10 +947,62 @@ const GraphViz: React.FC<GraphVizProps> = ({
     }
   };
 
+  // Manual zoom controls
+  const handleZoomIn = useCallback(() => {
+    setManualZoom(prev => Math.min(prev * 1.2, 3)); // Max 3x zoom
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setManualZoom(prev => Math.max(prev / 1.2, 0.2)); // Min 0.2x zoom (zoom out)
+  }, []);
+
+  const handleResetView = useCallback(() => {
+    setManualZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  }, []);
+
+  // Pan controls
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    // Only start panning if clicking on the SVG background
+    if (e.target === e.currentTarget || (e.target as any).tagName === 'rect' && (e.target as any).className?.includes?.('graph-background')) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+      e.preventDefault();
+    }
+  }, [panOffset]);
+
+  const handlePanMove = useCallback((e: MouseEvent) => {
+    if (isPanning) {
+      setPanOffset({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y
+      });
+    }
+  }, [isPanning, panStart]);
+
+  const handlePanEnd = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  // Add pan event listeners
+  useEffect(() => {
+    if (isPanning) {
+      document.addEventListener('mousemove', handlePanMove);
+      document.addEventListener('mouseup', handlePanEnd);
+      return () => {
+        document.removeEventListener('mousemove', handlePanMove);
+        document.removeEventListener('mouseup', handlePanEnd);
+      };
+    }
+  }, [isPanning, handlePanMove, handlePanEnd]);
+
   // Handle clicking on graph background to clear focus (but keep panel open)
   const handleGraphBackgroundClick = (event: React.MouseEvent) => {
-    // Only clear focus if clicking directly on the background rectangle
-    if (event.target === event.currentTarget) {
+    // Only clear focus if clicking directly on the background rectangle and not panning
+    if ((event.target === event.currentTarget || (event.target as any).className?.includes?.('graph-background')) && !isPanning) {
       setFocusedNodeId(null);
     }
   };
@@ -1053,11 +1121,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
               <div className="graph-stat">
                 <strong>{componentCount}</strong> subgraphs
               </div>
-              {combinedScaleFactor > 1.2 && (
-                <div className="graph-stat auto-zoom">
-                  <strong>{Math.round((1/combinedScaleFactor) * 100)}%</strong> zoom
-                </div>
-              )}
+              <div className="graph-stat zoom-info">
+                <strong>{Math.round((manualZoom / combinedScaleFactor) * 100)}%</strong> zoom
+              </div>
               {performanceConfig.useSimpleRendering && (
                 <div className="graph-stat performance-mode" style={{color: '#e67e22'}}>
                   <strong>⚡</strong> Performance Mode
@@ -1069,6 +1135,82 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Zoom Controls */}
+            <div className="zoom-controls" style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              zIndex: 10
+            }}>
+              <button
+                onClick={handleZoomIn}
+                className="zoom-btn"
+                title="Zoom In"
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  background: 'rgba(0,0,0,0.7)',
+                  color: 'white',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  fontWeight: 'bold'
+                }}
+              >
+                +
+              </button>
+              <button
+                onClick={handleZoomOut}
+                className="zoom-btn"
+                title="Zoom Out"
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  background: 'rgba(0,0,0,0.7)',
+                  color: 'white',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  fontWeight: 'bold'
+                }}
+              >
+                −
+              </button>
+              <button
+                onClick={handleResetView}
+                className="zoom-btn"
+                title="Reset Camera"
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  background: 'rgba(0,0,0,0.7)',
+                  color: 'white',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold'
+                }}
+              >
+                ⌂
+              </button>
+            </div>
+
             <svg
               ref={svgRef}
               width="100%"
@@ -1076,12 +1218,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
               viewBox={`0 0 ${width} ${heightNum}`}
               preserveAspectRatio="xMidYMid meet"
               style={{ 
-                cursor: draggedNode ? 'grabbing' : 'grab',
+                cursor: isPanning ? 'grabbing' : (draggedNode ? 'grabbing' : 'grab'),
                 maxWidth: '100%',
                 maxHeight: '100%',
                 overflow: 'visible',
                 display: 'block'
               }}
+              onMouseDown={handlePanStart}
             >
           {/* Grid background and gradients */}
           <defs>
@@ -1188,6 +1331,21 @@ const GraphViz: React.FC<GraphVizProps> = ({
             style={{ cursor: 'default' }}
           />
           
+          {/* Background rectangle for panning */}
+          <rect
+            className="graph-background"
+            x={0}
+            y={0}
+            width={width}
+            height={heightNum}
+            fill="transparent"
+            style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+            onClick={handleGraphBackgroundClick}
+          />
+
+          {/* Main graph group with zoom and pan transformations */}
+          <g transform={`translate(${panOffset.x / combinedScaleFactor}, ${panOffset.y / combinedScaleFactor}) scale(${manualZoom})`}>
+            
           {/* Edges */}
           <g className="edges">
 {/* Edge rendering with fallback positioning */}
@@ -1419,6 +1577,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 </g>
               );
             })}
+          </g>
+          
+          {/* End of main transform group */}
           </g>
           </svg>
           </div>

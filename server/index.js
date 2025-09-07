@@ -231,6 +231,49 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Get LLM provider backoff status for frontend
+app.get('/api/llm/backoff-status', (req, res) => {
+  try {
+    const status = llmManager.getBackoffStatus();
+    
+    if (!status) {
+      return res.json({
+        isRetrying: false,
+        provider: null,
+        remainingWaitMs: 0,
+        message: 'No active retries'
+      });
+    }
+    
+    // Calculate human-readable wait time
+    const waitSeconds = Math.ceil(status.remainingWaitMs / 1000);
+    let waitMessage = '';
+    
+    if (status.quotaExceeded) {
+      waitMessage = `${status.provider} quota exceeded. Retrying in ${waitSeconds}s...`;
+    } else if (status.allProvidersInCooldown) {
+      waitMessage = `All providers in cooldown. Retrying in ${waitSeconds}s...`;
+    } else {
+      waitMessage = `${status.provider} temporarily unavailable. Retrying in ${waitSeconds}s...`;
+    }
+    
+    res.json({
+      ...status,
+      waitSeconds,
+      message: waitMessage,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('Error getting backoff status:', error);
+    res.json({
+      isRetrying: false,
+      provider: null,
+      remainingWaitMs: 0,
+      message: 'Status unavailable'
+    });
+  }
+});
+
 // Get all industries
 app.get('/api/industries', async (req, res) => {
   const version = req.query.version || GRAPH_VERSIONS.BASE;
@@ -1218,38 +1261,115 @@ async function findAllRelationshipsBetweenNodes(nodes, version = 'base') {
   }
 }
 
+// Enhanced request tracking utility
+function generateRequestId() {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function detectBusinessContext(query) {
+  const queryLower = query.toLowerCase();
+  const commonCompanyTerms = ['anz', 'tesla', 'amazon', 'netflix', 'microsoft', 'apple', 'google', 'facebook', 'uber', 'spotify', 'airbnb'];
+  const detectedCompany = commonCompanyTerms.find(term => queryLower.includes(term));
+  
+  return {
+    isBusinessContext: !!detectedCompany,
+    detectedCompany: detectedCompany || null,
+    businessTerms: commonCompanyTerms.filter(term => queryLower.includes(term))
+  };
+}
+
 // Process natural language query for graph exploration
 app.post('/api/chat/query', async (req, res) => {
   const { query, context = {}, conversationHistory = [] } = req.body;
   const startTime = Date.now();
+  const requestId = generateRequestId();
+  
+  // Enhanced request logging with business context detection
+  const businessContext = detectBusinessContext(query);
+  
+  console.log(`[${requestId}] 🚀 Chat query received: "${query}"`);
+  console.log(`[${requestId}] 📊 Request metadata:`, {
+    timestamp: new Date().toISOString(),
+    queryLength: query.length,
+    hasContext: Object.keys(context).length > 0,
+    historyLength: conversationHistory.length,
+    businessContext: businessContext.isBusinessContext ? {
+      detected: true,
+      company: businessContext.detectedCompany,
+      terms: businessContext.businessTerms
+    } : false
+  });
   
   if (!query || query.trim().length === 0) {
+    console.log(`[${requestId}] ❌ Empty query rejected`);
     return res.status(400).json({
       success: false,
-      error: 'Query is required'
+      error: 'Query is required',
+      requestId
     });
   }
 
   try {
-    // Use enhanced ChatProcessor for intelligent three-stage processing
-    const result = await chatProcessor.processChat(query, conversationHistory, context);
+    // Enhanced context with request tracking
+    const enhancedContext = {
+      ...context,
+      requestId,
+      businessContext: businessContext.isBusinessContext ? businessContext : null,
+      timestamp: startTime
+    };
+    
+    console.log(`[${requestId}] 🔄 Processing with ChatProcessor...`);
+    if (businessContext.isBusinessContext) {
+      console.log(`[${requestId}] 🏢 Business context workflow initiated for: ${businessContext.detectedCompany}`);
+    }
+    
+    // Use enhanced ChatProcessor for intelligent processing
+    const result = await chatProcessor.processChat(query, conversationHistory, enhancedContext);
     
     const endTime = Date.now();
-    console.log(`Chat query processed in ${endTime - startTime}ms`);
+    const executionTime = endTime - startTime;
+    
+    console.log(`[${requestId}] ✅ Chat query processed in ${executionTime}ms`);
+    console.log(`[${requestId}] 📈 Result metadata:`, {
+      success: result.success,
+      hasQueryResult: !!result.queryResult,
+      queryResultType: result.queryResult?.type || null,
+      needsClarification: result.needsClarification || false,
+      businessContextPreserved: result.businessContextPreserved || false,
+      executionLog: result.executionLog?.length || 0
+    });
 
-    // Add execution time to result
+    // Add enhanced tracking metadata to result
     if (result.queryResult) {
-      result.queryResult.executionTime = endTime - startTime;
+      result.queryResult.executionTime = executionTime;
+      result.queryResult.requestId = requestId;
+      result.queryResult.businessContext = businessContext.isBusinessContext ? businessContext : null;
     }
+    
+    // Add request ID to main result
+    result.requestId = requestId;
+    result.executionTime = executionTime;
 
     res.json(result);
 
   } catch (error) {
-    console.error('Chat query error:', error);
+    const endTime = Date.now();
+    const executionTime = endTime - startTime;
+    
+    console.error(`[${requestId}] ❌ Chat query error after ${executionTime}ms:`, {
+      error: error.message,
+      stack: error.stack?.split('\n').slice(0, 5).join('\n'),
+      businessContext: businessContext.isBusinessContext,
+      detectedCompany: businessContext.detectedCompany
+    });
+    
     res.json({
       success: false,
       error: 'An error occurred while processing your query',
-      message: 'Sorry, there was a technical issue. Please try again or rephrase your question.'
+      message: 'Sorry, there was a technical issue. Please try again or rephrase your question.',
+      requestId,
+      executionTime,
+      businessContext: businessContext.isBusinessContext ? businessContext : null
     });
   }
 });

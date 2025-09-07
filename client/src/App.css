@@ -5033,7 +5033,7 @@ button.node-card {
   padding: 0.5rem;
   background: #f8f9fa;
   border-radius: 4px;
-  overflow: hidden;
+  overflow: visible;
   max-width: 100%;
 }
 
@@ -5054,7 +5054,13 @@ button.node-card {
   word-break: break-all;
   overflow-wrap: break-word;
   max-width: 100%;
-  overflow: hidden;
+  max-height: 400px;
+  overflow-y: auto;
+  background: #ffffff;
+  padding: 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+  margin-top: 0.25rem;
 }
 
 .step-metadata {
@@ -5649,4 +5655,131 @@ button.node-card {
 
 .reset-button:hover {
   background: #ff5252;
+}
+
+
+/* Backoff Status Indicator Styles */
+.backoff-status-indicator {
+  margin: 0.5rem 1rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.1);
+  animation: slideIn 0.3s ease-out;
+}
+
+.backoff-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.backoff-icon {
+  font-size: 1.5rem;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.backoff-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.backoff-message {
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.backoff-details {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: #b45309;
+}
+
+.attempt-info,
+.quota-info {
+  background: rgba(251, 191, 36, 0.3);
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.backoff-timer {
+  display: flex;
+  align-items: center;
+}
+
+.timer-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.8rem;
+  position: relative;
+  animation: timerPulse 1s ease-in-out infinite;
+}
+
+.backoff-progress {
+  margin-top: 0.5rem;
+  height: 4px;
+  background: rgba(251, 191, 36, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.backoff-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+  border-radius: 2px;
+  width: 100%;
+  transform-origin: left;
+}
+
+/* Animations */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+@keyframes timerPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
+}
+
+@keyframes backoffCountdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }

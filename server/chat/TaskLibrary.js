@@ -299,6 +299,11 @@ class TaskLibrary {
       return this.generateComparisonCypher(params);
     }
 
+    // Handle enhanced business intelligence mode with multi-level strategy
+    if (params.business_intelligence_mode) {
+      return this.generateBusinessIntelligenceCypher(params);
+    }
+
     const prompt = `
 Generate a Cypher query for Neo4j based on the specific goal and entities.
 
@@ -701,7 +706,11 @@ Respond with ONLY pure JSON:
       original_company,
       proxy_sectors,
       analysis_type,
-      expected_result
+      expected_result,
+      // New gap analysis parameters
+      missing_sectors,
+      business_impact_of_gaps,
+      data_completeness_score
     } = params;
     
     // Handle both single dataset and comparison scenarios
@@ -720,8 +729,10 @@ Respond with ONLY pure JSON:
     let prompt;
     
     if (isProxyAnalysis) {
+      const hasDataGaps = missing_sectors && missing_sectors.length > 0;
+      
       prompt = `
-You are an AI consultant providing analysis for ${original_company}. Analyze graph database results using proxy sectors with business intelligence and full transparency.
+You are an AI consultant providing analysis for ${original_company}. Analyze graph database results using proxy sectors with business intelligence and full transparency about data gaps.
 
 # Dataset from Database
 ${JSON.stringify(primaryDataset, null, 2)}
@@ -731,22 +742,37 @@ Company: ${original_company}
 Business Context: ${business_context || 'Major company in relevant industry'}
 Proxy Sectors Used: ${proxy_sectors || 'Database sectors representing similar business challenges'}
 
+# Data Completeness Assessment
+${hasDataGaps ? `
+⚠️ DATA GAP ANALYSIS:
+Missing Business Sectors: ${missing_sectors.join(', ')}
+Business Impact: ${business_impact_of_gaps}
+Data Completeness Score: ${data_completeness_score}/1.0
+
+These missing sectors represent ${original_company}'s actual business divisions that aren't captured in our database.
+` : 'Database provides good coverage for this company\'s business model.'}
+
 # Consultant Approach
 ${consultant_response || proxy_explanation || 'Using proxy sectors for analysis'}
 
 # Analysis Goal
 ${analysis_goal || 'Provide strategic insights for the client using proxy data and business intelligence'}
 
-# Your Consultant Response
-Provide a professional analysis combining database insights with business knowledge. Structure your response as:
+# Your Enhanced Consultant Response
+Provide a professional analysis combining database insights with business knowledge AND data gap awareness. Structure your response as:
 
 1. **Business Context**: Brief overview of ${original_company} and its market position (using business intelligence)
 2. **Proxy Analysis**: Key findings from the database sectors that represent similar operational challenges
 3. **Strategic Insights**: How these findings apply to ${original_company}'s business challenges and opportunities
-4. **Recommendations**: Actionable recommendations based on both database patterns and business knowledge
-5. **Methodology**: Clear explanation of the proxy approach and knowledge sources used
+4. **Data Completeness Assessment**: ${hasDataGaps ? 'Highlight missing business sectors and their impact on analysis depth' : 'Confirm analysis coverage is comprehensive'}
+5. **Recommendations**: Actionable recommendations based on both database patterns and business knowledge
+6. **Methodology**: Clear explanation of the proxy approach, knowledge sources, and analysis limitations
 
-Be transparent about what comes from the database vs. business intelligence while providing valuable consultant-level insights.
+${hasDataGaps ? `
+CRITICAL: Proactively highlight that ${original_company} operates in additional business sectors (${missing_sectors.join(', ')}) that aren't represented in our database. Explain what additional insights would be available with complete sector data.
+` : ''}
+
+Be transparent about what comes from the database vs. business intelligence while providing valuable consultant-level insights and honest gap analysis.
 `;
     } else if (isAnalyticalAnalysis) {
       prompt = `
@@ -918,15 +944,52 @@ Provide 3-5 specific, implementable suggestions or ideas.
       entity_issues,
       corrected_entities,
       show_exploration_data,
-      provide_final_answer
+      provide_final_answer,
+      // BUSINESS CONTEXT PARAMETERS - These should be preserved, not overridden
+      business_context_aware,
+      detected_company,
+      business_context_error,
+      original_company,
+      fallback_context
     } = params;
+    
+    // CRITICAL: Preserve business context workflow - don't fall back to legacy responses
+    if (business_context_aware || detected_company || business_context_error || original_company) {
+      console.log('[TaskLibrary] ✅ PRESERVING BUSINESS CONTEXT in clarify_with_user:', {
+        business_context_aware,
+        detected_company,
+        business_context_error,
+        original_company
+      });
+      
+      // Return the business context response as-is, don't override with legacy logic
+      return {
+        success: true,
+        output: {
+          needsClarification: true,
+          message: message || `I understand you're asking about ${detected_company || original_company}, let me help you explore relevant business opportunities.`,
+          suggestions: suggestions || [
+            'Show me all industries',
+            'Find pain points in banking',
+            'Browse available sectors',
+            'What projects are similar to this business model?'
+          ],
+          business_context_aware: true,
+          detected_company: detected_company,
+          business_context_error: business_context_error,
+          original_company: original_company,
+          fallback_context: fallback_context,
+          preserves_business_context: true
+        }
+      };
+    }
     
     // Check if we should provide a final answer instead of more clarification
     if (provide_final_answer || conversation_state === 'persistent_non_existent') {
       return await this.provideFinalAnswer(params);
     }
     
-    // Enhance message based on conversation state
+    // Standard clarification flow for non-business-context queries
     let enhancedMessage = message || 'I need more information to help you better.';
     let enhancedSuggestions = suggestions || [
       'Show me all industries',
@@ -937,13 +1000,10 @@ Provide 3-5 specific, implementable suggestions or ideas.
 
     // Add conversation state awareness to the response
     if (conversation_state === 'post_rejection') {
-      // User rejected previous suggestions, be more helpful
       enhancedMessage += " I want to make sure I understand what you're looking for.";
     } else if (conversation_state === 'meta_conversation') {
-      // User is asking about the conversation itself
       enhancedMessage += " Let me help you navigate our conversation more effectively.";
     } else if (conversation_state === 'repeated_failure') {
-      // Multiple failures, escalate to exploration
       enhancedMessage += " I'll show you what's available so we can find what you need together.";
     }
     
@@ -959,7 +1019,8 @@ Provide 3-5 specific, implementable suggestions or ideas.
         entity_issues: entity_issues,
         corrected_entities: corrected_entities,
         show_exploration_data: show_exploration_data,
-        conversation_aware: true
+        conversation_aware: true,
+        business_context_preserved: false
       }
     };
   }
@@ -1578,6 +1639,87 @@ Respond with ONLY JSON:
         exploration_mode: true
       }
     };
+  }
+
+  async generateBusinessIntelligenceCypher(params) {
+    console.log('[TaskLibrary] Generating business intelligence Cypher with multi-level strategy');
+    
+    const { goal, entities, proxy_context, multi_level_strategy } = params;
+    
+    const prompt = `
+Generate an intelligent Cypher query that uses multi-level business intelligence to find the most relevant data.
+
+# Graph Schema
+${this.graphSchema.relationships.join('\n')}
+
+# Goal
+${goal}
+
+# Available Entities (validated from database)
+${entities ? entities.join(', ') : 'Banking, Insurance'}
+
+# Business Intelligence Context
+${proxy_context || 'Using business intelligence to map company to database entities'}
+
+# Multi-Level Strategy
+${multi_level_strategy || 'Query both industry and sector levels for comprehensive results'}
+
+# Your Task
+Generate a Cypher query that intelligently queries both industry AND sector levels to find the most comprehensive results.
+
+Strategy:
+1. First try specific sectors if they exist (e.g., "Retail Banking", "Commercial Banking")
+2. Fall back to industry level if sectors don't exist (e.g., "Banking")
+3. Include both approaches in a UNION query for maximum coverage
+
+⚠️ CRITICAL Cypher Syntax Rules:
+- ALWAYS include relationship variables in RETURN statements for graph visualization
+- For visualization: RETURN industry, r1, sector, r2, projectOpportunity (not just nodes)
+- Use UNION ALL for combining industry and sector queries
+- Handle cases where entities might be industries OR sectors intelligently
+
+Example intelligent query structure:
+MATCH (industry:Industry)-[r1:HAS_SECTOR]->(sector:Sector)-[r2:HAS_OPPORTUNITY]->(project:ProjectOpportunity)
+WHERE industry.name IN ["Banking"] OR sector.name IN ["Retail Banking", "Commercial Banking"]
+RETURN industry, r1, sector, r2, project
+
+Respond with ONLY pure JSON:
+{
+  "query": "MATCH... RETURN...",
+  "params": {},
+  "explanation": "Multi-level business intelligence query strategy explanation",
+  "connectionStrategy": "intelligent_multi_level"
+}
+`;
+
+    try {
+      const response = await this.llmManager.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 400
+      });
+
+      // Clean LLM response for JSON parsing
+      let cleanResponse = response.trim();
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const result = JSON.parse(cleanResponse);
+      
+      // LLM-based self-validation and correction
+      const llmValidatedResult = await this.llmValidateCypherQuery(result);
+      
+      // Traditional validation and fixing
+      const validatedResult = this.validateAndFixCypherQuery(llmValidatedResult);
+      
+      return { success: true, output: validatedResult };
+    } catch (error) {
+      console.error('Business intelligence Cypher generation error:', error);
+      return { success: false, error: `Failed to generate business intelligence query: ${error.message}` };
+    }
   }
 }
 

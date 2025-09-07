@@ -1,5 +1,194 @@
 const llmManager = require('../llm/LLMManager');
 
+// JSON Schema validation for LLM responses
+class ResponseValidator {
+  static validateIntentAnalysis(response) {
+    const required = ['query_type', 'entities_mentioned', 'confidence', 'reasoning'];
+    const validQueryTypes = ['lookup', 'analytical', 'comparison', 'company_proxy'];
+    
+    for (const field of required) {
+      if (!(field in response)) {
+        throw new Error(`Missing required field: ${field}`);
+      }
+    }
+    
+    if (!validQueryTypes.includes(response.query_type)) {
+      throw new Error(`Invalid query_type: ${response.query_type}. Must be one of: ${validQueryTypes.join(', ')}`);
+    }
+    
+    if (!Array.isArray(response.entities_mentioned)) {
+      throw new Error('entities_mentioned must be an array');
+    }
+    
+    if (typeof response.confidence !== 'number' || response.confidence < 0 || response.confidence > 1) {
+      throw new Error('confidence must be a number between 0 and 1');
+    }
+    
+    if (response.query_type === 'company_proxy') {
+      if (!response.unknown_entities || !Array.isArray(response.unknown_entities) || response.unknown_entities.length === 0) {
+        throw new Error('company_proxy queries must have non-empty unknown_entities array');
+      }
+      if (!response.requires_company_mapping) {
+        throw new Error('company_proxy queries must have requires_company_mapping set to true');
+      }
+    }
+    
+    return true;
+  }
+  
+  static validateCompanyMapping(response) {
+    const required = ['company', 'business_context', 'actual_business_sectors', 'primary_industries', 'relevant_sectors', 'missing_sectors', 'business_impact_of_gaps', 'data_completeness_score', 'reasoning', 'confidence'];
+    
+    for (const field of required) {
+      if (!(field in response)) {
+        throw new Error(`Missing required field in company mapping: ${field}`);
+      }
+    }
+    
+    if (!Array.isArray(response.actual_business_sectors) || response.actual_business_sectors.length === 0) {
+      throw new Error('actual_business_sectors must be a non-empty array');
+    }
+    
+    if (!Array.isArray(response.primary_industries) || response.primary_industries.length === 0) {
+      throw new Error('primary_industries must be a non-empty array');
+    }
+    
+    if (!Array.isArray(response.relevant_sectors) || response.relevant_sectors.length === 0) {
+      throw new Error('relevant_sectors must be a non-empty array');
+    }
+    
+    if (!Array.isArray(response.missing_sectors)) {
+      throw new Error('missing_sectors must be an array (can be empty)');
+    }
+    
+    if (typeof response.confidence !== 'number' || response.confidence < 0 || response.confidence > 1) {
+      throw new Error('confidence must be a number between 0 and 1');
+    }
+    
+    if (typeof response.data_completeness_score !== 'number' || response.data_completeness_score < 0 || response.data_completeness_score > 1) {
+      throw new Error('data_completeness_score must be a number between 0 and 1');
+    }
+    
+    return true;
+  }
+  
+  static validateQueryTransformation(response) {
+    const required = ['transformed_query', 'consultant_response', 'execution_strategy', 'target_entities'];
+    
+    for (const field of required) {
+      if (!(field in response)) {
+        throw new Error(`Missing required field in query transformation: ${field}`);
+      }
+    }
+    
+    if (!Array.isArray(response.target_entities) || response.target_entities.length === 0) {
+      throw new Error('target_entities must be a non-empty array');
+    }
+    
+    const validStrategies = ['lookup', 'analytical', 'comparison'];
+    if (!validStrategies.includes(response.execution_strategy)) {
+      throw new Error(`Invalid execution_strategy: ${response.execution_strategy}. Must be one of: ${validStrategies.join(', ')}`);
+    }
+    
+    return true;
+  }
+  
+  static validateExecutionPlan(response) {
+    if (!response.plan || !Array.isArray(response.plan)) {
+      throw new Error('Response must have a plan array');
+    }
+    
+    if (response.plan.length === 0) {
+      throw new Error('Execution plan cannot be empty');
+    }
+    
+    for (let i = 0; i < response.plan.length; i++) {
+      const step = response.plan[i];
+      const required = ['task_type', 'params', 'reasoning'];
+      
+      for (const field of required) {
+        if (!(field in step)) {
+          throw new Error(`Missing required field in step ${i + 1}: ${field}`);
+        }
+      }
+      
+      if (typeof step.params !== 'object' || step.params === null) {
+        throw new Error(`Invalid params in step ${i + 1}: must be an object`);
+      }
+    }
+    
+    return true;
+  }
+}
+
+// Response sanitization utilities
+class ResponseSanitizer {
+  static sanitizeJSON(responseText) {
+    if (!responseText || typeof responseText !== 'string') {
+      throw new Error('Response text must be a non-empty string');
+    }
+    
+    let cleaned = responseText.trim();
+    
+    // Remove markdown code blocks
+    if (cleaned.startsWith('```json')) {
+      cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    
+    // Remove common LLM artifacts
+    cleaned = cleaned.replace(/^Here's the JSON response:\s*/i, '');
+    cleaned = cleaned.replace(/^The JSON object is:\s*/i, '');
+    cleaned = cleaned.replace(/^Response:\s*/i, '');
+    
+    // Remove any text before the first {
+    const firstBrace = cleaned.indexOf('{');
+    if (firstBrace > 0) {
+      cleaned = cleaned.substring(firstBrace);
+    }
+    
+    // Remove any text after the last }
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (lastBrace >= 0 && lastBrace < cleaned.length - 1) {
+      cleaned = cleaned.substring(0, lastBrace + 1);
+    }
+    
+    // Conservative JSON cleanup - only fix obvious issues
+    // Most LLM responses are already valid JSON, so be minimal
+    
+    // Only add quotes to unquoted keys if absolutely necessary
+    cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    
+    // Don't try to fix string values automatically as this can break numbers
+    // Only fix quoted booleans and null values that are clearly wrong
+    cleaned = cleaned.replace(/:\s*"true"/g, ': true');
+    cleaned = cleaned.replace(/:\s*"false"/g, ': false');
+    cleaned = cleaned.replace(/:\s*"null"/g, ': null');
+    
+    return cleaned.trim();
+  }
+  
+  static parseAndValidateJSON(responseText, validator) {
+    try {
+      const sanitized = this.sanitizeJSON(responseText);
+      console.log(`[ResponseSanitizer] Sanitized JSON: ${sanitized.substring(0, 200)}`);
+      
+      const parsed = JSON.parse(sanitized);
+      
+      if (validator) {
+        validator(parsed);
+      }
+      
+      return parsed;
+    } catch (error) {
+      console.error(`[ResponseSanitizer] Validation failed:`, error.message);
+      console.error(`[ResponseSanitizer] Original text: ${responseText?.substring(0, 300)}`);
+      throw new Error(`JSON validation failed: ${error.message}`);
+    }
+  }
+}
+
 class ExecutionPlanner {
   constructor(driver = null) {
     this.llmManager = llmManager;
@@ -42,26 +231,71 @@ class ExecutionPlanner {
       const intentAnalysis = await this.classifyQueryWithEntityAnalysis(query, conversationHistory);
       console.log(`[ExecutionPlanner] Intent analysis:`, intentAnalysis);
       
+      // Validate company_proxy classification
+      if (intentAnalysis.query_type === 'company_proxy') {
+        if (!intentAnalysis.unknown_entities || intentAnalysis.unknown_entities.length === 0) {
+          console.error('[ExecutionPlanner] company_proxy detected but no unknown_entities found, falling back to lookup');
+          console.error('[ExecutionPlanner] Intent analysis was:', intentAnalysis);
+          // Convert to lookup with warning
+          intentAnalysis.query_type = 'lookup';
+        }
+      }
+      
       // Handle different query types with appropriate LLM processing
       switch (intentAnalysis.query_type) {
         case 'company_proxy':
+          console.log('[ExecutionPlanner] Routing to BUSINESS CONTEXT workflow');
           return this.handleCompanyProxyQuery(query, intentAnalysis, conversationHistory);
           
         case 'analytical':
+          console.log('[ExecutionPlanner] Routing to analytical workflow');
           return this.handleAnalyticalQuery(query, intentAnalysis, conversationHistory);
           
         case 'comparison':
+          console.log('[ExecutionPlanner] Routing to comparison workflow');
           return this.handleComparisonQuery(query, intentAnalysis, conversationHistory);
           
         case 'lookup':
         default:
+          console.log('[ExecutionPlanner] Routing to lookup workflow');
           return this.handleLookupQuery(query, intentAnalysis, conversationHistory);
       }
       
     } catch (error) {
       console.error('[ExecutionPlanner] LLM-first processing failed:', error);
       
-      // Fallback to basic clarification
+      // Enhanced fallback with business context detection
+      const queryLower = query.toLowerCase();
+      const commonCompanyTerms = ['anz', 'tesla', 'amazon', 'netflix', 'microsoft', 'apple', 'google', 'facebook', 'uber'];
+      const mentionsCompany = commonCompanyTerms.some(term => queryLower.includes(term));
+      
+      if (mentionsCompany) {
+        console.log('[ExecutionPlanner] Fallback detected company mention, providing business context fallback');
+        const detectedCompany = commonCompanyTerms.find(term => queryLower.includes(term));
+        
+        return {
+          plan: [
+            {
+              task_type: 'clarify_with_user',
+              params: {
+                message: `I understand you're asking about ${detectedCompany.toUpperCase()}, but I encountered a processing issue. While ${detectedCompany.toUpperCase()} isn't in our project database, I can help you explore similar business challenges using our available data.`,
+                suggestions: [
+                  'Show me all industries',
+                  'Find pain points in banking', 
+                  'Browse available sectors',
+                  `What projects are similar to ${detectedCompany.toUpperCase()}'s business model?`
+                ],
+                business_context_aware: true,
+                detected_company: detectedCompany.toUpperCase()
+              },
+              on_failure: 'halt',
+              reasoning: 'LLM processing failed but company detected, providing business context aware fallback'
+            }
+          ]
+        };
+      }
+      
+      // Standard fallback for non-company queries
       return {
         plan: [
           {
@@ -80,6 +314,7 @@ class ExecutionPlanner {
 
   async classifyQueryWithEntityAnalysis(query, conversationHistory) {
     console.log('[ExecutionPlanner] LLM Call #1: Intent Classification & Entity Recognition');
+    console.log(`[ExecutionPlanner] Analyzing query: "${query}"`);
     
     const historyContext = conversationHistory
       .slice(-4) // Last 2 exchanges
@@ -100,7 +335,7 @@ ${historyContext || 'No previous context'}
 "${query}"
 
 # Your Task
-Classify the query intent and identify entities. Focus on understanding natural language patterns rather than exact matches.
+Classify the query intent and identify entities. Pay special attention to company names, brands, and organizations that are NOT in the database schema.
 
 Respond with ONLY a JSON object with this structure:
 {
@@ -117,20 +352,26 @@ Respond with ONLY a JSON object with this structure:
 - "lookup": Simple requests like "show me banking sectors", "find pain points"
 - "analytical": Complex operations like "painpoints without projects", "sectors not connected to departments"
 - "comparison": "compare X vs Y", "differences between A and B"
-- "company_proxy": Questions about real companies not in the graph (Tesla, Amazon, Netflix, etc.)
+- "company_proxy": Questions about real companies, brands, or organizations NOT in database (Tesla, Amazon, ANZ Bank, Netflix, Microsoft, Apple, etc.)
+
+# Company Detection Examples
+- "Projects for ANZ" → company_proxy (ANZ is a major Australian bank)
+- "Tesla opportunities" → company_proxy (Tesla is an EV company)
+- "Amazon pain points" → company_proxy (Amazon is a tech company)
+- "Banking sector projects" → lookup (Banking is in our schema)
 
 # Analytical Operations
 - "exclusion": queries with "without", "not", "except", "lacking"
 - "inclusion": queries with "with", "having", "containing"  
 - "relationship_analysis": queries about connections, paths, relationships
 
-Focus on intent understanding, not exact entity matching.
+CRITICAL: If the query mentions ANY company name, brand, or organization that is NOT in the database node types, classify as "company_proxy" and list it in "unknown_entities".
 `;
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.1,
       maxTokens: 300
-    });
+    }, null, { company: query, stage: 'intent_classification' });
 
     console.log(`[ExecutionPlanner] Raw LLM response: "${response}"`);
     
@@ -145,44 +386,97 @@ Focus on intent understanding, not exact entity matching.
       cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
     
+    console.log(`[ExecutionPlanner] Cleaned response for parsing: "${cleanResponse}"`);
+    
     try {
-      return JSON.parse(cleanResponse);
+      const parsedResponse = ResponseSanitizer.parseAndValidateJSON(response, ResponseValidator.validateIntentAnalysis);
+      
+      console.log(`[ExecutionPlanner] Successfully parsed and validated response:`, parsedResponse);
+      console.log(`[ExecutionPlanner] Query type detected: "${parsedResponse.query_type}"`);
+      console.log(`[ExecutionPlanner] Unknown entities: ${JSON.stringify(parsedResponse.unknown_entities)}`);
+      console.log(`[ExecutionPlanner] Requires company mapping: ${parsedResponse.requires_company_mapping}`);
+      
+      return parsedResponse;
     } catch (parseError) {
-      console.error('[ExecutionPlanner] JSON parse error:', parseError);
-      console.error('[ExecutionPlanner] Clean response was:', cleanResponse);
-      throw new Error(`Failed to parse LLM response as JSON: ${parseError.message}`);
+      console.error('[ExecutionPlanner] JSON parsing/validation failed:', parseError);
+      console.error('[ExecutionPlanner] Original response was:', response?.substring(0, 500));
+      
+      // Enhanced error recovery with business context detection
+      const businessContextFallback = this.detectBusinessContextFallback(query, response);
+      if (businessContextFallback) {
+        console.log('[ExecutionPlanner] Using business context fallback due to parsing failure');
+        return businessContextFallback;
+      }
+      
+      throw new Error(`Intent classification failed: ${parseError.message}`);
     }
   }
 
   async handleCompanyProxyQuery(query, intentAnalysis, conversationHistory) {
-    console.log('[ExecutionPlanner] Handling company proxy query');
+    console.log('[ExecutionPlanner] ========== BUSINESS CONTEXT WORKFLOW ACTIVATED ==========');
+    console.log(`[ExecutionPlanner] Company proxy query detected for: "${intentAnalysis.unknown_entities[0]}"`);
+    console.log(`[ExecutionPlanner] Original query: "${query}"`);
+    console.log(`[ExecutionPlanner] Intent analysis:`, intentAnalysis);
     
-    // LLM Call #2: Company-to-Graph Mapping
-    const companyMapping = await this.mapCompanyToGraphEntities(
-      intentAnalysis.unknown_entities[0], 
-      intentAnalysis
-    );
-    
-    // LLM Call #3: Query Transformation
-    const transformedQuery = await this.transformQueryWithProxies(
-      query, 
-      companyMapping, 
-      intentAnalysis
-    );
-    
-    // LLM Call #4: Generate Final Execution Plan
-    return this.generateFinalExecutionPlan(transformedQuery, companyMapping);
+    try {
+      // LLM Call #2: Company-to-Graph Mapping
+      console.log('[ExecutionPlanner] Stage 2/4: Mapping company to graph entities...');
+      const companyMapping = await this.mapCompanyToGraphEntities(
+        intentAnalysis.unknown_entities[0], 
+        intentAnalysis
+      );
+      console.log('[ExecutionPlanner] Company mapping completed:', companyMapping);
+      
+      // LLM Call #3: Query Transformation
+      console.log('[ExecutionPlanner] Stage 3/4: Transforming query with business context...');
+      const transformedQuery = await this.transformQueryWithProxies(
+        query, 
+        companyMapping, 
+        intentAnalysis
+      );
+      console.log('[ExecutionPlanner] Query transformation completed:', transformedQuery);
+      
+      // LLM Call #4: Generate Final Execution Plan
+      console.log('[ExecutionPlanner] Stage 4/4: Generating final execution plan...');
+      const executionPlan = await this.generateFinalExecutionPlan(transformedQuery, companyMapping);
+      console.log('[ExecutionPlanner] Final execution plan generated with', executionPlan.plan?.length || 0, 'steps');
+      console.log('[ExecutionPlanner] ========== BUSINESS CONTEXT WORKFLOW COMPLETE ==========');
+      
+      return executionPlan;
+    } catch (error) {
+      console.error('[ExecutionPlanner] ========== BUSINESS CONTEXT WORKFLOW FAILED ==========');
+      console.error('[ExecutionPlanner] Error in company proxy workflow:', error);
+      
+      // Fallback to basic clarification with business context awareness
+      return {
+        plan: [
+          {
+            task_type: 'clarify_with_user',
+            params: {
+              message: `I understand you're asking about ${intentAnalysis.unknown_entities[0]}, but I encountered an issue processing the business context. Let me help you with what's available in our database.`,
+              suggestions: ['Show me all industries', 'Find pain points in banking', 'Browse available sectors'],
+              business_context_error: true,
+              original_company: intentAnalysis.unknown_entities[0]
+            },
+            on_failure: 'halt',
+            reasoning: 'Business context workflow failed, providing fallback with company awareness'
+          }
+        ]
+      };
+    }
   }
 
   async mapCompanyToGraphEntities(companyName, intentAnalysis) {
     console.log(`[ExecutionPlanner] LLM Call #2: Company-to-Graph Mapping for "${companyName}"`);
     
+    // First, get actual available sectors from database for more accurate mapping
+    const availableSectors = await this.getAvailableDatabaseSectors();
+    
     const prompt = `
-You are an AI consultant helping analyze project opportunities. A user has asked about "${companyName}" which is not in our project database, but you can provide business intelligence and map it to relevant database entities.
+You are an AI business consultant with deep knowledge about companies and industries. A user has asked about "${companyName}" which is not in our project database, but you can provide business intelligence and identify data gaps.
 
 # Available Database Industries and Sectors:
-- Banking: Retail Banking, Commercial Banking, Investment Banking, Private Banking, Credit Unions, Online Banking
-- Insurance: Life Insurance, Health Insurance, Property Insurance, Casualty Insurance
+${this.formatAvailableSectors(availableSectors)}
 
 # Company to Analyze
 "${companyName}"
@@ -190,38 +484,66 @@ You are an AI consultant helping analyze project opportunities. A user has asked
 # Original Query Context
 "${intentAnalysis.reasoning}"
 
-# Your Consultant Role
-1. Provide business intelligence about this company (market position, size, key business areas)
-2. Map it to the most relevant database sectors for project opportunity analysis
-3. Be transparent about what's business knowledge vs. what's in our database
+# Your Enhanced Consultant Role
+1. Provide detailed business intelligence about this company's actual business divisions and sectors
+2. Map company to available database sectors (use closest matches)
+3. **CRITICAL**: Identify business sectors this company operates in that are MISSING from our database
+4. Explain the business impact of missing data and what additional insights would be possible
+5. Be transparent about analysis limitations due to database gaps
 
 Respond with ONLY a JSON object:
 {
   "company": "${companyName}",
-  "business_context": "Brief description of company's market position, size, and key business areas",
+  "business_context": "Detailed description of company's market position, size, and key business divisions",
+  "actual_business_sectors": ["List of actual business sectors/divisions this company operates in based on your business knowledge"],
   "primary_industries": ["Banking", "Insurance"],
-  "relevant_sectors": ["Sector1", "Sector2", "Sector3"],
-  "reasoning": "Why these specific sectors represent similar business challenges and opportunities",
+  "relevant_sectors": ["Available database sectors that best match this company"],
+  "missing_sectors": ["Business sectors this company operates in that are NOT in our database"],
+  "business_impact_of_gaps": "Explanation of what additional project insights would be available with complete sector data",
+  "data_completeness_score": 0.0-1.0,
+  "reasoning": "Why these specific available sectors are the best proxies and what's missing",
   "confidence": 0.0-1.0,
   "mapping_strategy": "use_closest_sectors|use_industry_broad|use_specific_match",
-  "knowledge_source": "business_intelligence",
-  "transparency_note": "Clear statement about using business knowledge for proxy mapping"
+  "knowledge_source": "business_intelligence_with_gap_analysis",
+  "transparency_note": "Clear statement about proxy mapping and identified data gaps"
 }
 
-# Example Business Intelligence Responses:
-- ANZ Bank → business_context: "One of Australia's 'Big Four' banks, major retail and commercial banking operations" + ["Banking"] + ["Retail Banking", "Commercial Banking"]
-- Tesla → business_context: "Leading electric vehicle manufacturer with energy storage business" + map to closest available sectors
-- Amazon → business_context: "Global e-commerce and cloud services leader" + map to closest available sectors
+# Example Enhanced Business Intelligence with Gap Analysis:
+- ANZ Bank → 
+  * business_context: "One of Australia's 'Big Four' banks with Personal Banking, Business Banking, Institutional Banking, and Wealth Management divisions"
+  * actual_business_sectors: ["Personal Banking", "Business Banking", "Institutional Banking", "Wealth Management", "Insurance Services"]
+  * relevant_sectors: ["Banking", "Insurance"] (available in database)
+  * missing_sectors: ["Personal Banking", "Business Banking", "Institutional Banking", "Wealth Management"]
+  * business_impact_of_gaps: "Missing granular banking divisions limits ability to identify sector-specific pain points and project opportunities for retail vs. commercial vs. institutional banking challenges"
 
-Focus on providing valuable business context while mapping to sectors with similar operational challenges and project opportunities.
+- Tesla → identify automotive, energy storage, and autonomous driving sectors that aren't in database
+- Amazon → identify e-commerce, cloud computing, logistics sectors missing from database
+
+Focus on leveraging your comprehensive business knowledge to identify what data would enhance the analysis, not just mapping to what's available.
 `;
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.2,
-      maxTokens: 200
-    });
+      maxTokens: 400
+    }, null, { company: companyName, stage: 'company_mapping' });
 
     console.log(`[ExecutionPlanner] Raw company mapping response: "${response}"`);
+    
+    // Handle empty or undefined response
+    if (!response || response.trim().length === 0) {
+      console.error('[ExecutionPlanner] Empty response from LLM for company mapping');
+      return {
+        company: companyName,
+        business_context: `${companyName} is a major company but detailed business intelligence is currently unavailable`,
+        primary_industries: ["Banking", "Insurance"],
+        relevant_sectors: ["Retail Banking", "Commercial Banking"],
+        reasoning: "Using default mapping due to LLM response issue",
+        confidence: 0.3,
+        mapping_strategy: "use_industry_broad",
+        knowledge_source: "fallback_mapping",
+        transparency_note: "Limited business context available, using broad industry mapping"
+      };
+    }
     
     // Clean and parse JSON response
     let cleanResponse = response.trim();
@@ -233,11 +555,38 @@ Focus on providing valuable business context while mapping to sectors with simil
       cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
     
+    console.log(`[ExecutionPlanner] Cleaned company mapping response: "${cleanResponse}"`);
+    
     try {
-      return JSON.parse(cleanResponse);
+      const parsedMapping = ResponseSanitizer.parseAndValidateJSON(response, ResponseValidator.validateCompanyMapping);
+      console.log(`[ExecutionPlanner] Successfully parsed and validated company mapping:`, parsedMapping);
+      return parsedMapping;
     } catch (parseError) {
-      console.error('[ExecutionPlanner] Company mapping JSON parse error:', parseError);
-      throw new Error(`Failed to parse company mapping as JSON: ${parseError.message}`);
+      console.error('[ExecutionPlanner] Company mapping parsing/validation failed:', parseError);
+      console.error('[ExecutionPlanner] Original response was:', response?.substring(0, 500));
+      
+      // Enhanced fallback with company-specific intelligence and gap analysis
+      const inferredSectors = this.inferActualBusinessSectorsFromCompany(companyName);
+      const availableSectors = this.inferSectorsFromCompany(companyName);
+      const missingFromDatabase = inferredSectors.filter(sector => !availableSectors.includes(sector));
+      
+      return {
+        company: companyName,
+        business_context: `${companyName} is a major company. Encountered processing issue, using heuristic business intelligence mapping.`,
+        actual_business_sectors: inferredSectors,
+        primary_industries: this.inferIndustriesFromCompany(companyName),
+        relevant_sectors: availableSectors,
+        missing_sectors: missingFromDatabase,
+        business_impact_of_gaps: missingFromDatabase.length > 0 ? 
+          `Missing ${missingFromDatabase.join(', ')} sectors limits granular analysis of ${companyName}'s business divisions` : 
+          'Database contains sufficient sector coverage for basic analysis',
+        data_completeness_score: missingFromDatabase.length === 0 ? 0.8 : 0.4,
+        reasoning: `Heuristic mapping for ${companyName} due to LLM response validation failure`,
+        confidence: 0.4,
+        mapping_strategy: "use_closest_sectors",
+        knowledge_source: "fallback_with_heuristics_and_gap_analysis",
+        transparency_note: `Encountered processing issue, using intelligent fallback mapping with gap analysis for ${companyName}`
+      };
     }
   }
 
@@ -282,10 +631,24 @@ Provide business intelligence while being transparent about database limitations
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.1,
-      maxTokens: 300
-    });
+      maxTokens: 400
+    }, null, { company: companyMapping.company, stage: 'query_transformation' });
 
     console.log(`[ExecutionPlanner] Raw query transformation response: "${response}"`);
+    
+    // Handle empty response
+    if (!response || response.trim().length === 0) {
+      console.error('[ExecutionPlanner] Empty response from LLM for query transformation');
+      return {
+        transformed_query: `Find all projects and pain points related to ${companyMapping.relevant_sectors.join(' and ')}`,
+        consultant_response: `Based on business intelligence, ${companyMapping.company} operates in sectors similar to ${companyMapping.relevant_sectors.join(', ')}. I'll analyze our database for relevant project opportunities.`,
+        business_context: companyMapping.business_context || `${companyMapping.company} is a major company`,
+        proxy_explanation: `Using ${companyMapping.relevant_sectors.join(', ')} as proxies for ${companyMapping.company}'s business challenges`,
+        execution_strategy: "lookup",
+        target_entities: companyMapping.relevant_sectors,
+        transparency_message: `${companyMapping.company} isn't in our project database, but based on business knowledge, I'm analyzing similar sectors`
+      };
+    }
     
     let cleanResponse = response.trim();
     if (cleanResponse.startsWith('```json')) {
@@ -295,11 +658,26 @@ Provide business intelligence while being transparent about database limitations
       cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
     
+    console.log(`[ExecutionPlanner] Cleaned query transformation response: "${cleanResponse}"`);
+    
     try {
-      return JSON.parse(cleanResponse);
+      const parsedTransformation = ResponseSanitizer.parseAndValidateJSON(response, ResponseValidator.validateQueryTransformation);
+      console.log(`[ExecutionPlanner] Successfully parsed and validated query transformation:`, parsedTransformation);
+      return parsedTransformation;
     } catch (parseError) {
-      console.error('[ExecutionPlanner] Query transformation JSON parse error:', parseError);
-      throw new Error(`Failed to parse query transformation as JSON: ${parseError.message}`);
+      console.error('[ExecutionPlanner] Query transformation parsing/validation failed:', parseError);
+      console.error('[ExecutionPlanner] Original response was:', response?.substring(0, 500));
+      
+      // Enhanced fallback with business context preservation
+      return {
+        transformed_query: `Find all projects and pain points related to ${companyMapping.relevant_sectors.join(' and ')}`,
+        consultant_response: `Based on business intelligence, ${companyMapping.company} operates in sectors similar to ${companyMapping.relevant_sectors.join(', ')}. I encountered a processing issue but will analyze our database using validated proxy mapping.`,
+        business_context: companyMapping.business_context || `${companyMapping.company} is a major company`,
+        proxy_explanation: `Using ${companyMapping.relevant_sectors.join(', ')} as validated proxies for ${companyMapping.company}'s business challenges`,
+        execution_strategy: "lookup",
+        target_entities: companyMapping.relevant_sectors,
+        transparency_message: `${companyMapping.company} isn't in our project database, but I'm analyzing similar sectors using intelligent business mapping`
+      };
     }
   }
 
@@ -369,11 +747,14 @@ Focus on the logical structure of the analytical operation.
     }
     
     try {
-      return JSON.parse(cleanResponse);
+      // Note: No specific validator for analytical decomposition yet, but use sanitization
+      const parsedDecomposition = ResponseSanitizer.parseAndValidateJSON(response, null);
+      console.log(`[ExecutionPlanner] Successfully parsed analytical decomposition:`, parsedDecomposition);
+      return parsedDecomposition;
     } catch (parseError) {
-      console.error('[ExecutionPlanner] Analytical decomposition JSON parse error:', parseError);
-      console.error('[ExecutionPlanner] Clean response was:', cleanResponse);
-      throw new Error(`Failed to parse analytical decomposition as JSON: ${parseError.message}`);
+      console.error('[ExecutionPlanner] Analytical decomposition parsing failed:', parseError);
+      console.error('[ExecutionPlanner] Original response was:', response?.substring(0, 500));
+      throw new Error(`Failed to parse analytical decomposition: ${parseError.message}`);
     }
   }
 
@@ -463,7 +844,12 @@ ${transformedQuery.execution_strategy}
 ${this.availableTasks.join(', ')}
 
 # Your Task
-Generate an execution plan that provides consultant-level insights with transparent business context and database analysis.
+Generate an execution plan that provides consultant-level insights with transparent business context and intelligent database analysis.
+
+CRITICAL RULES:
+- DO NOT include validate_entity steps - they cause parameter errors
+- Focus on intelligent industry/sector mapping using available database entities
+- Use multi-level business intelligence (industry AND sector level queries when beneficial)
 
 Respond with ONLY a JSON object:
 {
@@ -471,18 +857,20 @@ Respond with ONLY a JSON object:
     {
       "task_type": "generate_cypher",
       "params": {
-        "goal": "Specific goal for this step",
-        "entities": ["Entity1", "Entity2"],
-        "proxy_context": "${transformedQuery.transparency_message}"
+        "goal": "Find projects and opportunities for ${companyMapping.company} using intelligent business context mapping",
+        "entities": ${JSON.stringify(companyMapping.relevant_sectors)},
+        "proxy_context": "${transformedQuery.transparency_message}",
+        "business_intelligence_mode": true,
+        "multi_level_strategy": "query both industry and sector levels for comprehensive results"
       },
       "on_failure": "continue",
-      "reasoning": "Why this step is needed"
+      "reasoning": "Generate intelligent Cypher query using business intelligence and available database entities"
     },
     {
       "task_type": "execute_cypher", 
       "params": { "query": "$step1.output" },
       "on_failure": "continue",
-      "reasoning": "Execute the proxy query"
+      "reasoning": "Execute the business intelligence query against database"
     },
     {
       "task_type": "analyze_and_summarize",
@@ -491,10 +879,13 @@ Respond with ONLY a JSON object:
         "business_context": "${companyMapping.business_context}",
         "consultant_response": "${transformedQuery.consultant_response}",
         "original_company": "${companyMapping.company}",
-        "proxy_sectors": "${companyMapping.relevant_sectors.join(', ')}"
+        "proxy_sectors": "${companyMapping.relevant_sectors.join(', ')}",
+        "missing_sectors": "${companyMapping.missing_sectors ? companyMapping.missing_sectors.join(', ') : ''}",
+        "business_impact_of_gaps": "${companyMapping.business_impact_of_gaps || ''}",
+        "data_completeness_score": "${companyMapping.data_completeness_score || 1.0}"
       },
       "on_failure": "continue", 
-      "reasoning": "Provide consultant-level analysis with business intelligence and transparency"
+      "reasoning": "Provide consultant-level analysis with comprehensive business intelligence and data gap assessment"
     }
   ]
 }
@@ -504,10 +895,47 @@ Keep the plan focused and efficient while maintaining transparency about proxy u
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 600
     });
 
     console.log(`[ExecutionPlanner] Raw final execution plan response: "${response}"`);
+    
+    // Handle empty response
+    if (!response || response.trim().length === 0) {
+      console.error('[ExecutionPlanner] Empty response from LLM for final execution plan');
+      return {
+        plan: [
+          {
+            task_type: 'generate_cypher',
+            params: {
+              goal: `Find projects and opportunities related to ${companyMapping.relevant_sectors.join(' and ')}`,
+              entities: companyMapping.relevant_sectors,
+              proxy_context: transformedQuery.transparency_message || `Analyzing ${companyMapping.company} through similar sectors`
+            },
+            on_failure: 'continue',
+            reasoning: `Generate query for ${companyMapping.company} using proxy sectors`
+          },
+          {
+            task_type: 'execute_cypher',
+            params: { query: '$step1.output' },
+            on_failure: 'continue',
+            reasoning: 'Execute the proxy query'
+          },
+          {
+            task_type: 'analyze_and_summarize',
+            params: {
+              dataset: '$step2.output',
+              business_context: companyMapping.business_context,
+              consultant_response: transformedQuery.consultant_response,
+              original_company: companyMapping.company,
+              proxy_sectors: companyMapping.relevant_sectors.join(', ')
+            },
+            on_failure: 'continue',
+            reasoning: 'Provide business context analysis with consultant-level insights'
+          }
+        ]
+      };
+    }
     
     let cleanResponse = response.trim();
     if (cleanResponse.startsWith('```json')) {
@@ -517,11 +945,18 @@ Keep the plan focused and efficient while maintaining transparency about proxy u
       cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
     
+    console.log(`[ExecutionPlanner] Cleaned final execution plan response: "${cleanResponse}"`);
+    
     try {
-      return JSON.parse(cleanResponse);
+      const parsedPlan = ResponseSanitizer.parseAndValidateJSON(response, ResponseValidator.validateExecutionPlan);
+      console.log(`[ExecutionPlanner] Successfully parsed and validated final execution plan:`, parsedPlan);
+      return parsedPlan;
     } catch (parseError) {
-      console.error('[ExecutionPlanner] Final execution plan JSON parse error:', parseError);
-      throw new Error(`Failed to parse final execution plan as JSON: ${parseError.message}`);
+      console.error('[ExecutionPlanner] Final execution plan parsing/validation failed:', parseError);
+      console.error('[ExecutionPlanner] Original response was:', response?.substring(0, 500));
+      
+      // Generate robust fallback execution plan
+      return this.createFallbackBusinessPlan(companyMapping, transformedQuery, 'plan_generation_failed');
     }
   }
 
@@ -583,6 +1018,185 @@ Keep the plan focused and efficient while maintaining transparency about proxy u
     }
     
     console.log(`[ExecutionPlanner] Plan validation passed for ${planResult.plan.length} steps`);
+  }
+  
+  detectBusinessContextFallback(query, response) {
+    const queryLower = query.toLowerCase();
+    const responseLower = (response || '').toLowerCase();
+    
+    const commonCompanyTerms = ['anz', 'tesla', 'amazon', 'netflix', 'microsoft', 'apple', 'google', 'facebook', 'uber', 'spotify', 'airbnb'];
+    const mentionsCompany = commonCompanyTerms.some(term => queryLower.includes(term));
+    const responseHasCompanyContext = commonCompanyTerms.some(term => responseLower.includes(term)) || 
+                                     responseLower.includes('company_proxy') || 
+                                     responseLower.includes('business');
+    
+    if (mentionsCompany || responseHasCompanyContext) {
+      const detectedCompany = commonCompanyTerms.find(term => queryLower.includes(term) || responseLower.includes(term));
+      const extractedCompany = detectedCompany ? detectedCompany.toUpperCase() : 
+                              query.replace(/projects for |opportunities for |pain points for /i, '').trim();
+      
+      console.log(`[ExecutionPlanner] Business context fallback triggered for: ${extractedCompany}`);
+      
+      return {
+        query_type: 'company_proxy',
+        entities_mentioned: [],
+        unknown_entities: [extractedCompany],
+        requires_company_mapping: true,
+        analytical_operation: null,
+        confidence: 0.6,
+        reasoning: 'Fallback classification with business context detection due to LLM parsing failure'
+      };
+    }
+    
+    return null;
+  }
+  
+  inferIndustriesFromCompany(companyName) {
+    const name = companyName.toLowerCase();
+    
+    if (name.includes('bank') || name.includes('anz') || name.includes('westpac') || name.includes('commonwealth') || name.includes('nab')) {
+      return ['Banking'];
+    }
+    if (name.includes('insurance') || name.includes('axa') || name.includes('allianz')) {
+      return ['Insurance'];
+    }
+    if (name.includes('tesla') || name.includes('amazon') || name.includes('google') || name.includes('microsoft')) {
+      return ['Banking', 'Insurance']; // Default to both for tech companies
+    }
+    
+    return ['Banking', 'Insurance']; // Default fallback
+  }
+  
+  inferActualBusinessSectorsFromCompany(companyName) {
+    // Infer what business sectors/divisions this company ACTUALLY operates in based on business knowledge
+    const name = companyName.toLowerCase();
+    
+    if (name.includes('anz') || name.includes('westpac') || name.includes('commonwealth') || name.includes('nab')) {
+      // Australian Big 4 banks have specific divisions
+      return ['Personal Banking', 'Business Banking', 'Institutional Banking', 'Wealth Management', 'Insurance Services'];
+    }
+    if (name.includes('tesla')) {
+      return ['Electric Vehicles', 'Energy Storage', 'Autonomous Driving', 'Solar Energy', 'Charging Networks'];
+    }
+    if (name.includes('amazon')) {
+      return ['E-commerce', 'Cloud Computing (AWS)', 'Digital Advertising', 'Logistics & Fulfillment', 'Digital Streaming'];
+    }
+    if (name.includes('apple')) {
+      return ['Consumer Electronics', 'Software & Services', 'Digital Content', 'Retail Stores', 'Financial Services'];
+    }
+    if (name.includes('google') || name.includes('alphabet')) {
+      return ['Search & Advertising', 'Cloud Computing', 'Hardware', 'Autonomous Vehicles', 'Healthcare Technology'];
+    }
+    
+    // Generic business sectors for unknown companies
+    return ['Core Business', 'Customer Services', 'Digital Services', 'Operations'];
+  }
+  
+  inferSectorsFromCompany(companyName) {
+    // Map to available database sectors (simplified for proof of concept)
+    const name = companyName.toLowerCase();
+    
+    if (name.includes('bank') || name.includes('anz') || name.includes('westpac') || name.includes('commonwealth') || name.includes('nab')) {
+      return ['Banking']; // Simplified to what's likely in database
+    }
+    if (name.includes('insurance') || name.includes('axa') || name.includes('allianz')) {
+      return ['Insurance'];
+    }
+    if (name.includes('tesla') || name.includes('amazon') || name.includes('google') || name.includes('microsoft') || name.includes('apple')) {
+      return ['Banking', 'Insurance']; // Fallback to available industries
+    }
+    
+    // Default mapping for major companies
+    return ['Banking', 'Insurance'];
+  }
+  
+  async getAvailableDatabaseSectors() {
+    // Get real-time database sectors for more accurate mapping
+    if (!this.driver) {
+      console.warn('[ExecutionPlanner] No database driver available, using schema defaults');
+      return {
+        Banking: ['Retail Banking', 'Commercial Banking', 'Investment Banking', 'Private Banking', 'Credit Unions', 'Online Banking'],
+        Insurance: ['Life Insurance', 'Health Insurance', 'Property Insurance', 'Casualty Insurance']
+      };
+    }
+
+    const session = this.driver.session();
+    try {
+      const result = await session.run(`
+        MATCH (i:Industry)-[:HAS_SECTOR]->(s:Sector)
+        RETURN i.name as industry, collect(s.name) as sectors
+        ORDER BY i.name
+      `);
+      
+      const availableSectors = {};
+      result.records.forEach(record => {
+        const industry = record.get('industry');
+        const sectors = record.get('sectors');
+        availableSectors[industry] = sectors;
+      });
+      
+      console.log('[ExecutionPlanner] Retrieved available sectors from database:', availableSectors);
+      return availableSectors;
+    } catch (error) {
+      console.error('[ExecutionPlanner] Error retrieving database sectors:', error);
+      // Fallback to schema defaults
+      return {
+        Banking: ['Banking'], // Simplified fallback
+        Insurance: ['Insurance']
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  formatAvailableSectors(availableSectors) {
+    const formatted = Object.entries(availableSectors)
+      .map(([industry, sectors]) => `- ${industry}: ${sectors.join(', ')}`)
+      .join('\n');
+    
+    return formatted || '- Banking: General Banking\n- Insurance: General Insurance';
+  }
+
+  createFallbackBusinessPlan(companyMapping, transformedQuery, errorReason) {
+    console.log(`[ExecutionPlanner] Creating fallback business plan due to: ${errorReason}`);
+    
+    return {
+      plan: [
+        {
+          task_type: 'generate_cypher',
+          params: {
+            goal: `Find projects and opportunities related to ${companyMapping.relevant_sectors.join(' and ')}`,
+            entities: companyMapping.relevant_sectors,
+            proxy_context: transformedQuery.transparency_message || `Analyzing ${companyMapping.company} through validated proxy sectors`,
+            fallback_reason: errorReason
+          },
+          on_failure: 'continue',
+          reasoning: `Generate validated query for ${companyMapping.company} using proxy sectors (${errorReason})`
+        },
+        {
+          task_type: 'execute_cypher',
+          params: { query: '$step1.output' },
+          on_failure: 'continue',
+          reasoning: 'Execute the business proxy query'
+        },
+        {
+          task_type: 'analyze_and_summarize',
+          params: {
+            dataset: '$step2.output',
+            business_context: companyMapping.business_context,
+            consultant_response: transformedQuery.consultant_response,
+            original_company: companyMapping.company,
+            proxy_sectors: companyMapping.relevant_sectors.join(', '),
+            missing_sectors: companyMapping.missing_sectors ? companyMapping.missing_sectors.join(', ') : null,
+            business_impact_of_gaps: companyMapping.business_impact_of_gaps,
+            data_completeness_score: companyMapping.data_completeness_score,
+            fallback_context: `Processing issue handled through validated fallback (${errorReason})`
+          },
+          on_failure: 'continue',
+          reasoning: 'Provide robust business context analysis with consultant-level insights and gap analysis'
+        }
+      ]
+    };
   }
 }
 

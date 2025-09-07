@@ -59,6 +59,21 @@ class Orchestrator {
         if (!taskResult.success) {
           console.log(`[Orchestrator] Step ${stepNumber} failed:`, taskResult.error);
           
+          // CRITICAL: Check if this is a business context workflow failure
+          const hasBusinessContext = this.detectBusinessContextInExecutionLog(executionLog);
+          const businessContextParams = this.extractBusinessContextFromLog(executionLog);
+          
+          if (hasBusinessContext) {
+            console.log(`[Orchestrator] ⚠️  Business context workflow failure detected - preserving business context`);
+            return await this.handleBusinessContextFailure(
+              stepNumber, 
+              step, 
+              taskResult, 
+              businessContextParams, 
+              executionLog
+            );
+          }
+          
           // Check if this was a Cypher execution error that could benefit from intelligent handling
           const isRecoverableError = step.task_type === 'execute_cypher' && 
                                     taskResult.recoveryAttempted && 
@@ -169,7 +184,8 @@ class Orchestrator {
                     type: 'final_answer',
                     summary: finalAnswerTask.output.message,
                     availableData: finalAnswerTask.output.availableData,
-                    terminatesLoop: true
+                    terminatesLoop: true,
+                    reasoningSteps: this.convertExecutionLogToReasoningSteps(executionLog)
                   },
                   executionLog,
                   clarification_loop_terminated: true
@@ -243,7 +259,8 @@ class Orchestrator {
                       type: 'final_answer',
                       summary: finalAnswerTask.output.message,
                       availableData: finalAnswerTask.output.availableData,
-                      terminatesLoop: true
+                      terminatesLoop: true,
+                      reasoningSteps: this.convertExecutionLogToReasoningSteps(executionLog)
                     },
                     executionLog,
                     clarification_loop_terminated: true
@@ -595,6 +612,169 @@ class Orchestrator {
     
     // Default suggestions
     return ['Banking', 'Insurance', 'Retail Banking', 'Commercial Banking'];
+  }
+  
+  // Business Context Error Recovery Methods
+  detectBusinessContextInExecutionLog(executionLog) {
+    return executionLog.some(log => {
+      // Check for business context parameters in execution log
+      return log.params && (
+        log.params.proxy_context ||
+        log.params.business_context ||
+        log.params.consultant_response ||
+        log.params.original_company ||
+        log.params.proxy_sectors ||
+        (log.taskType === 'generate_cypher' && log.params.proxy_context)
+      );
+    });
+  }
+  
+  extractBusinessContextFromLog(executionLog) {
+    // Extract business context parameters from the execution log including gap analysis fields
+    let businessContext = {};
+    
+    for (const log of executionLog) {
+      if (log.params) {
+        if (log.params.proxy_context) businessContext.proxy_context = log.params.proxy_context;
+        if (log.params.business_context) businessContext.business_context = log.params.business_context;
+        if (log.params.consultant_response) businessContext.consultant_response = log.params.consultant_response;
+        if (log.params.original_company) businessContext.original_company = log.params.original_company;
+        if (log.params.proxy_sectors) businessContext.proxy_sectors = log.params.proxy_sectors;
+        if (log.params.transparency_message) businessContext.transparency_message = log.params.transparency_message;
+        
+        // New gap analysis fields
+        if (log.params.missing_sectors) businessContext.missing_sectors = log.params.missing_sectors;
+        if (log.params.business_impact_of_gaps) businessContext.business_impact_of_gaps = log.params.business_impact_of_gaps;
+        if (log.params.data_completeness_score !== undefined) businessContext.data_completeness_score = log.params.data_completeness_score;
+      }
+    }
+    
+    return businessContext;
+  }
+  
+  async handleBusinessContextFailure(stepNumber, step, taskResult, businessContextParams, executionLog) {
+    console.log(`[Orchestrator] 🔧 Handling business context failure at step ${stepNumber}`);
+    console.log(`[Orchestrator] Business context params:`, businessContextParams);
+    
+    // Preserve business context in the error response
+    const originalCompany = businessContextParams.original_company;
+    const businessContext = businessContextParams.business_context;
+    const proxySectors = businessContextParams.proxy_sectors;
+    
+    // Create a business-context-aware fallback response
+    let fallbackMessage;
+    
+    if (originalCompany) {
+      fallbackMessage = `I understand you're asking about ${originalCompany}. While I encountered a processing issue, I can help you explore similar business challenges using our available data.`;
+      
+      if (businessContext) {
+        fallbackMessage += ` Based on business intelligence, ${originalCompany} ${businessContext.toLowerCase()}. `;
+      }
+      
+      if (proxySectors) {
+        fallbackMessage += `I'll analyze sectors with similar operational challenges: ${proxySectors}.`;
+      }
+    } else {
+      fallbackMessage = `I encountered a processing issue with your business query, but I can help you explore relevant business opportunities.`;
+    }
+    
+    // Generate business-context-aware suggestions
+    const suggestions = [];
+    
+    if (originalCompany && proxySectors) {
+      const sectorsArray = typeof proxySectors === 'string' ? 
+        proxySectors.split(', ').slice(0, 2) : 
+        (Array.isArray(proxySectors) ? proxySectors.slice(0, 2) : ['Banking', 'Insurance']);
+      
+      suggestions.push(`Show me projects in ${sectorsArray[0]}`);
+      if (sectorsArray[1]) {
+        suggestions.push(`Find opportunities in ${sectorsArray[1]}`);
+      }
+      suggestions.push(`What pain points exist in these sectors?`);
+      suggestions.push(`Browse all available business opportunities`);
+    } else {
+      suggestions.push('Show me all industries');
+      suggestions.push('Find pain points in banking');
+      suggestions.push('Browse available sectors');
+      suggestions.push('What business opportunities are available?');
+    }
+    
+    return {
+      success: true, // Mark as successful to prevent cascading failures
+      message: fallbackMessage,
+      suggestions: suggestions,
+      queryResult: {
+        type: 'business_context_recovery',
+        error: taskResult.error,
+        failedStep: stepNumber,
+        originalCompany: originalCompany,
+        businessContext: businessContext,
+        proxySectors: proxySectors,
+        recoveryStrategy: 'business_context_preserved',
+        fallbackMessage: fallbackMessage,
+        reasoningSteps: this.convertExecutionLogToReasoningSteps(executionLog)
+      },
+      executionLog,
+      businessContextPreserved: true,
+      requiresBusinessFallback: true
+    };
+  }
+  
+  // Enhanced error recovery with business context preservation
+  async attemptProgressiveFallback(error, stepNumber, executionLog, businessContextParams) {
+    console.log(`[Orchestrator] 🔄 Attempting progressive fallback for step ${stepNumber}`);
+    
+    const hasBusinessContext = Object.keys(businessContextParams).length > 0;
+    
+    if (hasBusinessContext) {
+      // Business context fallback strategy
+      console.log(`[Orchestrator] Using business context fallback strategy`);
+      
+      // Try to generate a simpler business context query
+      try {
+        const fallbackCypher = await this.executeTask('generate_cypher', {
+          goal: `Find basic project information related to business sectors`,
+          entities: ['Sector', 'ProjectOpportunity'],
+          proxy_context: `Simplified query for ${businessContextParams.original_company || 'business analysis'}`,
+          fallback_mode: true
+        });
+        
+        if (fallbackCypher.success) {
+          const fallbackExecution = await this.executeTask('execute_cypher', {
+            query: fallbackCypher.output.query,
+            queryParams: fallbackCypher.output.params || {}
+          });
+          
+          if (fallbackExecution.success) {
+            return {
+              success: true,
+              message: `I used a simplified approach to find relevant business information for ${businessContextParams.original_company || 'your query'}.`,
+              queryResult: {
+                type: 'progressive_fallback',
+                graphData: fallbackExecution.output.graphData,
+                cypherQuery: fallbackCypher.output.query,
+                summary: `Simplified business analysis using progressive fallback`,
+                originalError: error,
+                fallbackLevel: 1,
+                businessContextPreserved: true
+              },
+              executionLog,
+              wasProgressiveFallback: true
+            };
+          }
+        }
+      } catch (fallbackError) {
+        console.log(`[Orchestrator] Progressive fallback attempt failed:`, fallbackError.message);
+      }
+    }
+    
+    // Standard progressive fallback
+    return {
+      success: false,
+      error: `Progressive fallback failed: ${error}`,
+      executionLog,
+      fallbackAttempted: true
+    };
   }
 }
 

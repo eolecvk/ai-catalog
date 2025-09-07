@@ -175,6 +175,14 @@ export const chatApi = {
     }
     return response.json();
   },
+
+  getBackoffStatus: async () => {
+    const response = await api.get('/api/llm/backoff-status');
+    if (!response.ok) {
+      throw new Error(`Backoff status failed: ${response.statusText}`);
+    }
+    return response.json();
+  },
 };
 
 // Log configuration on module load

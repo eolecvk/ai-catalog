@@ -221,13 +221,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                       {step.input && (
                         <div className="step-detail">
                           <strong>Input:</strong>
-                          <div className="step-content">{truncateText(step.input, 200)}</div>
+                          <div className="step-content">{formatReasoningData(step.input)}</div>
                         </div>
                       )}
                       {step.output && (
                         <div className="step-detail">
                           <strong>Output:</strong>
-                          <div className="step-content">{truncateText(step.output, 200)}</div>
+                          <div className="step-content">{formatReasoningData(step.output)}</div>
                         </div>
                       )}
                       {step.metadata && Object.keys(step.metadata).length > 0 && (
@@ -268,37 +268,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     ).join(' ');
   };
 
-  const truncateText = (text: string, maxLength: number) => {
-    if (text.length <= maxLength) return text;
+  const formatReasoningData = (text: string) => {
+    if (!text) return '';
     
     // Try to parse as JSON and format nicely
     try {
       const parsed = JSON.parse(text);
-      const formatted = JSON.stringify(parsed, null, 2);
-      
-      if (formatted.length <= maxLength) {
-        return formatted;
-      }
-      
-      // If formatted JSON is still too long, show key properties
-      if (typeof parsed === 'object' && parsed !== null) {
-        const keys = Object.keys(parsed);
-        if (keys.length > 0) {
-          const preview = keys.slice(0, 3).map(key => {
-            const value = parsed[key];
-            const valueStr = typeof value === 'string' ? `"${value}"` : String(value);
-            return `"${key}": ${valueStr.length > 20 ? valueStr.substring(0, 20) + '...' : valueStr}`;
-          }).join(', ');
-          
-          const remaining = keys.length > 3 ? `, ... (${keys.length - 3} more)` : '';
-          return `{ ${preview}${remaining} }`;
-        }
-      }
+      return JSON.stringify(parsed, null, 2);
     } catch (e) {
-      // Not JSON, proceed with normal truncation
+      // Not JSON, return as-is
+      return text;
     }
-    
-    return text.substring(0, maxLength) + '...';
   };
 
   const renderMessageContent = () => {

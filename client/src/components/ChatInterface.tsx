@@ -18,6 +18,18 @@ export interface ChatInterfaceRef {
   sendExampleQuestion: (question: string) => Promise<void>;
 }
 
+interface BackoffStatus {
+  isRetrying: boolean;
+  provider: string | null;
+  remainingWaitMs: number;
+  waitSeconds: number;
+  message: string;
+  quotaExceeded?: boolean;
+  allProvidersInCooldown?: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+}
+
 const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({ 
   onApplyQueryResult,
   onNavigateToNode,
@@ -26,8 +38,10 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [currentInput, setCurrentInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [backoffStatus, setBackoffStatus] = useState<BackoffStatus | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const backoffPollingRef = useRef<NodeJS.Timeout | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -41,6 +55,52 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
     if (inputRef.current) {
       inputRef.current.focus();
     }
+  }, []);
+
+  // Backoff status polling
+  const pollBackoffStatus = async () => {
+    try {
+      const response = await fetch('/api/llm/backoff-status');
+      const status = await response.json();
+      
+      if (status.isRetrying) {
+        setBackoffStatus(status);
+      } else {
+        setBackoffStatus(null);
+        // Stop polling when no longer retrying
+        if (backoffPollingRef.current) {
+          clearInterval(backoffPollingRef.current);
+          backoffPollingRef.current = null;
+        }
+      }
+    } catch (error) {
+      console.error('Failed to poll backoff status:', error);
+    }
+  };
+
+  const startBackoffPolling = () => {
+    if (backoffPollingRef.current) return; // Already polling
+    
+    // Poll immediately, then every second
+    pollBackoffStatus();
+    backoffPollingRef.current = setInterval(pollBackoffStatus, 1000);
+  };
+
+  const stopBackoffPolling = () => {
+    if (backoffPollingRef.current) {
+      clearInterval(backoffPollingRef.current);
+      backoffPollingRef.current = null;
+    }
+    setBackoffStatus(null);
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (backoffPollingRef.current) {
+        clearInterval(backoffPollingRef.current);
+      }
+    };
   }, []);
 
   // Expose methods to parent component
@@ -185,6 +245,9 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
     setMessages(prev => [...prev, userMessage, processingMessage]);
     setCurrentInput('');
     setIsProcessing(true);
+    
+    // Start polling for backoff status during processing
+    startBackoffPolling();
 
     try {
       const data: ChatApiResponse = await chatApi.query(query, graphContext, messages);
@@ -280,6 +343,7 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
       setMessages(prev => prev.slice(0, -1).concat(errorMessage));
     } finally {
       setIsProcessing(false);
+      stopBackoffPolling();
     }
   };
 
@@ -340,6 +404,46 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
             ))}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Backoff Status Indicator */}
+          {backoffStatus && backoffStatus.isRetrying && (
+            <div className={`backoff-status-indicator ${
+              backoffStatus.quotaExceeded ? 'quota-exceeded' : 
+              backoffStatus.allProvidersInCooldown ? 'all-cooldown' : ''
+            }`}>
+              <div className="backoff-content">
+                <div className="backoff-icon">
+                  {backoffStatus.quotaExceeded ? '📊' : backoffStatus.allProvidersInCooldown ? '⏰' : '🔄'}
+                </div>
+                <div className="backoff-text">
+                  <div className="backoff-message">{backoffStatus.message}</div>
+                  <div className="backoff-details">
+                    {backoffStatus.attempt && backoffStatus.maxAttempts && (
+                      <span className="attempt-info">
+                        Attempt {backoffStatus.attempt}/{backoffStatus.maxAttempts}
+                      </span>
+                    )}
+                    {backoffStatus.quotaExceeded && (
+                      <span className="quota-info">Quota limits exceeded</span>
+                    )}
+                  </div>
+                </div>
+                <div className="backoff-timer">
+                  <div className="timer-circle">
+                    <div className="timer-text">{backoffStatus.waitSeconds}s</div>
+                  </div>
+                </div>
+              </div>
+              <div className="backoff-progress">
+                <div 
+                  className="backoff-progress-bar"
+                  style={{
+                    animation: `backoffCountdown ${backoffStatus.remainingWaitMs}ms linear`
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           <form className="chat-input-form" onSubmit={handleSubmit}>
             <div className="chat-input-container">
