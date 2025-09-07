@@ -729,7 +729,10 @@ Respond with ONLY pure JSON:
     let prompt;
     
     if (isProxyAnalysis) {
-      const hasDataGaps = missing_sectors && missing_sectors.length > 0;
+      const missingSectorsArray = typeof missing_sectors === 'string' 
+      ? missing_sectors.split(', ').filter(s => s.trim())
+      : (Array.isArray(missing_sectors) ? missing_sectors : []);
+    const hasDataGaps = missingSectorsArray.length > 0;
       
       prompt = `
 You are an AI consultant providing analysis for ${original_company}. Analyze graph database results using proxy sectors with business intelligence and full transparency about data gaps.
@@ -745,7 +748,7 @@ Proxy Sectors Used: ${proxy_sectors || 'Database sectors representing similar bu
 # Data Completeness Assessment
 ${hasDataGaps ? `
 ⚠️ DATA GAP ANALYSIS:
-Missing Business Sectors: ${missing_sectors.join(', ')}
+Missing Business Sectors: ${missingSectorsArray.join(', ')}
 Business Impact: ${business_impact_of_gaps}
 Data Completeness Score: ${data_completeness_score}/1.0
 
@@ -769,7 +772,7 @@ Provide a professional analysis combining database insights with business knowle
 6. **Methodology**: Clear explanation of the proxy approach, knowledge sources, and analysis limitations
 
 ${hasDataGaps ? `
-CRITICAL: Proactively highlight that ${original_company} operates in additional business sectors (${missing_sectors.join(', ')}) that aren't represented in our database. Explain what additional insights would be available with complete sector data.
+CRITICAL: Proactively highlight that ${original_company} operates in additional business sectors (${missingSectorsArray.join(', ')}) that aren't represented in our database. Explain what additional insights would be available with complete sector data.
 ` : ''}
 
 Be transparent about what comes from the database vs. business intelligence while providing valuable consultant-level insights and honest gap analysis.
