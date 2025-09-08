@@ -1151,19 +1151,19 @@ const App: React.FC = () => {
     fetchBuilderStats();
   }, []);
 
-  // Load builder data when authenticated
+  // Load builder data when entering builder mode
   useEffect(() => {
-    if (builderAuthenticated) {
+    if (isBuilderMode && builderAuthenticated) {
       fetchAvailableVersions();
       fetchBuilderStats();
       loadFilterOptions();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builderAuthenticated]);
+  }, [isBuilderMode, builderAuthenticated]);
 
-  // Load graph data when authenticated or when specific node type is selected
+  // Load graph data when builder mode starts or when specific node type is selected
   useEffect(() => {
-    if (builderAuthenticated) {
+    if (isBuilderMode && builderAuthenticated) {
       // Only refresh graph data if not showing node-specific focus
       if (!isShowingNodeFocus) {
         // If a specific node type was selected from overview, use it
@@ -1192,11 +1192,11 @@ const App: React.FC = () => {
         console.log('Skipping auto-refresh: user is viewing focused node data');
       }
     }
-  }, [builderAuthenticated, selectedNodeType, fetchGraphData, isShowingNodeFocus]);
+  }, [isBuilderMode, builderAuthenticated, selectedNodeType, fetchGraphData, isShowingNodeFocus]);
 
   // Refresh data when version changes
   useEffect(() => {
-    if (builderAuthenticated) {
+    if (isBuilderMode && builderAuthenticated) {
       fetchBuilderStats(currentGraphVersion);
       // Only refresh graph data if not showing node-specific focus
       if (!isShowingNodeFocus) {
@@ -1210,7 +1210,7 @@ const App: React.FC = () => {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentGraphVersion, builderAuthenticated, selectedNodeType, isShowingNodeFocus]);
+  }, [currentGraphVersion, isBuilderMode, builderAuthenticated, selectedNodeType, isShowingNodeFocus]);
 
   const resetSelections = () => {
     setSelections({ viewMode: '', industries: [], sectors: [], departments: [], painPoints: [] });
@@ -1806,9 +1806,813 @@ const App: React.FC = () => {
           )}
         </div>
         </>
-      ) : null}
-      {/* Builder Modals - Always available when authenticated */}
-      {builderAuthenticated && (
+      )}
+        <div 
+          className={`step ${currentStep >= 1 ? 'active' : ''} ${currentStep > 1 ? 'clickable' : ''}`}
+          onClick={() => navigateToStep(1)}
+        >
+          <span className="step-number">1</span>
+          <span className="step-label">Business Context</span>
+        </div>
+        <div 
+          className={`step ${currentStep >= 2 ? 'active' : ''} ${currentStep > 2 ? 'clickable' : ''}`}
+          onClick={() => navigateToStep(2)}
+        >
+          <span className="step-number">2</span>
+          <span className="step-label">Scope</span>
+        </div>
+        <div 
+          className={`step ${currentStep >= 3 ? 'active' : ''} ${currentStep > 3 ? 'clickable' : ''}`}
+          onClick={() => navigateToStep(3)}
+        >
+          <span className="step-number">3</span>
+          <span className="step-label">Pain Points</span>
+        </div>
+        <div 
+          className={`step ${currentStep >= 4 ? 'active' : ''}`}
+        >
+          <span className="step-number">4</span>
+          <span className="step-label">Projects</span>
+        </div>
+      </div>
+
+
+      {/* Step Subtitle */}
+      <div className="step-subtitle">
+        {currentStep === 1 && businessContextSubstep === 'industries' && (
+          <p>Select your industry</p>
+        )}
+        {currentStep === 1 && businessContextSubstep === 'sectors' && selections.industries.map((industry, index) => {
+          if (index === currentSectorPage) {
+            return <p key={industry}>Select your {industry.toLowerCase()} sectors</p>;
+          }
+          return null;
+        })}
+        {currentStep === 2 && scopeSubstep === 'choice' && (
+          <p>Choose your scope</p>
+        )}
+        {currentStep === 2 && scopeSubstep === 'departments' && (
+          <p>Select your departments</p>
+        )}
+        {currentStep === 3 && (
+          <p>Select pain points you want to address</p>
+        )}
+        {currentStep === 4 && (
+          <p>Recommended AI projects for your selections</p>
+        )}
+      </div>
+
+      <main className="main-content">
+        {/* Step 1: Business Context */}
+        {currentStep === 1 && businessContextSubstep === 'industries' && (
+          <div className="selection-section">
+            
+            {/* Industries Section */}
+            <div className="industry-group">
+              <div className="selection-grid">
+                {industries.map(industry => (
+                  <button
+                    key={industry.name}
+                    className={`selection-card ${selections.industries.includes(industry.name) ? 'selected' : ''}`}
+                    onClick={() => handleIndustrySelection(industry.name)}
+                  >
+                    <div className="card-content">
+                      <div className="card-icon">🏭</div>
+                      <h3>{industry.name}</h3>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="action-buttons">
+              {(selections.industries.length > 0 || selections.sectors.length > 0 || currentStep > 1) && (
+                <button 
+                  className="skip-btn"
+                  onClick={handleClearProgress}
+                >
+                  Reset
+                </button>
+              )}
+              
+              {selections.industries.length > 0 && (
+                <button 
+                  className="find-projects-btn"
+                  onClick={handleProceedToSectors}
+                >
+                  Next
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Step 1: Sector Selection Pages */}
+        {currentStep === 1 && businessContextSubstep === 'sectors' && (
+          <div className="selection-section">
+            
+            {selections.industries.map((industryName, index) => {
+              if (index !== currentSectorPage) return null;
+              
+              const industrySectors = sectors[industryName] || [];
+              
+              return (
+                <div key={industryName}>
+                  <div className="industry-group">
+                    <div className="selection-grid">
+                      {industrySectors.map(sector => (
+                        <button
+                          key={sector.name}
+                          className={`selection-card ${selections.sectors.includes(sector.name) ? 'selected' : ''}`}
+                          onClick={() => handleSectorSelection(sector.name)}
+                        >
+                          <div className="card-content">
+                            <div className="card-icon">🏢</div>
+                            <h3>{sector.name}</h3>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Navigation buttons */}
+                  <div className="action-buttons">
+                    <button 
+                      className="skip-btn"
+                      onClick={handlePreviousSectorPage}
+                    >
+                      Back
+                    </button>
+                    
+                    {currentSectorPage < selections.industries.length - 1 ? (
+                      <button 
+                        className="find-projects-btn"
+                        onClick={handleNextSectorPage}
+                      >
+                        Next Industry
+                      </button>
+                    ) : (
+                      <button 
+                        className="find-projects-btn"
+                        onClick={handleProceedToScope}
+                        disabled={selections.sectors.length === 0}
+                      >
+                        Next
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Step 2: Scope Selection */}
+        {currentStep === 2 && scopeSubstep === 'choice' && (
+          <div className="selection-section">
+            <div className="selection-grid">
+              <button
+                className={`selection-card ${scopeChoice === 'company' ? 'selected' : ''}`}
+                onClick={() => handleScopeSelection('company')}
+              >
+                <div className="card-content">
+                  <div className="card-icon">🏢</div>
+                  <h3>Whole company</h3>
+                </div>
+              </button>
+              
+              <button
+                className={`selection-card ${scopeChoice === 'departments' ? 'selected' : ''}`}
+                onClick={() => handleScopeSelection('departments')}
+              >
+                <div className="card-content">
+                  <div className="card-icon">🏛️</div>
+                  <h3>Specific Departments</h3>
+                </div>
+              </button>
+            </div>
+            
+            {/* Navigation buttons */}
+            <div className="action-buttons">
+              <button 
+                className="skip-btn"
+                onClick={handleBackToBusinessContext}
+              >
+                Back
+              </button>
+              
+              {scopeChoice && (
+                <button 
+                  className="find-projects-btn"
+                  onClick={handleScopeNext}
+                >
+                  Next
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Department Selection */}
+        {currentStep === 2 && scopeSubstep === 'departments' && (
+          <div className="selection-section">
+            <div className="selection-grid">
+              {departments.map(department => (
+                <button
+                  key={department.name}
+                  className={`selection-card ${selections.departments.includes(department.name) ? 'selected' : ''}`}
+                  onClick={() => handleDepartmentSelection(department.name)}
+                >
+                  <div className="card-content">
+                    <div className="card-icon">🏛️</div>
+                    <h3>{department.name}</h3>
+                  </div>
+                </button>
+              ))}
+            </div>
+            
+            {/* Navigation buttons */}
+            <div className="action-buttons">
+              <button 
+                className="skip-btn"
+                onClick={handleBackToScopeChoice}
+              >
+                Back
+              </button>
+              
+              {selections.departments.length > 0 && (
+                <button 
+                  className="find-projects-btn"
+                  onClick={handleDepartmentNext}
+                >
+                  Next
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Pain Point Selection */}
+        {currentStep === 3 && (
+          <div className="selection-section">
+            <div className="selection-grid">
+              {painPoints.map(painPoint => (
+                <button
+                  key={painPoint.name}
+                  className={`selection-card ${selections.painPoints.includes(painPoint.name) ? 'selected' : ''}`}
+                  onClick={() => handlePainPointSelection(painPoint.name)}
+                >
+                  <div className="card-content">
+                    <h3>{painPoint.name}</h3>
+                    {painPoint.impact && (
+                      <div className="impact-badge">
+                        Impact: {painPoint.impact}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+              
+              {/* Add New Pain Point Button */}
+              <button
+                className="add-new-btn"
+                onClick={() => setShowPainPointModal(true)}
+              >
+                <div className="add-icon">+</div>
+                <h3>Add New Pain Point</h3>
+              </button>
+            </div>
+            
+            {selections.painPoints.length > 0 && (
+              <div className="action-buttons">
+                <button 
+                  className="find-projects-btn"
+                  onClick={fetchProjects}
+                  disabled={loading}
+                >
+                  {loading ? 'Finding Projects...' : 'Find AI Projects'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Step 4: Project Results */}
+        {currentStep === 4 && (
+          <div className="results-section">
+            <div className="results-header">
+              <h2>Recommended AI Projects ({projects.length})</h2>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button 
+                  className="modal-btn modal-btn-primary"
+                  onClick={() => setShowProjectModal(true)}
+                >
+                  Add Custom Project
+                </button>
+                <button className="reset-btn" onClick={resetSelections}>
+                  Start Over
+                </button>
+              </div>
+            </div>
+            
+            <div className="projects-grid">
+              {projects.map((project, index) => (
+                <div key={index} className="project-card">
+                  <div className="project-header">
+                    <h3>{project.title}</h3>
+                    <span 
+                      className="priority-badge"
+                      style={{ backgroundColor: getPriorityColor(project.priority) }}
+                    >
+                      {project.priority}
+                    </span>
+                  </div>
+                  
+                  <div className="project-details">
+                    <p className="business-case">{project.businessCase}</p>
+                    
+                    <div className="project-meta">
+                      <div className="meta-item">
+                        <strong>Sector:</strong> {project.sector}
+                      </div>
+                      {project.department && (
+                        <div className="meta-item">
+                          <strong>Department:</strong> {project.department}
+                        </div>
+                      )}
+                      <div className="meta-item">
+                        <strong>Addresses:</strong> {project.painPoint}
+                      </div>
+                      <div className="meta-item">
+                        <strong>Blueprint:</strong> {project.blueprintTitle}
+                      </div>
+                      {project.budgetRange && (
+                        <div className="meta-item">
+                          <strong>Budget:</strong> {project.budgetRange}
+                        </div>
+                      )}
+                      {project.duration && (
+                        <div className="meta-item">
+                          <strong>Duration:</strong> {project.duration}
+                        </div>
+                      )}
+                    </div>
+
+                    {project.requiredRoles.length > 0 && (
+                      <div className="roles-section">
+                        <strong>Required Roles:</strong>
+                        <div className="tags">
+                          {project.requiredRoles.map((role, roleIndex) => (
+                            <span key={roleIndex} className="tag role-tag">
+                              {typeof role === 'string' ? role : role.name}
+                              {typeof role === 'object' && role.specialty && (
+                                <span className="specialty"> - {role.specialty}</span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {project.subModules.length > 0 && (
+                      <div className="modules-section">
+                        <strong>Key Modules:</strong>
+                        <div className="tags">
+                          {project.subModules.map(module => (
+                            <span key={module} className="tag module-tag">{module}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Pain Point Creation Modal */}
+        {showPainPointModal && (
+          <div className="modal-backdrop" onClick={() => setShowPainPointModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Add New Pain Point</h2>
+                <button className="modal-close" onClick={() => setShowPainPointModal(false)}>×</button>
+              </div>
+              
+              <form 
+                onSubmit={handleCreatePainPoint}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+                    if (submitButton && !submitButton.disabled) {
+                      submitButton.click();
+                    }
+                  }
+                }}
+              >
+                {/* Connection Fields - Side by Side */}
+                <div className="form-row">
+                  <div className="form-group form-group-half">
+                    <label className="form-label">Connect to Sectors</label>
+                    <div className="multiselect-container">
+                      <div 
+                        className={`multiselect-dropdown ${showSectorDropdown ? 'active' : ''}`}
+                        onClick={() => setShowSectorDropdown(!showSectorDropdown)}
+                      >
+                        <div className="multiselect-display">
+                          {newPainPointForm.sectors.length === 0 ? (
+                            <span className="multiselect-placeholder">Select sectors...</span>
+                          ) : (
+                            newPainPointForm.sectors.map(sector => (
+                              <div key={sector} className="multiselect-tag">
+                                <span>{sector}</span>
+                                <button 
+                                  type="button"
+                                  className="multiselect-tag-remove"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeSectorTag(sector);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className={`multiselect-arrow ${showSectorDropdown ? 'open' : ''}`}>▼</div>
+                      </div>
+                      
+                      {showSectorDropdown && (
+                        <div className="multiselect-options">
+                          {getAllSectors().map(sector => (
+                            <div 
+                              key={sector}
+                              className={`multiselect-option ${newPainPointForm.sectors.includes(sector) ? 'selected' : ''}`}
+                              onClick={() => handleSectorToggle(sector)}
+                            >
+                              <div className="multiselect-checkbox"></div>
+                              <span>{sector}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="form-group form-group-half">
+                    <label className="form-label">Connect to Departments</label>
+                    <div className="multiselect-container">
+                      <div 
+                        className={`multiselect-dropdown ${showDepartmentDropdown ? 'active' : ''}`}
+                        onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}
+                      >
+                        <div className="multiselect-display">
+                          {newPainPointForm.departments.length === 0 ? (
+                            <span className="multiselect-placeholder">Select departments...</span>
+                          ) : (
+                            newPainPointForm.departments.map(department => (
+                              <div key={department} className="multiselect-tag">
+                                <span>{department}</span>
+                                <button 
+                                  type="button"
+                                  className="multiselect-tag-remove"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeDepartmentTag(department);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className={`multiselect-arrow ${showDepartmentDropdown ? 'open' : ''}`}>▼</div>
+                      </div>
+                      
+                      {showDepartmentDropdown && (
+                        <div className="multiselect-options">
+                          {getAllDepartments().map(departmentName => (
+                            <div 
+                              key={departmentName}
+                              className={`multiselect-option ${newPainPointForm.departments.includes(departmentName) ? 'selected' : ''}`}
+                              onClick={() => handleDepartmentToggle(departmentName)}
+                            >
+                              <div className="multiselect-checkbox"></div>
+                              <span>{departmentName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Pain Point Name *</label>
+                  <div className="name-suggestion-container">
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={newPainPointForm.name}
+                      onChange={(e) => setNewPainPointForm({...newPainPointForm, name: e.target.value})}
+                      required
+                      placeholder="e.g., Manual Process Bottlenecks"
+                      style={{ paddingRight: '10rem' }}
+                    />
+                    <button
+                      type="button"
+                      className="suggestion-btn"
+                      onClick={handleSuggestPainPointNames}
+                      disabled={suggestingPainPoints || (newPainPointForm.sectors.length === 0 && newPainPointForm.departments.length === 0)}
+                      title="Get AI-powered pain point suggestions based on selected sectors and departments"
+                    >
+                      {suggestingPainPoints ? (
+                        <>
+                          <div className="loading-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                          Suggesting...
+                        </>
+                      ) : (
+                        <>
+                          <span className="icon">✨</span>
+                          Smart Suggest
+                        </>
+                      )}
+                    </button>
+                    
+                    {showPainPointSuggestions && (
+                      <>
+                        <div 
+                          className="suggestion-backdrop" 
+                          onClick={() => setShowPainPointSuggestions(false)}
+                        ></div>
+                        <div className="suggestion-dropdown">
+                        <div className="suggestion-dropdown-header">
+                          <span>
+                            Pain Points for {
+                              [...newPainPointForm.sectors, ...newPainPointForm.departments]
+                                .filter(item => item)
+                                .join(', ')
+                            }
+                          </span>
+                          <button 
+                            type="button"
+                            className="suggestion-dropdown-close"
+                            onClick={() => setShowPainPointSuggestions(false)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        {painPointSuggestions.map((suggestion, index) => (
+                          <div
+                            key={index}
+                            className="suggestion-item"
+                            onClick={() => handleSelectPainPointSuggestion(suggestion)}
+                          >
+                            {suggestion}
+                          </div>
+                        ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                {newPainPointForm.name.trim() && (
+                  <div className="form-group">
+                    <label className="form-label">Impact Description</label>
+                  <div className="suggestion-container">
+                    <textarea
+                      className="form-textarea"
+                      value={newPainPointForm.impact}
+                      onChange={(e) => setNewPainPointForm({...newPainPointForm, impact: e.target.value})}
+                      placeholder="Describe the business impact of this pain point"
+                      style={{ paddingRight: '10rem' }}
+                    />
+                    <button
+                      type="button"
+                      className="suggestion-btn"
+                      onClick={handleSuggestImpact}
+                      disabled={suggestingImpact || !newPainPointForm.name.trim()}
+                      title="Generate AI-powered impact description"
+                    >
+                      {suggestingImpact ? (
+                        <>
+                          <div className="loading-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                          Suggesting...
+                        </>
+                      ) : (
+                        <>
+                          <span className="icon">✨</span>
+                          Smart Suggest
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  </div>
+                )}
+                
+                <div className="modal-actions">
+                  <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowPainPointModal(false)}>
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="modal-btn modal-btn-primary" 
+                    disabled={
+                      loading || 
+                      !newPainPointForm.name ||
+                      (newPainPointForm.departments.length === 0 && newPainPointForm.sectors.length === 0)
+                    }
+                  >
+                    {loading ? 'Creating...' : 'Create Pain Point'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Project Creation Modal */}
+        {showProjectModal && (
+          <div className="modal-backdrop" onClick={() => setShowProjectModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Add Custom Project</h2>
+                <button className="modal-close" onClick={() => setShowProjectModal(false)}>×</button>
+              </div>
+              
+              <form 
+                onSubmit={handleCreateProject}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+                    if (submitButton && !submitButton.disabled) {
+                      submitButton.click();
+                    }
+                  }
+                }}
+              >
+                <div className="form-group">
+                  <label className="form-label">Project Title *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.title}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, title: e.target.value})}
+                    required
+                    placeholder="e.g., AI-Powered Customer Service Bot"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Priority</label>
+                  <select
+                    className="form-select"
+                    value={newProjectForm.priority}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, priority: e.target.value as 'High' | 'Medium' | 'Low'})}
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Business Case *</label>
+                  <textarea
+                    className="form-textarea"
+                    value={newProjectForm.businessCase}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, businessCase: e.target.value})}
+                    required
+                    placeholder="Describe the business justification for this project"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Blueprint Title *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.blueprintTitle}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, blueprintTitle: e.target.value})}
+                    required
+                    placeholder="e.g., Conversational AI Platform"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Budget Range</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.budgetRange}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, budgetRange: e.target.value})}
+                    placeholder="e.g., $100K - $500K"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Duration</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={newProjectForm.duration}
+                    onChange={(e) => setNewProjectForm({...newProjectForm, duration: e.target.value})}
+                    placeholder="e.g., 6-12 months"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Required Roles</label>
+                  <div className="dynamic-list">
+                    {newProjectForm.requiredRoles.map((role, index) => (
+                      <div key={index} className="dynamic-list-item">
+                        <input
+                          type="text"
+                          placeholder="Role name"
+                          value={role.name}
+                          onChange={(e) => updateRequiredRole(index, 'name', e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Specialty (optional)"
+                          value={role.specialty || ''}
+                          onChange={(e) => updateRequiredRole(index, 'specialty', e.target.value)}
+                        />
+                        <button type="button" className="remove-item-btn" onClick={() => removeRequiredRole(index)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" className="add-item-btn" onClick={addRequiredRole}>
+                      Add Role
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Sub-modules</label>
+                  <div className="dynamic-list">
+                    {newProjectForm.subModules.map((module, index) => (
+                      <div key={index} className="dynamic-list-item">
+                        <input
+                          type="text"
+                          placeholder="Module name"
+                          value={module}
+                          onChange={(e) => updateSubModule(index, e.target.value)}
+                        />
+                        <button type="button" className="remove-item-btn" onClick={() => removeSubModule(index)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" className="add-item-btn" onClick={addSubModule}>
+                      Add Module
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="modal-actions">
+                  <button type="button" className="modal-btn modal-btn-secondary" onClick={() => setShowProjectModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="modal-btn modal-btn-primary" disabled={loading || !newProjectForm.title || !newProjectForm.businessCase || !newProjectForm.blueprintTitle}>
+                    {loading ? 'Creating...' : 'Create Project'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {loading && (
+          <div className="loading">
+            <div className="spinner"></div>
+            <p>Loading...</p>
+          </div>
+        )}
+        </main>
+        </>
+      )}
+
+      {/* Builder Modals - Always available when in builder mode */}
+      {isBuilderMode && builderAuthenticated && (
         <>
           {showBuilderNodeModal && (
             <div className="modal-backdrop" onClick={() => setShowBuilderNodeModal(false)}>

@@ -367,53 +367,32 @@ class ExecutionPlanner {
       .join('\n');
 
     const prompt = `
-Analyze this user query to understand the intent and identify entities mentioned.
+Classify query intent. Return ONLY JSON. No explanations.
 
-# Graph Database Schema
-Node Types: ${this.graphSchema.nodeLabels.join(', ')}
-Relationships: ${this.graphSchema.relationships.join(', ')}
+Entities: ${this.graphSchema.nodeLabels.join(', ')}
+Path: Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
 
-CRITICAL: To find projects for sectors/companies, use this path:
-Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
+Context: ${historyContext || 'None'}
+Query: "${query}"
 
-# Recent Conversation Context
-${historyContext || 'No previous context'}
-
-# User Query
-"${query}"
-
-# Your Task
-Classify the query intent and identify entities. Pay special attention to company names, brands, and organizations that are NOT in the database schema.
-
-Respond with ONLY a JSON object with this structure:
+JSON format:
 {
   "query_type": "lookup|analytical|comparison|company_proxy",
-  "entities_mentioned": ["entity1", "entity2"],
-  "unknown_entities": ["company_name"],
+  "entities_mentioned": ["entity1"],
+  "unknown_entities": ["company_name"], 
   "requires_company_mapping": true/false,
   "analytical_operation": "exclusion|inclusion|comparison|relationship_analysis",
   "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation of the classification"
+  "reasoning": "1-2 words"
 }
 
-# Query Type Guidelines
-- "lookup": Simple requests like "show me banking sectors", "find pain points"
-- "analytical": Complex operations like "painpoints without projects", "sectors not connected to departments"
-- "comparison": "compare X vs Y", "differences between A and B"
-- "company_proxy": Questions about real companies, brands, or organizations NOT in database (Tesla, Amazon, ANZ Bank, Netflix, Microsoft, Apple, etc.)
+Types:
+- lookup: Simple finds (e.g., "show banking")
+- analytical: Complex ops (e.g., "sectors without projects")
+- comparison: "compare X vs Y" 
+- company_proxy: Real companies NOT in entities (ANZ, Tesla, Amazon)
 
-# Company Detection Examples
-- "Projects for ANZ" → company_proxy (ANZ is a major Australian bank)
-- "Tesla opportunities" → company_proxy (Tesla is an EV company)
-- "Amazon pain points" → company_proxy (Amazon is a tech company)
-- "Banking sector projects" → lookup (Banking is in our schema)
-
-# Analytical Operations
-- "exclusion": queries with "without", "not", "except", "lacking"
-- "inclusion": queries with "with", "having", "containing"  
-- "relationship_analysis": queries about connections, paths, relationships
-
-CRITICAL: If the query mentions ANY company name, brand, or organization that is NOT in the database node types, classify as "company_proxy" and list it in "unknown_entities".
+If company name mentioned → company_proxy + add to unknown_entities.
 `;
 
     const response = await this.llmManager.generateText(prompt, {
