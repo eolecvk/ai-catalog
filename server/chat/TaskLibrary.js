@@ -12,8 +12,6 @@ class TaskLibrary {
         '(Industry)-[:HAS_SECTOR]->(Sector)',
         '(Sector)-[:EXPERIENCES]->(PainPoint)',
         '(Department)-[:EXPERIENCES]->(PainPoint)', 
-        '(Sector)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
-        '(Department)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
         '(ProjectOpportunity)-[:ADDRESSES]->(PainPoint)',
         '(ProjectOpportunity)-[:IS_INSTANCE_OF]->(ProjectBlueprint)',
         '(ProjectBlueprint)-[:REQUIRES_ROLE]->(Role)',
@@ -310,6 +308,10 @@ Generate a Cypher query for Neo4j based on the specific goal and entities.
 # Graph Schema
 ${this.graphSchema.relationships.join('\n')}
 
+CRITICAL: For Sector/Department to ProjectOpportunity queries, use this path:
+Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
+Department -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
+
 # Goal
 ${goal}
 
@@ -514,11 +516,11 @@ Create an analytical Cypher query based on the operation type.
 # Analytical Pattern Examples:
 ## Exclusion (NOT EXISTS):
 - "painpoints without projects": MATCH (p:PainPoint) WHERE NOT EXISTS((p)<-[:ADDRESSES]-(:ProjectOpportunity)) RETURN p
-- "sectors without opportunities": MATCH (s:Sector) WHERE NOT EXISTS((s)-[:HAS_OPPORTUNITY]->(:ProjectOpportunity)) RETURN s
+- "sectors without opportunities": MATCH (s:Sector) WHERE NOT EXISTS((s)-[:EXPERIENCES]->(:PainPoint)<-[:ADDRESSES]-(:ProjectOpportunity)) RETURN s
 
 ## Inclusion (EXISTS):
-- "sectors with pain points": MATCH (s:Sector) WHERE EXISTS((s)-[:EXPERIENCES]->(:PainPoint)) RETURN s
-- "departments having projects": MATCH (d:Department) WHERE EXISTS((d)-[:HAS_OPPORTUNITY]->(:ProjectOpportunity)) RETURN d
+- "sectors with pain points": MATCH (s:Sector) WHERE EXISTS((s)-[:EXPERIENCES]->(:PainPoint)) RETURN s  
+- "departments having projects": MATCH (d:Department) WHERE EXISTS((d)-[:EXPERIENCES]->(:PainPoint)<-[:ADDRESSES]-(:ProjectOpportunity)) RETURN d
 
 ⚠️ CRITICAL: For graph visualization, include relationships when possible:
 - MATCH (p:PainPoint) WHERE NOT EXISTS((p)<-[:ADDRESSES]-(:ProjectOpportunity)) OPTIONAL MATCH (p)<-[r:EXPERIENCES]-(entity) RETURN p, r, entity
@@ -587,7 +589,7 @@ Create a query that returns data suitable for comparison analysis.
 
 # Comparison Pattern Examples:
 - Compare pain points between sectors: MATCH (s:Sector)-[r1:EXPERIENCES]->(p:PainPoint) RETURN s, r1, p
-- Compare opportunities by department: MATCH (d:Department)-[r1:HAS_OPPORTUNITY]->(o:ProjectOpportunity) RETURN d, r1, o
+- Compare opportunities by department: MATCH (d:Department)-[r1:EXPERIENCES]->(pp:PainPoint)<-[r2:ADDRESSES]-(po:ProjectOpportunity) RETURN d, r1, pp, r2, po
 - Shared connections: MATCH (a)-[r1]->(shared)<-[r2]-(b) WHERE labels(a) = ["Sector"] AND labels(b) = ["Department"] RETURN a, r1, shared, r2, b
 
 ⚠️ CRITICAL: Always include relationships for proper graph visualization.
@@ -640,9 +642,18 @@ Respond with ONLY pure JSON:
       return { success: false, error: 'Missing query parameter' };
     }
 
+    // Validate query before execution
+    const validationError = this.validateCypherQuery(query);
+    if (validationError) {
+      return { 
+        success: false, 
+        error: `Query validation failed: ${validationError}` 
+      };
+    }
+
     const session = this.driver.session();
     try {
-      console.log(`[TaskLibrary] Executing query: ${query}`);
+      console.log(`[TaskLibrary] Executing validated query: ${query}`);
       console.log(`[TaskLibrary] Query params:`, queryParams || {});
       
       const result = await session.run(query, queryParams || {});
@@ -1615,8 +1626,8 @@ Respond with ONLY JSON:
     } else if (entities && entities.includes('Sector')) {
       query = `
         MATCH (s:Sector)
-        OPTIONAL MATCH (s)-[:HAS_OPPORTUNITY]->(po:ProjectOpportunity)
-        RETURN s, po
+        OPTIONAL MATCH (s)-[:EXPERIENCES]->(pp:PainPoint)<-[:ADDRESSES]-(po:ProjectOpportunity)
+        RETURN s, pp, po
         ORDER BY s.name
         LIMIT 20
       `;
@@ -1655,6 +1666,10 @@ Generate an intelligent Cypher query that uses multi-level business intelligence
 # Graph Schema
 ${this.graphSchema.relationships.join('\n')}
 
+CRITICAL: For Sector/Department to ProjectOpportunity queries, use this path:
+Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
+Department -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
+
 # Goal
 ${goal}
 
@@ -1671,20 +1686,26 @@ ${multi_level_strategy || 'Query both industry and sector levels for comprehensi
 Generate a Cypher query that intelligently queries both industry AND sector levels to find the most comprehensive results.
 
 Strategy:
-1. First try specific sectors if they exist (e.g., "Retail Banking", "Commercial Banking")
-2. Fall back to industry level if sectors don't exist (e.g., "Banking")
-3. Include both approaches in a UNION query for maximum coverage
+1. Use single query with OR conditions covering both industry and sector levels
+2. Match the complete path: Industry -> Sector -> PainPoint <- ProjectOpportunity
+3. Filter with WHERE industry.name IN [...] OR sector.name IN [...]
+4. AVOID UNION queries to prevent column mismatch errors
 
 ⚠️ CRITICAL Cypher Syntax Rules:
 - ALWAYS include relationship variables in RETURN statements for graph visualization
-- For visualization: RETURN industry, r1, sector, r2, projectOpportunity (not just nodes)
-- Use UNION ALL for combining industry and sector queries
+- For visualization: RETURN industry, r1, sector, r2, pp, r3, project (all relationships included)
+- UNION queries MUST have identical column names and counts
+- Use single query with OR conditions instead of UNION when possible
 - Handle cases where entities might be industries OR sectors intelligently
 
+🚫 AVOID UNION - Use OR conditions instead:
+CORRECT: WHERE industry.name IN [...] OR sector.name IN [...]
+WRONG: UNION queries with different return columns
+
 Example intelligent query structure:
-MATCH (industry:Industry)-[r1:HAS_SECTOR]->(sector:Sector)-[r2:HAS_OPPORTUNITY]->(project:ProjectOpportunity)
+MATCH (industry:Industry)-[r1:HAS_SECTOR]->(sector:Sector)-[r2:EXPERIENCES]->(pp:PainPoint)<-[r3:ADDRESSES]-(project:ProjectOpportunity)
 WHERE industry.name IN ["Banking"] OR sector.name IN ["Retail Banking", "Commercial Banking"]
-RETURN industry, r1, sector, r2, project
+RETURN industry, r1, sector, r2, pp, r3, project
 
 Respond with ONLY pure JSON:
 {
@@ -1723,6 +1744,58 @@ Respond with ONLY pure JSON:
       console.error('Business intelligence Cypher generation error:', error);
       return { success: false, error: `Failed to generate business intelligence query: ${error.message}` };
     }
+  }
+
+  /**
+   * Validate Cypher query for common issues before execution
+   * @param {string} query - The Cypher query to validate
+   * @returns {string|null} Error message if validation fails, null if valid
+   */
+  validateCypherQuery(query) {
+    if (!query || typeof query !== 'string') {
+      return 'Query must be a non-empty string';
+    }
+
+    const upperQuery = query.toUpperCase();
+    
+    // Check for UNION queries with potential column mismatch
+    if (upperQuery.includes('UNION')) {
+      const unionParts = query.split(/UNION\s+(ALL\s+)?/i);
+      if (unionParts.length > 1) {
+        const returnColumns = [];
+        
+        for (let i = 0; i < unionParts.length; i++) {
+          const part = unionParts[i].trim();
+          if (!part) continue;
+          
+          const returnMatch = part.match(/RETURN\s+(.*?)(?:\s+LIMIT|\s+ORDER|\s*$)/i);
+          if (returnMatch) {
+            const columns = returnMatch[1]
+              .split(',')
+              .map(col => col.trim().replace(/\s+AS\s+\w+/i, ''))
+              .filter(col => col.length > 0);
+            returnColumns.push(columns);
+          }
+        }
+        
+        // Check if all UNION parts have the same number of columns
+        if (returnColumns.length > 1) {
+          const firstColumnCount = returnColumns[0].length;
+          for (let i = 1; i < returnColumns.length; i++) {
+            if (returnColumns[i].length !== firstColumnCount) {
+              return `UNION column count mismatch: first query has ${firstColumnCount} columns, query ${i + 1} has ${returnColumns[i].length} columns. All UNION queries must return the same number of columns.`;
+            }
+          }
+        }
+      }
+    }
+    
+    // Check for common Neo4j syntax issues
+    if (upperQuery.includes('HAS_OPPORTUNITY') && !upperQuery.includes('EXPERIENCES')) {
+      return 'Invalid relationship pattern detected: HAS_OPPORTUNITY relationships do not exist. Use: Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity';
+    }
+    
+    return null; // Query is valid
   }
 }
 

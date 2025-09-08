@@ -21,8 +21,6 @@ class ChatProcessor {
         '(Industry)-[:HAS_SECTOR]->(Sector)',
         '(Sector)-[:EXPERIENCES]->(PainPoint)',
         '(Department)-[:EXPERIENCES]->(PainPoint)', 
-        '(Sector)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
-        '(Department)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
         '(ProjectOpportunity)-[:ADDRESSES]->(PainPoint)',
         '(ProjectOpportunity)-[:IS_INSTANCE_OF]->(ProjectBlueprint)',
         '(ProjectBlueprint)-[:REQUIRES_ROLE]->(Role)',
@@ -441,7 +439,7 @@ Intent Types:
         RETURN a, pp, b, 'EXPERIENCES' as sharedRelation
         LIMIT 20
         UNION
-        MATCH (a:${type1})-[:HAS_OPPORTUNITY]->(po:ProjectOpportunity)-[:TARGETS_DEPARTMENT]->(b:${type2})
+        MATCH (a:${type1})-[:EXPERIENCES]->(painpoint:PainPoint)<-[:ADDRESSES]-(po:ProjectOpportunity)-[:ADDRESSES]->(shared_pain:PainPoint)<-[:EXPERIENCES]-(b:${type2})
         RETURN a, po as pp, b, 'PROJECT_CONNECTION' as sharedRelation
         LIMIT 20
       `;

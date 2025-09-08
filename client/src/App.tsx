@@ -3,7 +3,7 @@ import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPa
 import GraphViz from './GraphViz';
 import ChatInterface, { ChatInterfaceRef } from './components/ChatInterface';
 import GraphErrorBoundary from './components/GraphErrorBoundary';
-import { api, nodeApi } from './utils/api';
+import { api, nodeApi, importApi } from './utils/api';
 import './App.css';
 
 // Memoized GraphHeroSection component to prevent unnecessary re-renders
@@ -750,7 +750,7 @@ const App: React.FC = () => {
     try {
       const fileContent = await importFile.text();
       
-      const response = await api.post(`/api/admin/import?versionName=${encodeURIComponent(importVersionName.trim())}`, fileContent);
+      const response = await importApi.importCypher(fileContent, importVersionName.trim());
 
       const result = await response.json();
 
@@ -1253,15 +1253,9 @@ const App: React.FC = () => {
     // Only reset filters if needed, and don't reset everything
     // resetFilters(); // This might be causing issues
     
-    // For projects, we need to handle the fact that ProjectOpportunity is empty
-    // but ProjectBlueprint has data
-    let actualNodeType = nodeType;
-    if (nodeType === 'projects') {
-      // Check if we should show blueprints instead of opportunities
-      actualNodeType = 'blueprints'; // Use blueprints since opportunities are empty
-    }
-    
-    fetchGraphData(actualNodeType);
+    // Fetch graph data directly without transformation
+    // Backend will handle comprehensive project queries for 'projects'
+    fetchGraphData(nodeType);
   };
 
   const navigateToStep = (stepNumber: number) => {

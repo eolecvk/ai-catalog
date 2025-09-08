@@ -3399,10 +3399,10 @@ app.get('/api/admin/node/:nodeId/connections', async (req, res) => {
 
 // Get graph data for visualization
 app.get('/api/admin/graph/:nodeType', async (req, res) => {
-  const session = driver.session();
   const { nodeType } = req.params;
   const { sector, department } = req.query;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   // Handle multiple industries (sent as multiple query params)
   const industries = Array.isArray(req.query.industry) ? req.query.industry : 
@@ -3418,7 +3418,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
       'sectors': 'Sector', 
       'departments': 'Department',
       'painpoints': 'PainPoint',
-      'projects': 'ProjectOpportunity',
+      'projects': 'ProjectOpportunity', // This will trigger our comprehensive project case
       'blueprints': 'ProjectBlueprint',
       'roles': 'Role',
       'modules': 'Module',
@@ -3515,6 +3515,235 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
             properties: node.properties
           };
           nodeMap.set(nodeData.id, nodeData);
+        });
+        break;
+        
+      case 'ProjectOpportunity':
+        // Projects: Show ProjectBlueprint, Module, and SubModule nodes with all relationships
+        // Start from ProjectBlueprint since ProjectOpportunity nodes may not exist in current database
+        const projectQuery = `
+          MATCH (pb:ProjectBlueprint)
+          OPTIONAL MATCH (pb)-[r1:REQUIRES_ROLE]->(role:Role)
+          OPTIONAL MATCH (pb)-[r2:CONTAINS]->(m:Module)
+          OPTIONAL MATCH (m)-[r3:CONTAINS]->(sm:SubModule)
+          OPTIONAL MATCH (po:ProjectOpportunity)-[r4:IS_INSTANCE_OF]->(pb)
+          OPTIONAL MATCH (po)-[r5:ADDRESSES]->(pp:PainPoint)
+          OPTIONAL MATCH (po)-[r6:USES_MODULE]->(m2:Module)
+          OPTIONAL MATCH (m2)-[r7:CONTAINS]->(sm2:SubModule)
+          RETURN pb, r1, role, r2, m, r3, sm, po, r4, r5, pp, r6, m2, r7, sm2
+        `;
+        
+        const projectResult = await session.run(projectQuery);
+        
+        projectResult.records.forEach(record => {
+          const blueprint = record.get('pb');
+          const role = record.get('role');
+          const module1 = record.get('m');
+          const submodule1 = record.get('sm');
+          const opportunity = record.get('po');
+          const painPoint = record.get('pp');
+          const module2 = record.get('m2');
+          const submodule2 = record.get('sm2');
+          
+          const r1 = record.get('r1'); // REQUIRES_ROLE (blueprint->role)
+          const r2 = record.get('r2'); // CONTAINS (blueprint->module)
+          const r3 = record.get('r3'); // CONTAINS (module->submodule)
+          const r4 = record.get('r4'); // IS_INSTANCE_OF (opportunity->blueprint)
+          const r5 = record.get('r5'); // ADDRESSES (opportunity->painpoint)
+          const r6 = record.get('r6'); // USES_MODULE (opportunity->module)
+          const r7 = record.get('r7'); // CONTAINS (module2->submodule2)
+          
+          // Add ProjectBlueprint node (always present since we start from it)
+          if (blueprint) {
+            const blueprintId = blueprint.identity.toString();
+            if (!nodeMap.has(blueprintId)) {
+              nodeMap.set(blueprintId, {
+                id: blueprintId,
+                label: blueprint.properties.title || 'Unnamed Blueprint',
+                group: 'ProjectBlueprint',
+                properties: blueprint.properties
+              });
+            }
+            
+            // Add Role and relationship
+            if (role && r1) {
+              const roleId = role.identity.toString();
+              if (!nodeMap.has(roleId)) {
+                nodeMap.set(roleId, {
+                  id: roleId,
+                  label: role.properties.name || 'Unnamed Role',
+                  group: 'Role',
+                  properties: role.properties
+                });
+              }
+              
+              const edgeId = `${blueprintId}-${roleId}-REQUIRES_ROLE`;
+              if (!edgeMap.has(edgeId)) {
+                edgeMap.set(edgeId, {
+                  id: edgeId,
+                  from: blueprintId,
+                  to: roleId,
+                  label: 'REQUIRES_ROLE',
+                  type: 'REQUIRES_ROLE',
+                  properties: r1.properties
+                });
+              }
+            }
+            
+            // Add Module and relationship
+            if (module1 && r2) {
+              const moduleId = module1.identity.toString();
+              if (!nodeMap.has(moduleId)) {
+                nodeMap.set(moduleId, {
+                  id: moduleId,
+                  label: module1.properties.name || 'Unnamed Module',
+                  group: 'Module',
+                  properties: module1.properties
+                });
+              }
+              
+              const edgeId = `${blueprintId}-${moduleId}-CONTAINS`;
+              if (!edgeMap.has(edgeId)) {
+                edgeMap.set(edgeId, {
+                  id: edgeId,
+                  from: blueprintId,
+                  to: moduleId,
+                  label: 'CONTAINS',
+                  type: 'CONTAINS',
+                  properties: r2.properties
+                });
+              }
+              
+              // Add SubModule connected to this module
+              if (submodule1 && r3) {
+                const submoduleId = submodule1.identity.toString();
+                if (!nodeMap.has(submoduleId)) {
+                  nodeMap.set(submoduleId, {
+                    id: submoduleId,
+                    label: submodule1.properties.name || 'Unnamed SubModule',
+                    group: 'SubModule',
+                    properties: submodule1.properties
+                  });
+                }
+                
+                const subEdgeId = `${moduleId}-${submoduleId}-CONTAINS`;
+                if (!edgeMap.has(subEdgeId)) {
+                  edgeMap.set(subEdgeId, {
+                    id: subEdgeId,
+                    from: moduleId,
+                    to: submoduleId,
+                    label: 'CONTAINS',
+                    type: 'CONTAINS',
+                    properties: r3.properties
+                  });
+                }
+              }
+            }
+          }
+          
+          // Add ProjectOpportunity relationships if they exist
+          if (opportunity && blueprint && r4) {
+            const opportunityId = opportunity.identity.toString();
+            const blueprintId = blueprint.identity.toString();
+            
+            // Add opportunity node
+            if (!nodeMap.has(opportunityId)) {
+              nodeMap.set(opportunityId, {
+                id: opportunityId,
+                label: opportunity.properties.title || 'Unnamed Project',
+                group: 'ProjectOpportunity',
+                properties: opportunity.properties
+              });
+            }
+            
+            // Add opportunity->blueprint relationship
+            const edgeId = `${opportunityId}-${blueprintId}-IS_INSTANCE_OF`;
+            if (!edgeMap.has(edgeId)) {
+              edgeMap.set(edgeId, {
+                id: edgeId,
+                from: opportunityId,
+                to: blueprintId,
+                label: 'IS_INSTANCE_OF',
+                type: 'IS_INSTANCE_OF',
+                properties: r4.properties
+              });
+            }
+            
+            // Add opportunity->painpoint relationship
+            if (painPoint && r5) {
+              const painPointId = painPoint.identity.toString();
+              if (!nodeMap.has(painPointId)) {
+                nodeMap.set(painPointId, {
+                  id: painPointId,
+                  label: painPoint.properties.name || 'Unnamed PainPoint',
+                  group: 'PainPoint',
+                  properties: painPoint.properties
+                });
+              }
+              
+              const ppEdgeId = `${opportunityId}-${painPointId}-ADDRESSES`;
+              if (!edgeMap.has(ppEdgeId)) {
+                edgeMap.set(ppEdgeId, {
+                  id: ppEdgeId,
+                  from: opportunityId,
+                  to: painPointId,
+                  label: 'ADDRESSES',
+                  type: 'ADDRESSES',
+                  properties: r5.properties
+                });
+              }
+            }
+            
+            // Add opportunity->module relationship and its submodules
+            if (module2 && r6) {
+              const moduleId = module2.identity.toString();
+              if (!nodeMap.has(moduleId)) {
+                nodeMap.set(moduleId, {
+                  id: moduleId,
+                  label: module2.properties.name || 'Unnamed Module',
+                  group: 'Module',
+                  properties: module2.properties
+                });
+              }
+              
+              const modEdgeId = `${opportunityId}-${moduleId}-USES_MODULE`;
+              if (!edgeMap.has(modEdgeId)) {
+                edgeMap.set(modEdgeId, {
+                  id: modEdgeId,
+                  from: opportunityId,
+                  to: moduleId,
+                  label: 'USES_MODULE',
+                  type: 'USES_MODULE',
+                  properties: r6.properties
+                });
+              }
+              
+              // Add submodules for this module
+              if (submodule2 && r7) {
+                const submoduleId = submodule2.identity.toString();
+                if (!nodeMap.has(submoduleId)) {
+                  nodeMap.set(submoduleId, {
+                    id: submoduleId,
+                    label: submodule2.properties.name || 'Unnamed SubModule',
+                    group: 'SubModule',
+                    properties: submodule2.properties
+                  });
+                }
+                
+                const subEdgeId = `${moduleId}-${submoduleId}-CONTAINS`;
+                if (!edgeMap.has(subEdgeId)) {
+                  edgeMap.set(subEdgeId, {
+                    id: subEdgeId,
+                    from: moduleId,
+                    to: submoduleId,
+                    label: 'CONTAINS',
+                    type: 'CONTAINS',
+                    properties: r7.properties
+                  });
+                }
+              }
+            }
+          }
         });
         break;
         

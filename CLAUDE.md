@@ -607,14 +607,41 @@ relationships: [
 '(Industry)-[:HAS_SECTOR]->(Sector)',
 '(Sector)-[:EXPERIENCES]->(PainPoint)',
 '(Department)-[:EXPERIENCES]->(PainPoint)',
-'(Sector)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
-'(Department)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
 '(ProjectOpportunity)-[:ADDRESSES]->(PainPoint)',
 '(ProjectOpportunity)-[:IS_INSTANCE_OF]->(ProjectBlueprint)',
 '(ProjectBlueprint)-[:REQUIRES_ROLE]->(Role)',
 '(ProjectBlueprint)-[:CONTAINS]->(Module)',
 '(Module)-[:NEEDS_SUBMODULE]->(SubModule)'
 ]
+
+## CRITICAL: Correct Relationship Patterns for ProjectOpportunities
+
+### Key Schema Facts for LLM Query Generation:
+
+1. **NO DIRECT SECTOR-TO-PROJECT RELATIONSHIPS**: 
+   - There are NO `(Sector)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)` relationships
+   - There are NO `(Department)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)` relationships
+
+2. **CORRECT PROJECT-TO-PAINPOINT RELATIONSHIP**:
+   - `(ProjectOpportunity)-[:ADDRESSES]->(PainPoint)` - Projects address pain points
+
+3. **CORRECT PATH FROM SECTORS TO PROJECTS**:
+   - `(Sector)-[:EXPERIENCES]->(PainPoint)<-[:ADDRESSES]-(ProjectOpportunity)`
+   - This means: Sectors experience pain points, which are addressed by project opportunities
+
+4. **CORRECT CYPHER PATTERN FOR SECTOR-PROJECT QUERIES**:
+   ```cypher
+   MATCH (s:Sector)-[:EXPERIENCES]->(pp:PainPoint)<-[:ADDRESSES]-(po:ProjectOpportunity)
+   WHERE s.name IN ['Retail Banking', 'Commercial Banking']
+   RETURN s, pp, po
+   ```
+
+5. **CORRECT PATH INCLUDING INDUSTRY**:
+   ```cypher
+   MATCH (i:Industry)-[:HAS_SECTOR]->(s:Sector)-[:EXPERIENCES]->(pp:PainPoint)<-[:ADDRESSES]-(po:ProjectOpportunity)
+   WHERE i.name = 'Banking'
+   RETURN i, s, pp, po
+   ```
 ```
 
 ## Security and Optimization

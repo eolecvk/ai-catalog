@@ -259,8 +259,6 @@ class ExecutionPlanner {
         '(Industry)-[:HAS_SECTOR]->(Sector)',
         '(Sector)-[:EXPERIENCES]->(PainPoint)',
         '(Department)-[:EXPERIENCES]->(PainPoint)', 
-        '(Sector)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
-        '(Department)-[:HAS_OPPORTUNITY]->(ProjectOpportunity)',
         '(ProjectOpportunity)-[:ADDRESSES]->(PainPoint)',
         '(ProjectOpportunity)-[:IS_INSTANCE_OF]->(ProjectBlueprint)',
         '(ProjectBlueprint)-[:REQUIRES_ROLE]->(Role)',
@@ -374,6 +372,9 @@ Analyze this user query to understand the intent and identify entities mentioned
 # Graph Database Schema
 Node Types: ${this.graphSchema.nodeLabels.join(', ')}
 Relationships: ${this.graphSchema.relationships.join(', ')}
+
+CRITICAL: To find projects for sectors/companies, use this path:
+Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
 
 # Recent Conversation Context
 ${historyContext || 'No previous context'}
@@ -615,7 +616,7 @@ Focus on leveraging your comprehensive business knowledge to identify what data 
         try {
           const retryResponse = await this.llmManager.generateText(prompt, {
             temperature: 0.2,
-            maxTokens: 800 // Double the token limit
+            maxTokens: 1600 // Quadruple the original limit (400 → 1600)
           }, null, { company: companyName, stage: 'company_mapping_retry' });
           
           const retryParsed = ResponseSanitizer.parseAndValidateJSON(retryResponse, ResponseValidator.validateCompanyMapping, { allowRetry: false });
@@ -769,6 +770,9 @@ ${intentAnalysis.analytical_operation}
 
 # Graph Schema
 ${this.graphSchema.relationships.join('\n')}
+
+CRITICAL: To find projects for sectors, use this path:
+Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
 
 # Your Task
 Analyze the query structure and identify the components needed for execution.
@@ -1022,7 +1026,7 @@ Keep the plan focused and efficient while maintaining transparency about proxy u
         try {
           const retryResponse = await this.llmManager.generateText(prompt, {
             temperature: 0.1,
-            maxTokens: 1200 // Double the token limit
+            maxTokens: 2400 // Quadruple the original limit (600 → 2400)
           });
           
           const retryParsed = ResponseSanitizer.parseAndValidateJSON(retryResponse, ResponseValidator.validateExecutionPlan, { allowRetry: false });

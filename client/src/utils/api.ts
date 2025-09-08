@@ -185,6 +185,78 @@ export const chatApi = {
   },
 };
 
+export const importApi = {
+  importCypher: async (cypherScript: string, versionName: string) => {
+    const url = config.baseUrl + `/api/admin/import?versionName=${encodeURIComponent(versionName)}`;
+    
+    console.log(`[API] POST ${url} (importing Cypher script)`);
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+        body: cypherScript, // Send raw text, not JSON
+      });
+      
+      console.log(`[API] Import response: ${response.status} ${response.statusText}`);
+      
+      // If proxy mode fails, try direct mode as fallback
+      if (!response.ok && config.mode === 'proxy' && response.status === 404) {
+        console.log('[API] Proxy failed for import, trying direct mode fallback...');
+        
+        const backendPort = process.env.REACT_APP_BACKEND_PORT || '5002';
+        const fallbackUrl = `http://localhost:${backendPort}/api/admin/import?versionName=${encodeURIComponent(versionName)}`;
+        
+        console.log(`[API] Fallback POST ${fallbackUrl}`);
+        
+        const fallbackResponse = await fetch(fallbackUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain',
+          },
+          body: cypherScript,
+        });
+        
+        console.log(`[API] Fallback import response: ${fallbackResponse.status} ${fallbackResponse.statusText}`);
+        return fallbackResponse;
+      }
+      
+      return response;
+    } catch (error) {
+      console.error(`[API] Network error for import:`, error);
+      
+      // Try direct mode fallback on network error
+      if (config.mode === 'proxy') {
+        console.log('[API] Network error in proxy mode, trying direct fallback for import...');
+        
+        const backendPort = process.env.REACT_APP_BACKEND_PORT || '5002';
+        const fallbackUrl = `http://localhost:${backendPort}/api/admin/import?versionName=${encodeURIComponent(versionName)}`;
+        
+        try {
+          console.log(`[API] Fallback POST ${fallbackUrl}`);
+          const fallbackResponse = await fetch(fallbackUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/plain',
+            },
+            body: cypherScript,
+          });
+          
+          console.log(`[API] Fallback import response: ${fallbackResponse.status} ${fallbackResponse.statusText}`);
+          return fallbackResponse;
+        } catch (fallbackError) {
+          console.error(`[API] Fallback import also failed:`, fallbackError);
+          throw fallbackError;
+        }
+      }
+      
+      throw error;
+    }
+  },
+};
+
 // Log configuration on module load
 console.log(`[API] Initialized with config:`, {
   mode: config.mode,
