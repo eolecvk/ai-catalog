@@ -261,7 +261,7 @@ class LLMManager {
           console.log(`[LLMManager] 🚀 Using provider: ${this.currentProvider.name} (global: ${globalAttempts + 1}/${maxAttempts}, provider: ${providerAttempts + 1}/${maxProviderAttempts})`);
           
           // Add timeout handling for business context workflows
-          const timeoutMs = businessContext ? 15000 : 10000;
+          const timeoutMs = businessContext ? 30000 : 15000;
           const result = await Promise.race([
             this.currentProvider.generateText(prompt, options),
             new Promise((_, reject) => 

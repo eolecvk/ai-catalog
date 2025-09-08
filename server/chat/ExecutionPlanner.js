@@ -169,7 +169,9 @@ class ResponseSanitizer {
     return cleaned.trim();
   }
   
-  static parseAndValidateJSON(responseText, validator) {
+  static parseAndValidateJSON(responseText, validator, options = {}) {
+    const { allowRetry = true } = options;
+    
     try {
       const sanitized = this.sanitizeJSON(responseText);
       console.log(`[ResponseSanitizer] Sanitized JSON: ${sanitized.substring(0, 200)}`);
@@ -184,8 +186,53 @@ class ResponseSanitizer {
     } catch (error) {
       console.error(`[ResponseSanitizer] Validation failed:`, error.message);
       console.error(`[ResponseSanitizer] Original text: ${responseText?.substring(0, 300)}`);
+      
+      // Check if this looks like a truncated JSON response
+      if (allowRetry && this.isTruncatedJSON(responseText)) {
+        console.warn(`[ResponseSanitizer] Detected truncated JSON response, will request retry`);
+        const truncError = new Error(`JSON validation failed: ${error.message}`);
+        truncError.isTruncated = true;
+        truncError.partialResponse = responseText;
+        throw truncError;
+      }
+      
       throw new Error(`JSON validation failed: ${error.message}`);
     }
+  }
+  
+  /**
+   * Check if a response appears to be truncated JSON
+   * @param {string} responseText - The response text to check
+   * @returns {boolean} True if the response appears truncated
+   */
+  static isTruncatedJSON(responseText) {
+    if (!responseText || typeof responseText !== 'string') {
+      return false;
+    }
+    
+    const text = responseText.trim();
+    
+    // Check for common truncation patterns
+    const truncationIndicators = [
+      // Ends with incomplete string
+      /[^"}]\s*$/,
+      // Ends with incomplete object/array
+      /[,{[]$/,
+      // Ends with colon (incomplete key-value pair)
+      /:\s*$/,
+      // Missing closing braces/brackets
+      text.startsWith('{') && !text.includes('}'),
+      text.startsWith('[') && !text.includes(']'),
+      // Ends mid-word or mid-field
+      /[a-zA-Z_]$/,
+      // Contains markdown code block start but no end
+      text.includes('```json') && !text.includes('```\n') && !text.endsWith('```')
+    ];
+    
+    return truncationIndicators.some(indicator => {
+      if (typeof indicator === 'boolean') return indicator;
+      return indicator.test(text);
+    });
   }
 }
 
@@ -562,6 +609,23 @@ Focus on leveraging your comprehensive business knowledge to identify what data 
       console.log(`[ExecutionPlanner] Successfully parsed and validated company mapping:`, parsedMapping);
       return parsedMapping;
     } catch (parseError) {
+      // Check if this is a truncated response that we can retry
+      if (parseError.isTruncated) {
+        console.warn(`[ExecutionPlanner] Truncated JSON detected for company mapping, attempting retry with higher max tokens`);
+        try {
+          const retryResponse = await this.llmManager.generateText(prompt, {
+            temperature: 0.2,
+            maxTokens: 800 // Double the token limit
+          }, null, { company: companyName, stage: 'company_mapping_retry' });
+          
+          const retryParsed = ResponseSanitizer.parseAndValidateJSON(retryResponse, ResponseValidator.validateCompanyMapping, { allowRetry: false });
+          console.log(`[ExecutionPlanner] Retry successful for company mapping`);
+          return retryParsed;
+        } catch (retryError) {
+          console.error(`[ExecutionPlanner] Company mapping retry failed:`, retryError);
+          // Continue to fallback
+        }
+      }
       console.error('[ExecutionPlanner] Company mapping parsing/validation failed:', parseError);
       console.error('[ExecutionPlanner] Original response was:', response?.substring(0, 500));
       
@@ -952,6 +1016,24 @@ Keep the plan focused and efficient while maintaining transparency about proxy u
       console.log(`[ExecutionPlanner] Successfully parsed and validated final execution plan:`, parsedPlan);
       return parsedPlan;
     } catch (parseError) {
+      // Check if this is a truncated response that we can retry
+      if (parseError.isTruncated) {
+        console.warn(`[ExecutionPlanner] Truncated JSON detected for execution plan, attempting retry with higher max tokens`);
+        try {
+          const retryResponse = await this.llmManager.generateText(prompt, {
+            temperature: 0.1,
+            maxTokens: 1200 // Double the token limit
+          });
+          
+          const retryParsed = ResponseSanitizer.parseAndValidateJSON(retryResponse, ResponseValidator.validateExecutionPlan, { allowRetry: false });
+          console.log(`[ExecutionPlanner] Retry successful for execution plan`);
+          return retryParsed;
+        } catch (retryError) {
+          console.error(`[ExecutionPlanner] Execution plan retry failed:`, retryError);
+          // Continue to fallback
+        }
+      }
+      
       console.error('[ExecutionPlanner] Final execution plan parsing/validation failed:', parseError);
       console.error('[ExecutionPlanner] Original response was:', response?.substring(0, 500));
       
