@@ -397,7 +397,7 @@ If company name mentioned → company_proxy + add to unknown_entities.
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.1,
-      maxTokens: 300
+      maxTokens: 400
     }, null, { company: query, stage: 'intent_classification' });
 
     console.log(`[ExecutionPlanner] Raw LLM response: "${response}"`);
