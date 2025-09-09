@@ -500,58 +500,34 @@ If company name mentioned → company_proxy + add to unknown_entities.
     const availableSectors = await this.getAvailableDatabaseSectors();
     
     const prompt = `
-You are an AI business consultant with deep knowledge about companies and industries. A user has asked about "${companyName}" which is not in our project database, but you can provide business intelligence and identify data gaps.
+Map company to database sectors. Return ONLY JSON.
 
-# Available Database Industries and Sectors:
-${this.formatAvailableSectors(availableSectors)}
+Available sectors: ${this.formatAvailableSectors(availableSectors)}
+Company: "${companyName}"
 
-# Company to Analyze
-"${companyName}"
-
-# Original Query Context
-"${intentAnalysis.reasoning}"
-
-# Your Enhanced Consultant Role
-1. Provide detailed business intelligence about this company's actual business divisions and sectors
-2. Map company to available database sectors (use closest matches)
-3. **CRITICAL**: Identify business sectors this company operates in that are MISSING from our database
-4. Explain the business impact of missing data and what additional insights would be possible
-5. Be transparent about analysis limitations due to database gaps
-
-Respond with ONLY a JSON object:
+JSON format:
 {
   "company": "${companyName}",
-  "business_context": "Detailed description of company's market position, size, and key business divisions",
-  "actual_business_sectors": ["List of actual business sectors/divisions this company operates in based on your business knowledge"],
+  "business_context": "Brief description (max 50 words)",
+  "actual_business_sectors": ["max 5 sectors"],
   "primary_industries": ["Banking", "Insurance"],
-  "relevant_sectors": ["Available database sectors that best match this company"],
-  "missing_sectors": ["Business sectors this company operates in that are NOT in our database"],
-  "business_impact_of_gaps": "Explanation of what additional project insights would be available with complete sector data",
+  "relevant_sectors": ["max 3 closest database matches"],
+  "missing_sectors": ["max 3 missing sectors"],
+  "business_impact_of_gaps": "Brief impact (max 30 words)",
   "data_completeness_score": 0.0-1.0,
-  "reasoning": "Why these specific available sectors are the best proxies and what's missing",
+  "reasoning": "1-2 words",
   "confidence": 0.0-1.0,
   "mapping_strategy": "use_closest_sectors|use_industry_broad|use_specific_match",
   "knowledge_source": "business_intelligence_with_gap_analysis",
-  "transparency_note": "Clear statement about proxy mapping and identified data gaps"
+  "transparency_note": "Brief note (max 20 words)"
 }
 
-# Example Enhanced Business Intelligence with Gap Analysis:
-- ANZ Bank → 
-  * business_context: "One of Australia's 'Big Four' banks with Personal Banking, Business Banking, Institutional Banking, and Wealth Management divisions"
-  * actual_business_sectors: ["Personal Banking", "Business Banking", "Institutional Banking", "Wealth Management", "Insurance Services"]
-  * relevant_sectors: ["Banking", "Insurance"] (available in database)
-  * missing_sectors: ["Personal Banking", "Business Banking", "Institutional Banking", "Wealth Management"]
-  * business_impact_of_gaps: "Missing granular banking divisions limits ability to identify sector-specific pain points and project opportunities for retail vs. commercial vs. institutional banking challenges"
-
-- Tesla → identify automotive, energy storage, and autonomous driving sectors that aren't in database
-- Amazon → identify e-commerce, cloud computing, logistics sectors missing from database
-
-Focus on leveraging your comprehensive business knowledge to identify what data would enhance the analysis, not just mapping to what's available.
+Keep all fields concise. Focus on essential mapping only.
 `;
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.2,
-      maxTokens: 400
+      maxTokens: 600
     }, null, { company: companyName, stage: 'company_mapping' });
 
     console.log(`[ExecutionPlanner] Raw company mapping response: "${response}"`);
@@ -638,44 +614,27 @@ Focus on leveraging your comprehensive business knowledge to identify what data 
     console.log('[ExecutionPlanner] LLM Call #3: Query Transformation with Proxies');
     
     const prompt = `
-As an AI consultant, transform the query to use database entities as proxies for the company, providing transparent business context.
+Transform query using database proxies. Return ONLY JSON.
 
-# Original Query
-"${originalQuery}"
-
-# Company Business Intelligence
+Query: "${originalQuery}"
 Company: ${companyMapping.company}
-Business Context: ${companyMapping.business_context || 'Business context available'}
-Proxy Sectors: ${companyMapping.relevant_sectors.join(', ')}
-Reasoning: ${companyMapping.reasoning}
+Proxies: ${companyMapping.relevant_sectors.join(', ')}
 
-# Consultant Approach
-1. Acknowledge the company and provide business context
-2. Explain the proxy approach transparently
-3. Transform the query to use database entities
-4. Maintain consultant-level insight and analysis
-
-Respond with ONLY a JSON object:
+JSON format:
 {
-  "transformed_query": "Rewritten query using proxy entities",
-  "consultant_response": "Professional response with business context and transparent proxy explanation",
-  "business_context": "Business intelligence about the company",
-  "proxy_explanation": "Clear explanation of why these sectors are relevant proxies",
+  "transformed_query": "Rewritten using ${companyMapping.relevant_sectors.join(', ')}",
+  "consultant_response": "Brief response (max 50 words)",
+  "business_context": "${companyMapping.business_context || 'Business context'}",
+  "proxy_explanation": "Brief explanation (max 30 words)",
   "execution_strategy": "lookup|analytical|comparison", 
-  "target_entities": ["Entity1", "Entity2"],
-  "transparency_message": "Note that [Company] isn't in our project database, but based on business knowledge..."
+  "target_entities": ${JSON.stringify(companyMapping.relevant_sectors)},
+  "transparency_message": "${companyMapping.company} not in database, using proxy mapping"
 }
-
-# Consultant Response Examples:
-- ANZ Bank → "ANZ is one of Australia's 'Big Four' banks with major retail and commercial operations. While not in our project database, I'll analyze similar banking sectors..."
-- Tesla → "Tesla is a leading EV manufacturer. I'll use closest available sectors to analyze similar operational challenges..."
-
-Provide business intelligence while being transparent about database limitations and proxy approach.
 `;
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.1,
-      maxTokens: 400
+      maxTokens: 500
     }, null, { company: companyMapping.company, stage: 'query_transformation' });
 
     console.log(`[ExecutionPlanner] Raw query transformation response: "${response}"`);
@@ -871,78 +830,49 @@ Focus on the logical structure of the analytical operation.
     console.log('[ExecutionPlanner] LLM Call #4: Generate Final Execution Plan');
     
     const prompt = `
-Create a consultant-level execution plan for this company proxy analysis, integrating business intelligence with database queries.
+Generate EXACTLY 3 steps. Return ONLY JSON.
 
-# Transformed Query
-${transformedQuery.transformed_query}
-
-# Business Intelligence Context
 Company: ${companyMapping.company}
-Business Context: ${companyMapping.business_context || 'Business context available'}
-Proxy Entities: ${companyMapping.relevant_sectors.join(', ')}
+Sectors: ${companyMapping.relevant_sectors.join(', ')}
 
-# Consultant Response Template
-${transformedQuery.consultant_response || transformedQuery.proxy_explanation}
+REQUIRED: Use this EXACT template with EXACTLY 3 steps:
 
-# Execution Strategy  
-${transformedQuery.execution_strategy}
-
-# Available Tasks
-${this.availableTasks.join(', ')}
-
-# Your Task
-Generate an execution plan that provides consultant-level insights with transparent business context and intelligent database analysis.
-
-CRITICAL RULES:
-- DO NOT include validate_entity steps - they cause parameter errors
-- Focus on intelligent industry/sector mapping using available database entities
-- Use multi-level business intelligence (industry AND sector level queries when beneficial)
-
-Respond with ONLY a JSON object:
 {
   "plan": [
     {
       "task_type": "generate_cypher",
       "params": {
-        "goal": "Find projects and opportunities for ${companyMapping.company} using intelligent business context mapping",
+        "goal": "Find projects for ${companyMapping.company}",
         "entities": ${JSON.stringify(companyMapping.relevant_sectors)},
-        "proxy_context": "${transformedQuery.transparency_message}",
-        "business_intelligence_mode": true,
-        "multi_level_strategy": "query both industry and sector levels for comprehensive results"
+        "proxy_context": "Using proxy mapping",
+        "business_intelligence_mode": true
       },
       "on_failure": "continue",
-      "reasoning": "Generate intelligent Cypher query using business intelligence and available database entities"
+      "reasoning": "Query gen"
     },
     {
       "task_type": "execute_cypher", 
       "params": { "query": "$step1.output" },
       "on_failure": "continue",
-      "reasoning": "Execute the business intelligence query against database"
+      "reasoning": "Run query"
     },
     {
       "task_type": "analyze_and_summarize",
       "params": {
         "dataset": "$step2.output",
         "business_context": "${companyMapping.business_context}",
-        "consultant_response": "${transformedQuery.consultant_response}",
-        "original_company": "${companyMapping.company}",
-        "proxy_sectors": "${companyMapping.relevant_sectors.join(', ')}",
-        "missing_sectors": "${companyMapping.missing_sectors ? companyMapping.missing_sectors.join(', ') : ''}",
-        "business_impact_of_gaps": "${companyMapping.business_impact_of_gaps || ''}",
-        "data_completeness_score": "${companyMapping.data_completeness_score || 1.0}"
+        "original_company": "${companyMapping.company}"
       },
       "on_failure": "continue", 
-      "reasoning": "Provide consultant-level analysis with comprehensive business intelligence and data gap assessment"
+      "reasoning": "Analysis"
     }
   ]
 }
-
-Keep the plan focused and efficient while maintaining transparency about proxy usage.
 `;
 
     const response = await this.llmManager.generateText(prompt, {
       temperature: 0.1,
-      maxTokens: 600
+      maxTokens: 800
     });
 
     console.log(`[ExecutionPlanner] Raw final execution plan response: "${response}"`);

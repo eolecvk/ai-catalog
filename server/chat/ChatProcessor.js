@@ -92,36 +92,27 @@ class ChatProcessor {
       .join('\n');
 
     const prompt = `
-You are analyzing a user query to a graph database containing business data.
+Analyze query intent. Return ONLY JSON.
 
-# Graph Schema
-Node Labels: ${this.graphSchema.nodeLabels.join(', ')}
-Relationships: 
-${this.graphSchema.relationships.map(rel => `- ${rel}`).join('\n')}
+Entities: ${this.graphSchema.nodeLabels.join(', ')}
+Context: ${historyContext || 'None'}
+Query: "${query}"
 
-# Recent Chat History
-${historyContext || 'No previous context'}
-
-# Current Query
-"${query}"
-
-CRITICAL: You must respond with ONLY a JSON object. No markdown, no backticks, no explanations - just pure JSON.
-
-Expected JSON format:
+JSON format:
 {
   "type": "QUERY|MUTATION|CREATIVE|ANALYSIS|UNCLEAR",
-  "entities": ["extracted entities from query"],
-  "action": "specific action if MUTATION",
-  "missing_context": "what context is needed if unclear", 
+  "entities": ["extracted entities"],
+  "action": "action if mutation",
+  "missing_context": "needed context if unclear", 
   "confidence": 0.0-1.0
 }
 
-Intent Types:
-- QUERY: Retrieving existing data (show, find, list, what are)
-- MUTATION: Modifying graph (add, create, connect, update, delete) 
-- CREATIVE: Generate ideas/suggestions (suggest, brainstorm, imagine)
-- ANALYSIS: Compare/analyze data (compare, analyze, summarize differences)
-- UNCLEAR: Vague or ambiguous requests
+Types:
+- QUERY: Retrieve (show, find, list)
+- MUTATION: Modify (add, create, update, delete) 
+- CREATIVE: Generate (suggest, brainstorm)
+- ANALYSIS: Compare/analyze
+- UNCLEAR: Vague
 `;
 
     try {
@@ -710,24 +701,19 @@ Intent Types:
 
   async processCreative(classification, contextData, query, conversationHistory, reasoningSteps = []) {
     const prompt = `
-Based on the graph data context and user request, generate creative suggestions.
+Generate 3-5 creative suggestions. Return ONLY text, no JSON.
 
-# Context Data
-${JSON.stringify(contextData.relatedData.existingPatterns || [], null, 2)}
+Context: ${JSON.stringify(contextData.relatedData.existingPatterns || [])}
+Query: "${query}"
+Recent chat: ${conversationHistory.slice(-2).map(msg => `${msg.type}: ${msg.content}`).join('; ')}
 
-# User Request
-"${query}"
-
-# Recent Conversation
-${conversationHistory.slice(-4).map(msg => `${msg.type}: ${msg.content}`).join('\n')}
-
-Provide 3-5 creative, actionable suggestions that fit the graph schema. Focus on practical solutions.
+Provide actionable suggestions (max 200 words total).
 `;
 
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.7,
-        maxTokens: 500
+        maxTokens: 300
       });
 
       return {
@@ -750,21 +736,18 @@ Provide 3-5 creative, actionable suggestions that fit the graph schema. Focus on
     const analysisData = contextData.relatedData;
     
     const prompt = `
-Analyze and compare the following graph data based on the user's request.
+Analyze data. Return ONLY text, no JSON.
 
-# Data to Analyze
-${JSON.stringify(analysisData, null, 2)}
+Data: ${JSON.stringify(analysisData)}
+Query: "${query}"
 
-# User Request
-"${query}"
-
-Provide a clear, structured analysis with specific insights and comparisons.
+Provide structured analysis with key insights (max 400 words).
 `;
 
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.3,
-        maxTokens: 600
+        maxTokens: 500
       });
 
       return {
@@ -856,69 +839,32 @@ Provide a clear, structured analysis with specific insights and comparisons.
     const prompt = `
 Generate a Cypher query for Neo4j based on the user request and connection analysis.
 
-# Graph Schema
-${this.graphSchema.relationships.join('\n')}
-
-# User Query
-"${query}"
-
-# Extracted Entities
-${entities.join(', ')}
-
-# Available Context
-${Object.keys(contextData.entities).join(', ')}
+Schema: ${this.graphSchema.relationships.join('; ')}
+Query: "${query}"
+Entities: ${entities.join(', ')}
+Context: ${Object.keys(contextData.entities).join(', ')}
 ${connectionContext}
 
-⚠️ CRITICAL Cypher Syntax Rules - MUST FOLLOW EXACTLY:
+CRITICAL Rules:
+❌ NEVER: relationships(node), nodes(node) - Path only
+❌ NEVER: [:REL1|REL2*1..3] - Invalid syntax
+✅ ALWAYS: Include relationships in RETURN for visualization
+✅ Pattern: MATCH (a)-[r]->(b) RETURN a, r, b
+✅ Path: MATCH path = (a)-[]->(b) RETURN path
 
-🚫 FORBIDDEN PATTERNS - These will cause Neo4jError:
-❌ RETURN sector, relationships(sector), painPoint    // ERROR: relationships() needs Path, not Node
-❌ RETURN industry, relationships(industry)           // ERROR: relationships() needs Path, not Node
-❌ RETURN nodes(sector)                              // ERROR: nodes() needs Path, not Node
-❌ MATCH (a)-[:REL1|REL2*1..3]->(b)                  // ERROR: Invalid variable-length syntax
-
-✅ CORRECT PATTERNS - Use these instead:
-✅ MATCH path = (industry:Industry)-[:HAS_SECTOR]->(sector:Sector) RETURN path
-✅ MATCH (industry:Industry)-[r:HAS_SECTOR]->(sector:Sector) RETURN industry, r, sector
-✅ MATCH path = (a)-[*1..3]->(b) RETURN nodes(path), relationships(path)
-✅ MATCH (a:Sector)-[r1:EXPERIENCES]->(shared:PainPoint)<-[r2:EXPERIENCES]-(b:Department) RETURN a, r1, shared, r2, b
-
-🔥 ABSOLUTELY CRITICAL:
-- relationships() function ONLY works with Path variables, NEVER with Node variables
-- If you need relationships, either use a path variable OR explicitly name relationship variables
-- ALWAYS include relationship variables in RETURN clause for graph visualization
-- Variable-length patterns: [:REL*1..3] not [:REL1|REL2*1..3]
-
-MUST Include Relationships in Results:
-- Graph visualization REQUIRES both nodes AND relationships to display connections
-- ALWAYS return relationship variables in your RETURN clause
-- For shared connections, return ALL relationships: RETURN a, r1, shared, r2, b
-- For path queries, use: RETURN path OR RETURN nodes(path), relationships(path)
-- For direct queries, use: RETURN a, r, b (not just a, b)
-
-Connection Strategy:
-- If direct connections exist, include them AND their relationships in results
-- If no direct connections but indirect ones exist, use variable-length relationships or shared patterns
-- For multi-entity queries, look for shared connections through intermediate nodes
-- ALWAYS ensure relationships are returned for proper graph visualization
-
-CRITICAL: Respond with ONLY pure JSON. No markdown, no backticks, no code blocks.
-
-JSON format:
+Return ONLY JSON:
 {
   "query": "MATCH... RETURN...",
   "params": {},
-  "explanation": "brief explanation of what this query does and what connection types it explores",
+  "explanation": "brief explanation",
   "connectionStrategy": "direct|indirect|both"
 }
-
-Make queries efficient and return relevant graph structure for visualization.
 `;
 
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.1,
-        maxTokens: 400
+        maxTokens: 600
       });
 
       console.log(`[ChatProcessor] Cypher generation raw response: "${response}"`);
@@ -1116,28 +1062,19 @@ Make queries efficient and return relevant graph structure for visualization.
 
   async generateMutationPlan(classification, contextData, query) {
     const prompt = `
-Create a plan for modifying the graph database based on the user request.
+Create graph modification plan. Return ONLY JSON.
 
-# Graph Schema
-${this.graphSchema.relationships.join('\n')}
-
-# User Request
-"${query}"
-
-# Action Type
-${classification.action || 'CREATE'}
-
-# Context
-${JSON.stringify(contextData.entities, null, 2)}
-
-CRITICAL: Respond with ONLY pure JSON. No markdown, no backticks, no code blocks.
+Schema: ${this.graphSchema.relationships.join('; ')}
+Query: "${query}"
+Action: ${classification.action || 'CREATE'}
+Context: ${JSON.stringify(contextData.entities)}
 
 JSON format:
 {
-  "explanation": "Human-readable explanation of the changes",
-  "query": "MATCH/CREATE/MERGE Cypher query", 
+  "explanation": "Brief explanation (max 50 words)",
+  "query": "MATCH/CREATE/MERGE query",
   "params": {},
-  "affectedNodes": ["list of node types affected"],
+  "affectedNodes": ["node types"],
   "riskLevel": "LOW|MEDIUM|HIGH"
 }
 `;
@@ -1145,7 +1082,7 @@ JSON format:
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.2,
-        maxTokens: 400
+        maxTokens: 500
       });
 
       return JSON.parse(response.trim());

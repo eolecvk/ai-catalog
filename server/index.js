@@ -1267,6 +1267,7 @@ function generateRequestId() {
 }
 
 function detectBusinessContext(query) {
+  if (!query) return { isBusinessContext: false, detectedCompany: null, businessTerms: [] };
   const queryLower = query.toLowerCase();
   const commonCompanyTerms = ['anz', 'tesla', 'amazon', 'netflix', 'microsoft', 'apple', 'google', 'facebook', 'uber', 'spotify', 'airbnb'];
   const detectedCompany = commonCompanyTerms.find(term => queryLower.includes(term));
@@ -1280,17 +1281,18 @@ function detectBusinessContext(query) {
 
 // Process natural language query for graph exploration
 app.post('/api/chat/query', async (req, res) => {
-  const { query, context = {}, conversationHistory = [] } = req.body;
+  const { message, query, context = {}, conversationHistory = [] } = req.body;
+  const actualQuery = message || query;
   const startTime = Date.now();
   const requestId = generateRequestId();
   
   // Enhanced request logging with business context detection
-  const businessContext = detectBusinessContext(query);
+  const businessContext = detectBusinessContext(actualQuery);
   
-  console.log(`[${requestId}] 🚀 Chat query received: "${query}"`);
+  console.log(`[${requestId}] 🚀 Chat query received: "${actualQuery}"`);
   console.log(`[${requestId}] 📊 Request metadata:`, {
     timestamp: new Date().toISOString(),
-    queryLength: query.length,
+    queryLength: actualQuery?.length || 0,
     hasContext: Object.keys(context).length > 0,
     historyLength: conversationHistory.length,
     businessContext: businessContext.isBusinessContext ? {
@@ -1300,7 +1302,7 @@ app.post('/api/chat/query', async (req, res) => {
     } : false
   });
   
-  if (!query || query.trim().length === 0) {
+  if (!actualQuery || actualQuery.trim().length === 0) {
     console.log(`[${requestId}] ❌ Empty query rejected`);
     return res.status(400).json({
       success: false,
@@ -1324,7 +1326,7 @@ app.post('/api/chat/query', async (req, res) => {
     }
     
     // Use enhanced ChatProcessor for intelligent processing
-    const result = await chatProcessor.processChat(query, conversationHistory, enhancedContext);
+    const result = await chatProcessor.processChat(actualQuery, conversationHistory, enhancedContext);
     
     const endTime = Date.now();
     const executionTime = endTime - startTime;
@@ -3237,10 +3239,30 @@ app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
   const { nodeId } = req.params;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
   
+  console.log('[API] Node graph request received:', {
+    rawNodeId: nodeId,
+    nodeIdType: typeof nodeId,
+    version: version,
+    parsedNodeId: parseInt(nodeId),
+    parseSuccess: !isNaN(parseInt(nodeId))
+  });
+  
+  let queryNodeId; // Declare outside try block for error handling
+  
   try {
+    // Try to parse as integer first (Neo4j internal IDs are integers)
+    const parsedNodeId = parseInt(nodeId);
+    
+    if (isNaN(parsedNodeId)) {
+      console.error('[API] Invalid node ID - cannot parse as integer:', nodeId);
+      return res.status(400).json({ error: `Invalid node ID: ${nodeId}. Must be a valid integer.` });
+    }
+    
+    queryNodeId = parsedNodeId;
+    
     // Query to get the specific node and its direct neighbors
     const graphQuery = `
-      MATCH (center) WHERE id(center) = $nodeId
+      MATCH (center) WHERE ID(center) = $nodeId
       OPTIONAL MATCH (center)-[r1]->(connected)
       OPTIONAL MATCH (source)-[r2]->(center)
       RETURN center,
@@ -3248,16 +3270,47 @@ app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
              collect(DISTINCT {node: source, relationship: r2, direction: 'incoming'}) as incoming
     `;
     
-    const result = await session.run(graphQuery, { nodeId: parseInt(nodeId) });
+    console.log('[API] Executing Neo4j query with nodeId:', queryNodeId);
+    const result = await session.run(graphQuery, { nodeId: queryNodeId });
     
     if (result.records.length === 0) {
-      return res.status(404).json({ error: 'Node not found' });
+      console.error('[API] Node not found in database:', queryNodeId);
+      
+      // Try to find similar nodes for debugging
+      try {
+        const debugQuery = 'MATCH (n) RETURN n.name as name, ID(n) as id, labels(n) as labels LIMIT 10';
+        const debugResult = await session.run(debugQuery);
+        const availableNodes = debugResult.records.map(r => ({
+          id: r.get('id').toString(),
+          name: r.get('name'),
+          labels: r.get('labels')
+        }));
+        
+        console.log('[API] Available nodes for debugging:', availableNodes);
+        
+        return res.status(404).json({ 
+          error: `Node with ID ${queryNodeId} not found`,
+          availableNodes: availableNodes.slice(0, 5), // First 5 for debugging
+          suggestion: 'Check if the node ID is correct'
+        });
+      } catch (debugError) {
+        return res.status(404).json({ error: 'Node not found' });
+      }
     }
     
     const record = result.records[0];
     const centerNode = record.get('center');
     const outgoing = record.get('outgoing') || [];
     const incoming = record.get('incoming') || [];
+    
+    console.log('[API] Query result:', {
+      recordsCount: result.records.length,
+      centerNodeId: centerNode?.identity?.toString(),
+      centerNodeLabels: centerNode?.labels,
+      centerNodeProps: centerNode?.properties,
+      outgoingCount: outgoing.length,
+      incomingCount: incoming.length
+    });
     
     const nodes = [];
     const edges = [];
@@ -3302,10 +3355,22 @@ app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
       }
     });
     
+    console.log('[API] Sending response:', {
+      nodesCount: nodes.length,
+      edgesCount: edges.length,
+      centerNodeId: centerNodeData.id,
+      nodesSummary: nodes.map(n => ({ id: n.id, label: n.label, group: n.group }))
+    });
+    
     res.json({ nodes, edges, centerNodeId: centerNodeData.id });
     
   } catch (error) {
-    console.error('Error fetching node graph:', error);
+    console.error('[API] Error fetching node graph:', {
+      nodeId: nodeId,
+      queryNodeId: queryNodeId,
+      error: error.message,
+      stack: error.stack
+    });
     res.status(500).json({ error: error.message });
   } finally {
     await session.close();

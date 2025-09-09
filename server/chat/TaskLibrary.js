@@ -303,63 +303,26 @@ class TaskLibrary {
     }
 
     const prompt = `
-Generate a Cypher query for Neo4j based on the specific goal and entities.
+Generate Neo4j Cypher query. Return ONLY JSON.
 
-# Graph Schema
-${this.graphSchema.relationships.join('\n')}
+Schema: ${this.graphSchema.relationships.join('; ')}
+Goal: ${goal}
+Entities: ${entities ? entities.join(', ') : 'None'}
+Context: ${context ? JSON.stringify(context) : 'None'}
 
-CRITICAL: For Sector/Department to ProjectOpportunity queries, use this path:
-Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
-Department -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
-
-# Goal
-${goal}
-
-# Entities
-${entities ? entities.join(', ') : 'None specified'}
-
-# Additional Context
-${context ? JSON.stringify(context, null, 2) : 'None'}
-
-⚠️ CRITICAL Cypher Syntax Rules - MUST FOLLOW EXACTLY:
-
-🚫 FORBIDDEN PATTERNS - These will cause Neo4jError:
-❌ RETURN sector, relationships(sector), painPoint    // ERROR: relationships() needs Path, not Node
-❌ RETURN industry, relationships(industry)           // ERROR: relationships() needs Path, not Node
-❌ RETURN nodes(sector)                              // ERROR: nodes() needs Path, not Node
-❌ RETURN industry, sector, painPoint                // ERROR: Missing relationships - shows 0 connections!
-❌ {name: 'Commercial Banking'}                      // ERROR: Single quotes in property values cause parsing errors
-❌ {name: 'Retail Banking'}                          // ERROR: Single quotes are invalid in Cypher string literals
-
-✅ CORRECT PATTERNS - Use these instead:
-✅ MATCH path = (industry:Industry)-[:HAS_SECTOR]->(sector:Sector) RETURN path
-✅ MATCH (industry:Industry)-[r:HAS_SECTOR]->(sector:Sector) RETURN industry, r, sector
-✅ MATCH path = (a)-[*1..3]->(b) RETURN nodes(path), relationships(path)
-✅ MATCH (a:Sector)-[r1:EXPERIENCES]->(shared:PainPoint)<-[r2:EXPERIENCES]-(b:Department) RETURN a, r1, shared, r2, b
-✅ {name: "Commercial Banking"}                      // CORRECT: Double quotes for string literals
-✅ {name: "Retail Banking"}                          // CORRECT: Double quotes for string literals
-
-📝 STRING LITERAL FORMATTING RULES:
-- ALWAYS use double quotes ("") for string literals in property values
-- NEVER use single quotes ('') - they cause parsing errors
-- Example: MATCH (s:Sector {name: "Commercial Banking"}) - CORRECT
-- Example: MATCH (s:Sector {name: 'Commercial Banking'}) - WRONG, will fail!
-
-🔥 CRITICAL FOR GRAPH VISUALIZATION:
-- Graph visualization REQUIRES both nodes AND relationships to display connections
-- NEVER return just nodes like "RETURN industry, sector, painPoint" - this will show "0 connections"
-- ALWAYS include relationship variables: "RETURN industry, r1, sector, r2, painPoint"
-- For path queries, use: RETURN path OR RETURN nodes(path), relationships(path)
-- For multi-hop: MATCH (a)-[r1]->(b)-[r2]->(c) RETURN a, r1, b, r2, c
-- Example: MATCH (industry:Industry {name: 'Banking'})-[r1:HAS_SECTOR]->(sector:Sector)-[r2:EXPERIENCES]->(painPoint:PainPoint) RETURN industry, r1, sector, r2, painPoint
-
-CRITICAL: Respond with ONLY pure JSON. No markdown, no backticks, no code blocks.
+CRITICAL Rules:
+❌ NEVER: relationships(node), nodes(node) - Path only
+❌ NEVER: RETURN just nodes - include relationships
+❌ NEVER: Double quotes in properties - use single quotes
+✅ Pattern: MATCH (a)-[r]->(b) RETURN a, r, b
+✅ Path: MATCH path = (a)-[]->(b) RETURN path
+✅ Projects via: Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
 
 JSON format:
 {
   "query": "MATCH... RETURN...",
   "params": {},
-  "explanation": "brief explanation of what this query does",
+  "explanation": "brief explanation",
   "connectionStrategy": "direct|indirect|both"
 }
 `;
@@ -367,7 +330,7 @@ JSON format:
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.1,
-        maxTokens: 400
+        maxTokens: 600
       });
 
       // Clean LLM response for JSON parsing
@@ -399,7 +362,7 @@ JSON format:
         try {
           const response = await this.llmManager.generateText(prompt, {
             temperature: 0.1,
-            maxTokens: 400
+            maxTokens: 600
           });
           
           const currentProvider = this.llmManager.currentProvider;
@@ -451,7 +414,7 @@ Create a Cypher query that finds relevant data for these proxy entities while be
 Respond with ONLY pure JSON:
 {
   "query": "MATCH (sector:Sector)-[r:EXPERIENCES]->(pain:PainPoint) WHERE sector.name IN $proxyEntities RETURN sector, r, pain",
-  "params": {"proxyEntities": ${JSON.stringify(entities || [])}},
+  "params": {"proxyEntities": entities || []},
   "explanation": "Finding pain points for proxy sectors representing the company",
   "connectionStrategy": "proxy_mapping"
 }
@@ -460,7 +423,7 @@ Respond with ONLY pure JSON:
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.1,
-        maxTokens: 300
+        maxTokens: 500
       });
 
       // Clean LLM response for JSON parsing
@@ -537,7 +500,7 @@ Respond with ONLY pure JSON:
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.1,
-        maxTokens: 400
+        maxTokens: 600
       });
 
       // Clean LLM response for JSON parsing
@@ -590,7 +553,7 @@ Create a query that returns data suitable for comparison analysis.
 # Comparison Pattern Examples:
 - Compare pain points between sectors: MATCH (s:Sector)-[r1:EXPERIENCES]->(p:PainPoint) RETURN s, r1, p
 - Compare opportunities by department: MATCH (d:Department)-[r1:EXPERIENCES]->(pp:PainPoint)<-[r2:ADDRESSES]-(po:ProjectOpportunity) RETURN d, r1, pp, r2, po
-- Shared connections: MATCH (a)-[r1]->(shared)<-[r2]-(b) WHERE labels(a) = ["Sector"] AND labels(b) = ["Department"] RETURN a, r1, shared, r2, b
+- Shared connections: MATCH (a)-[r1]->(shared)<-[r2]-(b) WHERE labels(a) = ['Sector'] AND labels(b) = ['Department'] RETURN a, r1, shared, r2, b
 
 ⚠️ CRITICAL: Always include relationships for proper graph visualization.
 
@@ -606,7 +569,7 @@ Respond with ONLY pure JSON:
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.1,
-        maxTokens: 350
+        maxTokens: 550
       });
 
       // Clean LLM response for JSON parsing
@@ -705,12 +668,8 @@ Respond with ONLY pure JSON:
     console.log('[TaskLibrary] Executing analyze_and_summarize:', params);
     
     const { 
-      dataset1, 
-      dataset2, 
-      dataset, 
-      comparison_type, 
+      dataset,
       analysis_goal,
-      // Enhanced business context parameters
       business_context,
       consultant_response,
       proxy_explanation,
@@ -718,22 +677,44 @@ Respond with ONLY pure JSON:
       proxy_sectors,
       analysis_type,
       expected_result,
-      // New gap analysis parameters
       missing_sectors,
       business_impact_of_gaps,
       data_completeness_score
     } = params;
     
-    // Handle both single dataset and comparison scenarios
-    let primaryDataset = dataset1 || dataset;
-    let secondaryDataset = dataset2;
-    
-    if (!primaryDataset && !secondaryDataset) {
-      return { success: false, error: 'Missing dataset(s) to analyze' };
+    if (!dataset) {
+      return { success: false, error: 'Missing dataset parameter' };
     }
 
-    // Determine analysis type (comparison, proxy, analytical, standard)
-    const isComparison = secondaryDataset && primaryDataset;
+    // Check for empty dataset - avoid hallucination
+    const isEmpty = !dataset.nodes || dataset.nodes.length === 0;
+    
+    if (isEmpty && original_company) {
+      return {
+        success: true,
+        output: {
+          analysis: `I don't have data for ${original_company} in our database.`,
+          analysis_context: {
+            type: 'empty_result_with_company',
+            original_company: original_company,
+            datasets_analyzed: 0
+          }
+        }
+      };
+    } else if (isEmpty) {
+      return {
+        success: true,
+        output: {
+          analysis: `No data found for this query.`,
+          analysis_context: {
+            type: 'empty_result',
+            datasets_analyzed: 0
+          }
+        }
+      };
+    }
+
+    // Determine analysis type (proxy, analytical, standard)
     const isProxyAnalysis = (proxy_explanation || consultant_response || business_context) && original_company;
     const isAnalyticalAnalysis = analysis_type && ['exclusion', 'inclusion', 'relationship_analysis'].includes(analysis_type);
     
@@ -749,7 +730,7 @@ Respond with ONLY pure JSON:
 You are an AI consultant providing analysis for ${original_company}. Analyze graph database results using proxy sectors with business intelligence and full transparency about data gaps.
 
 # Dataset from Database
-${JSON.stringify(primaryDataset, null, 2)}
+${JSON.stringify(dataset, null, 2)}
 
 # Business Intelligence Context
 Company: ${original_company}
@@ -793,7 +774,7 @@ Be transparent about what comes from the database vs. business intelligence whil
 Analyze the results of an analytical query and provide structured insights.
 
 # Dataset
-${JSON.stringify(primaryDataset, null, 2)}
+${JSON.stringify(dataset, null, 2)}
 
 # Analysis Type
 ${analysis_type}
@@ -815,38 +796,13 @@ For ${analysis_type} analysis, focus on:
 
 Structure your response clearly with specific insights and recommendations.
 `;
-    } else if (isComparison) {
-      prompt = `
-You are an AI consultant providing comparative analysis to support strategic decision-making. Analyze the following business intelligence data.
-
-# Dataset 1
-${JSON.stringify(primaryDataset, null, 2)}
-
-# Dataset 2
-${JSON.stringify(secondaryDataset, null, 2)}
-
-# Analysis Framework
-Comparison Type: ${comparison_type || 'Strategic Comparative Analysis'}
-Business Objective: ${analysis_goal || 'Identify strategic patterns and opportunities across domains'}
-
-# Your Consultant Analysis
-Provide a professional comparative analysis structured as:
-
-1. **Executive Summary**: Key strategic differences and similarities at a glance
-2. **Detailed Comparison**: Specific patterns, trends, and variations between the datasets
-3. **Strategic Insights**: Business implications and opportunities identified from the comparison
-4. **Recommendations**: Actionable recommendations based on the comparative findings
-5. **Risk Assessment**: Potential challenges or limitations revealed by the analysis
-
-Focus on strategic value and actionable insights that support business decision-making.
-`;
     } else {
       // Standard single dataset analysis
       prompt = `
 You are an AI consultant providing strategic analysis to support business decision-making. Analyze the following project opportunity data.
 
 # Dataset from Database
-${JSON.stringify(primaryDataset, null, 2)}
+${JSON.stringify(dataset, null, 2)}
 
 # Analysis Framework
 Analysis Type: ${comparison_type || analysis_type || 'Strategic Business Analysis'}
@@ -877,15 +833,13 @@ Focus on translating data patterns into strategic business insights and actionab
           analysis: response,
           analysis_context: {
             type: isProxyAnalysis ? 'proxy_analysis' : 
-                  isAnalyticalAnalysis ? 'analytical_analysis' : 
-                  isComparison ? 'comparative_analysis' : 'single_dataset_analysis',
+                  isAnalyticalAnalysis ? 'analytical_analysis' : 'single_dataset_analysis',
             is_proxy: isProxyAnalysis,
             is_analytical: isAnalyticalAnalysis,
-            is_comparison: isComparison,
             original_company: original_company || null,
             proxy_explanation: proxy_explanation || null,
             analysis_type: analysis_type || null,
-            datasets_analyzed: isComparison ? 2 : 1
+            datasets_analyzed: 1
           }
         }
       };
@@ -1172,8 +1126,8 @@ Review this Cypher query for syntax errors and correct any issues found.
 ${cypherResult.query}
 
 # Common Issues to Check:
-1. String literals - MUST use double quotes ("") not single quotes ('')
-2. Property matching syntax - {name: "value"} not {name: 'value'}
+1. String literals - MUST use single quotes ('') not double quotes ("")
+2. Property matching syntax - {name: 'value'} not {name: "value"}
 3. Relationship patterns - ensure proper syntax
 4. Variable naming - check for consistency
 
@@ -1193,7 +1147,7 @@ Respond with ONLY JSON in this format:
     try {
       const response = await this.llmManager.generateText(validationPrompt, {
         temperature: 0.1,
-        maxTokens: 300
+        maxTokens: 500
       });
 
       // Clean LLM response for JSON parsing
@@ -1270,7 +1224,7 @@ Respond with ONLY JSON:
     try {
       const response = await this.llmManager.generateText(recoveryPrompt, {
         temperature: 0.1,
-        maxTokens: 400
+        maxTokens: 600
       });
 
       // Clean LLM response for JSON parsing
@@ -1704,7 +1658,7 @@ WRONG: UNION queries with different return columns
 
 Example intelligent query structure:
 MATCH (industry:Industry)-[r1:HAS_SECTOR]->(sector:Sector)-[r2:EXPERIENCES]->(pp:PainPoint)<-[r3:ADDRESSES]-(project:ProjectOpportunity)
-WHERE industry.name IN ["Banking"] OR sector.name IN ["Retail Banking", "Commercial Banking"]
+WHERE industry.name IN ['Banking'] OR sector.name IN ['Retail Banking', 'Commercial Banking']
 RETURN industry, r1, sector, r2, pp, r3, project
 
 Respond with ONLY pure JSON:
@@ -1719,7 +1673,7 @@ Respond with ONLY pure JSON:
     try {
       const response = await this.llmManager.generateText(prompt, {
         temperature: 0.1,
-        maxTokens: 400
+        maxTokens: 600
       });
 
       // Clean LLM response for JSON parsing

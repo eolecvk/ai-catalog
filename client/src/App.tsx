@@ -981,13 +981,28 @@ const App: React.FC = () => {
 
   // Handle node double-click in graph (center and show connections)
   const handleGraphNodeEdit = async (nodeId: string, nodeData: any) => {
-    console.log(`Double-clicked node: ${nodeId} (${nodeData.label})`);
+    console.log('[App] Double-click handler called:', {
+      receivedNodeId: nodeId,
+      nodeIdType: typeof nodeId,
+      nodeData: nodeData,
+      nodeLabel: nodeData?.label,
+      nodeGroup: nodeData?.group,
+      currentGraphVersion: currentGraphVersion
+    });
     
     try {
+      console.log(`[App] Making API call to /api/admin/node/${nodeId}/graph?version=${currentGraphVersion}`);
+      
       // Fetch the node's direct connections from the API
       const data = await nodeApi.getGraph(nodeId, currentGraphVersion);
       
-      console.log(`API returned ${data.nodes.length} nodes and ${data.edges.length} edges for node ${nodeId}`);
+      console.log(`[App] API response received:`, {
+        nodeId: nodeId,
+        nodesCount: data.nodes.length,
+        edgesCount: data.edges.length,
+        centerNodeId: data.centerNodeId,
+        actualNodes: data.nodes.map(n => ({ id: n.id, label: n.label, group: n.group }))
+      });
       
       // Update graph data smoothly without loading state or delays
       setGraphData({
@@ -999,10 +1014,15 @@ const App: React.FC = () => {
       setFocusedGraphNode(nodeId);
       setIsShowingNodeFocus(true);
       
-      console.log(`Successfully updated graph for node ${nodeId} - blocking auto-refresh`);
+      console.log(`[App] Successfully updated graph for node ${nodeId} - blocking auto-refresh`);
     } catch (error) {
-      console.error('Failed to fetch node connections:', error);
-      alert('Failed to load node connections');
+      console.error('[App] Failed to fetch node connections:', {
+        nodeId: nodeId,
+        error: error.message,
+        errorStack: error.stack,
+        nodeData: nodeData
+      });
+      alert(`Failed to load node connections for ${nodeData?.label || nodeId}: ${error.message}`);
     }
   };
 
