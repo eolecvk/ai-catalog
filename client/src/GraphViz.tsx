@@ -14,6 +14,10 @@ interface GraphVizProps {
   graphVersion?: string;
   onGraphDataUpdate?: (nodes: GraphNode[], edges: GraphEdge[]) => void;
   hasData?: boolean;
+  // Version management props
+  availableVersions?: string[];
+  onVersionChange?: (version: string) => void;
+  onManageVersions?: () => void;
 }
 
 // Quadtree implementation for spatial partitioning
@@ -127,7 +131,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
   enableChat = true,
   graphVersion = 'base',
   onGraphDataUpdate,
-  hasData = true
+  hasData = true,
+  availableVersions = [],
+  onVersionChange,
+  onManageVersions
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [simulationNodes, setSimulationNodes] = useState<GraphNode[]>([]);
@@ -1098,34 +1105,72 @@ const GraphViz: React.FC<GraphVizProps> = ({
   // Pan controls
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const initialPanOffset = useRef({ x: 0, y: 0 });
 
   const handlePanStart = useCallback((e: React.MouseEvent) => {
     const target = e.target as any;
     
-    // Only start panning if clicking on the SVG background or background rect
-    const isBackgroundClick = (
-      e.target === e.currentTarget || // SVG itself
-      (target.tagName === 'rect' && target.getAttribute?.('fill') === 'transparent') || // Background rect
-      target.classList?.contains?.('graph-background') // Background class
+    // Check if this is a node-related element that should NOT trigger panning
+    const isNodeElement = (
+      target.tagName === 'circle' || // Node circles
+      (target.tagName === 'text' && target.closest('g')?.querySelector('circle')) || // Text inside node groups
+      (target.tagName === 'g' && target.querySelector('circle')) // Group containers with node circles
     );
     
-    if (isBackgroundClick) {
-      console.log('[GraphViz] Starting pan on background click');
+    // Allow panning from specific background and edge elements only
+    const isBackgroundElement = (
+      e.target === e.currentTarget || // SVG itself
+      (target.tagName === 'rect' && target.getAttribute?.('fill') === 'transparent') || // Background rects
+      (target.tagName === 'rect' && target.getAttribute?.('fill')?.includes('url(#grid)')) || // Grid background
+      target.classList?.contains?.('graph-background') || // Background class
+      target.classList?.contains?.('graph-background-expanded') || // Expanded background
+      target.tagName === 'line' || // Edge lines
+      (target.tagName === 'g' && target.classList?.contains?.('edges')) || // Edge container groups
+      target.tagName === 'path' // Grid pattern or other paths
+    );
+    
+    // Only allow panning from background elements, not from node elements
+    if (isBackgroundElement && !isNodeElement) {
+      console.log('[GraphViz] Starting pan on element:', target.tagName, target.className);
       setIsPanning(true);
-      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+      // Store the initial mouse position and current pan offset separately to prevent jumping
+      setPanStart({ 
+        x: e.clientX, 
+        y: e.clientY
+      });
+      initialPanOffset.current = { ...panOffset };
       e.preventDefault();
       e.stopPropagation();
+    } else if (isNodeElement) {
+      console.log('[GraphViz] Node element clicked - not starting pan:', target.tagName);
     }
   }, [panOffset]);
 
   const handlePanMove = useCallback((e: MouseEvent) => {
     if (isPanning) {
+      // Calculate the raw mouse movement delta since pan started
+      const rawDeltaX = e.clientX - panStart.x;
+      const rawDeltaY = e.clientY - panStart.y;
+      
+      // Base sensitivity - make panning more responsive to mouse movements
+      const baseSensitivity = 2.0; // 2x more sensitive than default
+      
+      // Additional sensitivity scaling at higher zoom levels for better navigation
+      const zoomSensitivityBoost = Math.max(1, manualZoom * 0.3);
+      
+      // Add subtle acceleration for larger movements to make panning feel more fluid
+      const distance = Math.sqrt(rawDeltaX * rawDeltaX + rawDeltaY * rawDeltaY);
+      const accelerationFactor = 1 + Math.min(distance / 200, 0.5); // Up to 50% acceleration for large movements
+      
+      const totalSensitivity = baseSensitivity * zoomSensitivityBoost * accelerationFactor;
+      
+      // Apply sensitivity to the movement delta, then add to initial pan offset to prevent jumping
       setPanOffset({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y
+        x: initialPanOffset.current.x + (rawDeltaX * totalSensitivity),
+        y: initialPanOffset.current.y + (rawDeltaY * totalSensitivity)
       });
     }
-  }, [isPanning, panStart]);
+  }, [isPanning, panStart, manualZoom]);
 
   const handlePanEnd = useCallback(() => {
     console.log('[GraphViz] Ending pan');
@@ -1253,110 +1298,142 @@ const GraphViz: React.FC<GraphVizProps> = ({
               padding: '1rem'
             }}
           >
-            {/* Graph Stats Overlay */}
-            <div className="graph-stats-overlay">
-              <div className="graph-stat">
-                <strong>{nodes.length}</strong> nodes
-              </div>
-              <div className="graph-stat">
-                <strong>{edges.length}</strong> connections
-              </div>
-              <div className="graph-stat">
-                <strong>{componentCount}</strong> subgraphs
-              </div>
-              <div className="graph-stat zoom-info">
-                <strong>{Math.round(manualZoom * 100)}%</strong> zoom
-              </div>
-              {performanceConfig.useSimpleRendering && (
-                <div className="graph-stat performance-mode" style={{color: '#e67e22'}}>
-                  <strong>⚡</strong> Performance Mode
-                </div>
-              )}
-              {/* Pan state indicator for debugging */}
-              <div className="graph-stat pan-state" style={{color: isPanning ? '#27ae60' : '#95a5a6'}}>
-                <strong>{isPanning ? '🤏' : '✋'}</strong> {isPanning ? 'Panning' : 'Ready'}
-              </div>
-              {isAnimationRunning && performanceMetrics.current.currentFps > 0 && (
-                <div className="graph-stat fps-counter" style={{color: performanceMetrics.current.currentFps < 20 ? '#e74c3c' : '#27ae60'}}>
-                  <strong>{Math.round(performanceMetrics.current.currentFps)}</strong> fps
-                </div>
-              )}
-            </div>
-
-            {/* Zoom Controls */}
-            <div className="zoom-controls" style={{
+            {/* Professional Graph Controls Overlay */}
+            <div className="graph-controls-overlay" style={{
               position: 'absolute',
-              top: '10px',
-              right: '10px',
+              top: '8px',
+              left: '8px',
+              right: '8px',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '4px',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              pointerEvents: 'none',
               zIndex: 10
             }}>
-              <button
-                onClick={handleZoomIn}
-                className="zoom-btn"
-                title="Zoom In"
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(0,0,0,0.7)',
-                  color: 'white',
-                  borderRadius: '4px',
+              {/* Left side: Stats */}
+              <div className="graph-stats-section" style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                background: 'rgba(0, 0, 0, 0.85)',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                pointerEvents: 'auto',
+                maxWidth: '200px'
+              }}>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '11px', color: 'rgba(255,255,255,0.9)' }}>
+                  <span><strong style={{color: '#3498db'}}>{nodes.length}</strong> nodes</span>
+                  <span><strong style={{color: '#e74c3c'}}>{edges.length}</strong> edges</span>
+                  <span><strong style={{color: '#f39c12'}}>{componentCount}</strong> groups</span>
+                </div>
+                {performanceConfig.useSimpleRendering && (
+                  <div style={{ fontSize: '10px', color: '#e67e22' }}>
+                    <strong>⚡</strong> Performance Mode
+                  </div>
+                )}
+              </div>
+
+              {/* Right side: Controls */}
+              <div className="graph-controls-section" style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+                alignItems: 'flex-end'
+              }}>
+                {/* Zoom Controls */}
+                <div className="integrated-zoom-controls" style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  fontSize: '18px',
-                  fontWeight: 'bold'
-                }}
-              >
-                +
-              </button>
-              <button
-                onClick={handleZoomOut}
-                className="zoom-btn"
-                title="Zoom Out"
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(0,0,0,0.7)',
-                  color: 'white',
+                  gap: '4px',
+                  background: 'rgba(0, 0, 0, 0.85)',
+                  padding: '6px',
+                  borderRadius: '6px',
+                  pointerEvents: 'auto'
+                }}>
+                  <div style={{ 
+                    fontSize: '11px', 
+                    color: 'rgba(255,255,255,0.8)', 
+                    padding: '4px 8px',
+                    minWidth: '45px',
+                    textAlign: 'center'
+                  }}>
+                    {Math.round(manualZoom * 100)}%
+                  </div>
+                  <button
+                    onClick={handleZoomOut}
+                    title="Zoom Out"
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      background: 'rgba(255,255,255,0.1)',
+                      color: 'white',
+                      borderRadius: '3px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    −
+                  </button>
+                  <button
+                    onClick={handleZoomIn}
+                    title="Zoom In"
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      background: 'rgba(255,255,255,0.1)',
+                      color: 'white',
+                      borderRadius: '3px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    +
+                  </button>
+                  <button
+                    onClick={handleResetView}
+                    title="Reset View"
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      background: 'rgba(255,255,255,0.1)',
+                      color: 'white',
+                      borderRadius: '3px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontSize: '10px',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    ⌂
+                  </button>
+                </div>
+
+                {/* Version Info */}
+                <div style={{
+                  background: 'rgba(0, 0, 0, 0.85)',
+                  padding: '4px 8px',
                   borderRadius: '4px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  fontSize: '18px',
-                  fontWeight: 'bold'
-                }}
-              >
-                −
-              </button>
-              <button
-                onClick={handleResetView}
-                className="zoom-btn"
-                title="Fit All Nodes"
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(0,0,0,0.7)',
-                  color: 'white',
-                  borderRadius: '4px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  fontWeight: 'bold'
-                }}
-              >
-                ⌂
-              </button>
+                  fontSize: '10px',
+                  color: 'rgba(255,255,255,0.7)',
+                  pointerEvents: 'auto'
+                }}>
+                  {graphVersion === 'base' ? '🔒 Base' : `✏️ ${graphVersion}`}
+                </div>
+              </div>
             </div>
+
 
             <svg
               ref={svgRef}
@@ -1470,15 +1547,45 @@ const GraphViz: React.FC<GraphVizProps> = ({
               </>
             )}
           </defs>
+          
+          {/* Ultimate background coverage - massive invisible rectangle behind everything */}
+          <rect 
+            x="-10000"
+            y="-10000" 
+            width="20000"
+            height="20000"
+            fill="transparent"
+            onClick={handleGraphBackgroundClick}
+            onMouseDown={handlePanStart}
+            style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+          />
+          
           <rect 
             width="100%" 
             height="100%" 
             fill="url(#grid)" 
             onClick={handleGraphBackgroundClick}
-            style={{ cursor: 'default' }}
+            onMouseDown={handlePanStart}
+            style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
           />
           
-          {/* Background rectangle for panning */}
+          {/* Expanded background rectangle for panning - covers much larger area */}
+          <rect
+            className="graph-background-expanded"
+            x={-width * 2}
+            y={-heightNum * 2}
+            width={width * 5}
+            height={heightNum * 5}
+            fill="transparent"
+            style={{ 
+              cursor: isPanning ? 'grabbing' : 'grab',
+              transition: 'fill-opacity 0.2s ease'
+            }}
+            onMouseDown={handlePanStart}
+            onClick={handleGraphBackgroundClick}
+          />
+
+          {/* Original background rectangle for panning */}
           <rect
             className="graph-background"
             x={0}
@@ -1490,16 +1597,25 @@ const GraphViz: React.FC<GraphVizProps> = ({
               cursor: isPanning ? 'grabbing' : 'grab',
               transition: 'fill-opacity 0.2s ease'
             }}
+            onMouseDown={handlePanStart}
             onMouseEnter={() => console.log('[GraphViz] Background hover - grab available')}
             onMouseLeave={() => console.log('[GraphViz] Background hover end')}
             onClick={handleGraphBackgroundClick}
           />
 
           {/* Main graph group with center-based zoom and pan transformations */}
-          <g transform={getCenterBasedTransform()}>
+          <g 
+            transform={getCenterBasedTransform()}
+            style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+            onMouseDown={handlePanStart}
+          >
             
           {/* Edges */}
-          <g className="edges">
+          <g 
+            className="edges"
+            style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+            onMouseDown={handlePanStart}
+          >
 {/* Edge rendering with fallback positioning */}
             {edges.map((edge, edgeIndex) => {
               const source = simulationNodes.find(n => n.id === edge.from);
@@ -1569,8 +1685,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     strokeWidth={connectionStyle.strokeWidth}
                     opacity={connectionStyle.opacity}
                     style={{
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      cursor: isPanning ? 'grabbing' : 'grab'
                     }}
+                    onMouseDown={handlePanStart}
                   />
                   
                   {/* Main connection line */}
@@ -1587,11 +1705,12 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     filter={isFocused && !performanceConfig.disableShadows ? "url(#connectionShadow)" : "none"}
                     style={{
                       transition: performanceConfig.disableAnimations ? 'none' : 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                      cursor: 'pointer'
+                      cursor: isPanning ? 'grabbing' : 'grab'
                     }}
+                    onMouseDown={handlePanStart}
                   />
                   
-                  {/* Interactive hover area (invisible but clickable) */}
+                  {/* Interactive hover area (invisible but clickable and pannable) */}
                   <line
                     x1={sourceX}
                     y1={sourceY}
@@ -1600,8 +1719,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     stroke="transparent"
                     strokeWidth="8"
                     style={{
-                      cursor: 'pointer'
+                      cursor: isPanning ? 'grabbing' : 'grab'
                     }}
+                    onMouseDown={handlePanStart}
                     onMouseEnter={(e) => {
                       const mainLine = e.currentTarget.previousSibling as SVGLineElement;
                       if (mainLine && !isFaded) {
@@ -1662,8 +1782,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     fontWeight={isFocused ? '700' : '500'}
                     opacity={shouldFade ? 0.3 : 1}
                     style={{ 
-                      pointerEvents: 'none', 
                       userSelect: 'none',
+                      cursor: 'default',
                       transition: 'opacity 0.3s ease-in-out, font-weight 0.3s ease-in-out'
                     }}
                   >
@@ -1717,8 +1837,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     fontSize={isFocused ? '16' : '14'}
                     opacity={shouldFade ? 0.3 : 1}
                     style={{ 
-                      pointerEvents: 'none', 
                       userSelect: 'none',
+                      cursor: 'default',
                       transition: 'opacity 0.3s ease-in-out, font-size 0.3s ease-in-out'
                     }}
                   >

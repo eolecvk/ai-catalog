@@ -19,6 +19,10 @@ const GraphHeroSection = memo<{
   currentGraphVersion: string;
   handleGraphDataUpdate: (nodes: any[], edges: any[]) => void;
   handleExampleQuestionClick: (question: string) => void;
+  // Version management props
+  availableVersions: string[];
+  onVersionChange: (version: string) => void;
+  onManageVersions: () => void;
 }>(({ 
   graphLoading, 
   showGraphSection, 
@@ -30,7 +34,10 @@ const GraphHeroSection = memo<{
   focusedGraphNode, 
   currentGraphVersion, 
   handleGraphDataUpdate,
-  handleExampleQuestionClick 
+  handleExampleQuestionClick,
+  availableVersions,
+  onVersionChange,
+  onManageVersions
 }) => {
   return (
     <div className="graph-hero-section">
@@ -54,6 +61,9 @@ const GraphHeroSection = memo<{
             graphVersion={currentGraphVersion}
             onGraphDataUpdate={handleGraphDataUpdate}
             hasData={hasGraphData}
+            availableVersions={[]}
+            onVersionChange={undefined}
+            onManageVersions={undefined}
           />
         </GraphErrorBoundary>
       ) : (
@@ -1603,34 +1613,9 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      <header className="app-header builder-mode">
+      <header className="app-header builder-mode compact">
         <div className="header-content">
           <h1>AI Project Map</h1>
-          <div className="header-controls">
-            {builderAuthenticated && (
-              <div className="version-controls">
-                <span className="version-label">Version:</span>
-                <select 
-                  value={currentGraphVersion} 
-                  onChange={(e) => setCurrentGraphVersion(e.target.value)}
-                  className="version-select"
-                >
-                  {availableVersions.map(version => (
-                    <option key={version} value={version}>
-                      {version === 'base' ? '🔒 Base' : `✏️ ${version}`}
-                    </option>
-                  ))}
-                </select>
-                <button 
-                  className="version-manage-btn"
-                  onClick={() => setShowManageVersionsModal(true)}
-                  title="Manage all versions"
-                >
-                  🗂️
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </header>
 
@@ -1668,6 +1653,9 @@ const App: React.FC = () => {
                   currentGraphVersion={currentGraphVersion}
                   handleGraphDataUpdate={handleGraphDataUpdate}
                   handleExampleQuestionClick={handleExampleQuestionClick}
+                  availableVersions={availableVersions}
+                  onVersionChange={setCurrentGraphVersion}
+                  onManageVersions={() => setShowManageVersionsModal(true)}
                 />
                 
                 {/* Node Cards - Horizontal layout under graph */}
