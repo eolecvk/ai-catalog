@@ -1152,7 +1152,7 @@ JSON format:
       if (!nodes.has(nodeId)) {
         nodes.set(nodeId, {
           id: nodeId,
-          label: item.properties.name || item.properties.title || 'Unnamed',
+          label: item.properties.name || 'Unnamed',
           group: item.labels[0] || 'Unknown',
           properties: item.properties
         });

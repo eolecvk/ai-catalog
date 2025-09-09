@@ -49,7 +49,7 @@ class TaskLibrary {
       // First check for exact name/title matches in the data
       const exactQuery = `
         MATCH (n)
-        WHERE toLower(n.name) = toLower($entity) OR toLower(n.title) = toLower($entity)
+        WHERE toLower(n.name) = toLower($entity)
         RETURN n, labels(n) as labels
         LIMIT 5
       `;
@@ -77,13 +77,11 @@ class TaskLibrary {
       // Check for partial/fuzzy matches with enhanced search
       const fuzzyQuery = `
         MATCH (n)
-        WHERE toLower(n.name) CONTAINS toLower($entity) 
-          OR toLower(n.title) CONTAINS toLower($entity)
+        WHERE toLower(n.name) CONTAINS toLower($entity)
           OR ANY(label IN labels(n) WHERE toLower(label) CONTAINS toLower($entity))
         RETURN n, labels(n) as labels, 
                CASE 
                  WHEN toLower(n.name) CONTAINS toLower($entity) THEN n.name
-                 WHEN toLower(n.title) CONTAINS toLower($entity) THEN n.title
                  ELSE labels(n)[0]
                END as matched_field
         ORDER BY size(matched_field) ASC
@@ -314,9 +312,11 @@ CRITICAL Rules:
 ❌ NEVER: relationships(node), nodes(node) - Path only
 ❌ NEVER: RETURN just nodes - include relationships
 ❌ NEVER: Double quotes in properties - use single quotes
+✅ ALWAYS: Use case-insensitive matching: WHERE toLower(n.name) CONTAINS toLower('term')
 ✅ Pattern: MATCH (a)-[r]->(b) RETURN a, r, b
 ✅ Path: MATCH path = (a)-[]->(b) RETURN path
 ✅ Projects via: Sector -[:EXPERIENCES]-> PainPoint <-[:ADDRESSES]- ProjectOpportunity
+✅ Multi-field search: WHERE toLower(po.name) CONTAINS toLower('fraud') OR toLower(po.business_case) CONTAINS toLower('fraud') OR toLower(pp.name) CONTAINS toLower('fraud')
 
 JSON format:
 {
@@ -1393,7 +1393,7 @@ Respond with ONLY JSON:
       if (!nodes.has(nodeId)) {
         nodes.set(nodeId, {
           id: nodeId,
-          label: item.properties.name || item.properties.title || 'Unnamed',
+          label: item.properties.name || 'Unnamed',
           group: item.labels[0] || 'Unknown',
           properties: item.properties
         });

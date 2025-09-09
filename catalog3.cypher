@@ -1,14 +1,5 @@
 // =================================================================
 // COMPLETE SCRIPT - BANKING & INSURANCE WITH DEPARTMENTS (v4 - REVISED)
-// This version reflects an updated data model where:
-// 1. Projects are not directly linked to Sectors/Departments.
-// 2. Projects depend on Modules, not Sub-Modules.
-// 3. Roles are required by Modules, not Projects.
-// -- MODIFIED: Removed all ProjectBlueprint nodes and relationships.
-// =================================================================
-
-// Clear existing graph for a clean run (Optional)
-// MATCH (n) DETACH DELETE n;
 
 // =================================================================
 // SECTION 1: CREATE CORE ENTITIES
@@ -423,7 +414,7 @@ MERGE (mod_sec_ops)-[:REQUIRES_ROLE]->(ds);
 MATCH (pp_loan_risk:PainPoint {name: 'Inaccurate Loan Default Prediction'})
 MATCH (mod_cr:Module {name: 'Credit Scoring Core Modules'})
 CREATE (opp_rb_cr:ProjectOpportunity {
-    title: 'Next-Gen Credit Scoring for Retail Mortgages',
+    name: 'Next-Gen Credit Scoring for Retail Mortgages',
     priority: 'High',
     business_case: 'Improve mortgage approval accuracy and reduce defaults by using alternative data sources and mitigating model bias.'
 })
@@ -434,7 +425,7 @@ CREATE (opp_rb_cr)-[:USES_MODULE]->(mod_cr);
 MATCH (pp_cc_fraud:PainPoint {name: 'High-Volume Transaction Fraud'})
 MATCH (mod_fd:Module {name: 'Fraud Detection Core Modules'})
 CREATE (opp_rb_fd:ProjectOpportunity {
-    title: 'Real-Time Credit Card Fraud Prevention',
+    name: 'Real-Time Credit Card Fraud Prevention',
     priority: 'High',
     business_case: 'Reduce financial losses from credit card fraud by 25% through real-time transaction analysis.'
 })
@@ -445,7 +436,7 @@ CREATE (opp_rb_fd)-[:USES_MODULE]->(mod_fd);
 MATCH (pp_call_volume:PainPoint {name: 'Overloaded Call Center Staff'})
 MATCH (mod_cs:Module {name: 'Customer Service Core Modules'})
 CREATE (opp_rb_cs:ProjectOpportunity {
-    title: 'AI-Powered Omnichannel Customer Service Assistant',
+    name: 'AI-Powered Omnichannel Customer Service Assistant',
     priority: 'Medium',
     business_case: 'Reduce call center volume by 30% and improve first-call resolution by automating common queries and empowering agents.'
 })
@@ -457,7 +448,7 @@ MATCH (pp_slow_claims:PainPoint {name: 'Slow & Manual Claims Processing'})
 MATCH (pp_claim_fraud:PainPoint {name: 'Fraudulent & Inflated Claims'})
 MATCH (mod_cl:Module {name: 'Claims Processing Core Modules'})
 CREATE (opp_pi_cl:ProjectOpportunity {
-    title: 'Automated Property Claims Processing',
+    name: 'Automated Property Claims Processing',
     priority: 'High',
     business_case: 'Reduce average claims processing time by 50% and automate fraudulent claim flags using document analysis.'
 })
@@ -471,7 +462,7 @@ CREATE (opp_pi_cl)-[:USES_MODULE]->(mod_cl);
 MATCH (pp_cross_sell:PainPoint {name: 'Ineffective Cross-Sell/Up-Sell'})
 MATCH (mod_nba:Module {name: 'Next Best Action Core'})
 CREATE (opp_rb_nba:ProjectOpportunity {
-    title: 'Next Best Action for Retail Banking Products',
+    name: 'Next Best Action for Retail Banking Products',
     priority: 'High',
     business_case: 'Increase product penetration by 40% through AI-driven recommendations at every customer touchpoint.',
     budget_range: '$2-3M',
@@ -484,7 +475,7 @@ CREATE (opp_rb_nba)-[:USES_MODULE]->(mod_nba);
 MATCH (pp_turnover:PainPoint {name: 'High First-Year Turnover'})
 MATCH (mod_hr_analytics:Module {name: 'HR Analytics Core'})
 CREATE (opp_cb_churn:ProjectOpportunity {
-    title: 'Relationship Manager Retention Analytics',
+    name: 'Relationship Manager Retention Analytics',
     priority: 'High',
     business_case: 'Reduce RM turnover from 40% to 15%, saving $5M annually in replacement costs.',
     budget_range: '$1-1.5M',
@@ -497,7 +488,7 @@ CREATE (opp_cb_churn)-[:USES_MODULE]->(mod_hr_analytics);
 MATCH (pp_invoice_manual:PainPoint {name: 'Manual Invoice Processing'})
 MATCH (mod_doc_intel:Module {name: 'Document Intelligence Core'})
 CREATE (opp_hi_idp:ProjectOpportunity {
-    title: 'Medical Invoice Automation Platform',
+    name: 'Medical Invoice Automation Platform',
     priority: 'High',
     business_case: 'Process 50,000 medical invoices/month with 90% automation, reducing FTE needs by 12.',
     budget_range: '$2-2.5M',
@@ -510,7 +501,7 @@ CREATE (opp_hi_idp)-[:USES_MODULE]->(mod_doc_intel);
 MATCH (pp_alert_fatigue:PainPoint {name: 'Security Alert Fatigue'})
 MATCH (mod_sec_ops:Module {name: 'Security Operations Core'})
 CREATE (opp_ob_soc:ProjectOpportunity {
-    title: 'Intelligent Cybersecurity Threat Response',
+    name: 'Intelligent Cybersecurity Threat Response',
     priority: 'High',
     business_case: 'Reduce false positive security alerts by 95% and automate incident response for 80% of routine threats.',
     budget_range: '$3-4M',
@@ -523,7 +514,7 @@ CREATE (opp_ob_soc)-[:USES_MODULE]->(mod_sec_ops);
 MATCH (pp_handle_time:PainPoint {name: 'Long Call Center Handle Time'})
 MATCH (mod_cs:Module {name: 'Customer Service Core Modules'})
 CREATE (opp_hi_call:ProjectOpportunity {
-    title: 'AI-Powered Patient Service & Routing',
+    name: 'AI-Powered Patient Service & Routing',
     priority: 'Medium',
     business_case: 'Reduce call handle time by 30% by intelligently routing patient calls to the correct department and automating basic queries.',
     budget_range: '$1-2M',
@@ -536,7 +527,7 @@ CREATE (opp_hi_call)-[:USES_MODULE]->(mod_cs);
 MATCH (pp_aml_false_positives:PainPoint {name: 'AML Alert Inefficiency'})
 MATCH (mod_fd:Module {name: 'Fraud Detection Core Modules'})
 CREATE (opp_rb_aml:ProjectOpportunity {
-    title: 'AML Transaction Monitoring Optimization',
+    name: 'AML Transaction Monitoring Optimization',
     priority: 'High',
     business_case: 'Decrease AML false positives by 90%, freeing up compliance analysts to focus on true risks and reducing manual review time.',
     budget_range: '$2-3M',
@@ -551,7 +542,7 @@ CREATE (opp_rb_aml)-[:USES_MODULE]->(mod_fd);
 MATCH (pp_generic_comm:PainPoint {name: 'Generic Customer Communications'})
 MATCH (mod_nba:Module {name: 'Next Best Action Core'})
 CREATE (opp_li_pers:ProjectOpportunity {
-    title: 'Life Insurance Customer Journey Personalization',
+    name: 'Life Insurance Customer Journey Personalization',
     priority: 'Medium',
     business_case: 'Increase policy conversion rates by 25% through personalized communications and targeted content delivery.',
     budget_range: '$1.5-2M',
@@ -565,7 +556,7 @@ MATCH (pp_resume_volume:PainPoint {name: 'Overwhelming Resume Volume'})
 MATCH (pp_turnover:PainPoint {name: 'High First-Year Turnover'})
 MATCH (mod_hr_analytics:Module {name: 'HR Analytics Core'})
 CREATE (opp_ib_talent:ProjectOpportunity {
-    title: 'AI-Powered Investment Banking Recruitment',
+    name: 'AI-Powered Investment Banking Recruitment',
     priority: 'High',
     business_case: 'Screen 10,000+ applications monthly and identify top talent with 85% accuracy, reducing time-to-hire by 50%.',
     budget_range: '$2-3M',
@@ -579,7 +570,7 @@ CREATE (opp_ib_talent)-[:USES_MODULE]->(mod_hr_analytics);
 MATCH (pp_forecast_accuracy:PainPoint {name: 'Inaccurate Revenue Forecasting'})
 MATCH (mod_cr:Module {name: 'Credit Scoring Core Modules'})
 CREATE (opp_cb_forecast:ProjectOpportunity {
-    title: 'Commercial Lending Revenue Forecasting',
+    name: 'Commercial Lending Revenue Forecasting',
     priority: 'High',
     business_case: 'Improve revenue forecast accuracy to within 5% variance using advanced ML models and external economic indicators.',
     budget_range: '$1-1.5M',
@@ -592,7 +583,7 @@ CREATE (opp_cb_forecast)-[:USES_MODULE]->(mod_cr);
 MATCH (pp_qa_sampling:PainPoint {name: 'Limited QA Coverage'})
 MATCH (mod_cl:Module {name: 'Claims Processing Core Modules'})
 CREATE (opp_pi_qa:ProjectOpportunity {
-    title: 'Automated Claims Quality Assurance',
+    name: 'Automated Claims Quality Assurance',
     priority: 'Medium',
     business_case: 'Increase QA coverage from 2% to 50% of transactions through automated quality scoring and anomaly detection.',
     budget_range: '$1.5-2M',
@@ -605,7 +596,7 @@ CREATE (opp_pi_qa)-[:USES_MODULE]->(mod_cl);
 MATCH (pp_unplanned_downtime:PainPoint {name: 'Unplanned System Downtime'})
 MATCH (mod_sec_ops:Module {name: 'Security Operations Core'})
 CREATE (opp_pb_maint:ProjectOpportunity {
-    title: 'Predictive System Health Monitoring',
+    name: 'Predictive System Health Monitoring',
     priority: 'High',
     business_case: 'Prevent 90% of unplanned downtime through predictive analytics on system performance metrics and preemptive maintenance.',
     budget_range: '$2-2.5M',
@@ -618,7 +609,7 @@ CREATE (opp_pb_maint)-[:USES_MODULE]->(mod_sec_ops);
 MATCH (pp_reg_tracking:PainPoint {name: 'Manual Regulatory Tracking'})
 MATCH (mod_cl:Module {name: 'Claims Processing Core Modules'})
 CREATE (opp_hi_reg:ProjectOpportunity {
-    title: 'Healthcare Regulatory Compliance Automation',
+    name: 'Healthcare Regulatory Compliance Automation',
     priority: 'High',
     business_case: 'Automate tracking of 200+ yearly regulatory updates and ensure 99% compliance through intelligent document processing.',
     budget_range: '$2.5-3M',

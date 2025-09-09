@@ -130,7 +130,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
   hasData = true
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [simulationNodes, setSimulationNodes] = useState<GraphNode[]>([]);
   const [componentCount, setComponentCount] = useState<number>(1);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -241,30 +240,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
     };
   }, []);
 
-  // Memoize expensive calculations
+  // Memoize expensive calculations - removed window size dependencies for stable node sizing
   const memoizedCanvasSize = useMemo(() => {
     console.log('🔄 Recalculating canvas size');
     
-    // Get actual container dimensions for responsive behavior
-    let baseWidth = 1200; // Default fallback
-    let baseHeight = 700; // Default fallback
-    
-    if (canvasContainerRef.current) {
-      const containerWidth = canvasContainerRef.current.clientWidth;
-      const containerHeight = canvasContainerRef.current.clientHeight;
-      
-      if (containerWidth > 0) {
-        baseWidth = Math.max(400, containerWidth - 40); // Subtract padding/margins
-      }
-      
-      if (height === "100%" && containerHeight > 0) {
-        baseHeight = Math.max(400, containerHeight - 100); // Subtract padding/margins
-      } else {
-        baseHeight = parseInt(height) || 700;
-      }
-    } else {
-      baseHeight = parseInt(height) || 700;
-    }
+    // Use fixed base dimensions to prevent node size changes on window resize
+    const baseWidth = 1200;
+    const baseHeight = parseInt(height) || 700;
     
     // Auto-zoom calculation: zoom out when there are many nodes
     const nodeCount = currentGraphData.nodes.length;
@@ -277,25 +259,14 @@ const GraphViz: React.FC<GraphVizProps> = ({
     const componentScaleFactor = Math.max(1, estimatedComponentCount / 3); // Starts scaling after 3 components
     const combinedScaleFactor = Math.max(nodeScaleFactor, componentScaleFactor);
     
-    // For responsive behavior, use the actual canvas container size as the base for viewBox
-    // This ensures the graph content scales proportionally to fit the container
-    const containerWidth = canvasContainerRef.current?.clientWidth || 1200;
-    const containerHeight = canvasContainerRef.current?.clientHeight || 700;
+    // Scale dimensions based on content complexity only, not container size
+    const scaledWidth = Math.max(baseWidth, baseWidth * combinedScaleFactor);
+    const scaledHeight = Math.max(baseHeight, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
     
-    console.log('📏 Container dimensions:', containerWidth, 'x', containerHeight);
+    console.log('📏 Fixed canvas dimensions:', scaledWidth, 'x', scaledHeight, 'scale:', combinedScaleFactor);
     
-    // Create viewBox that matches container aspect ratio
-    const width = Math.max(400, containerWidth - 40); // Minimum width with padding
-    const heightNum = Math.max(300, height === "100%" ? containerHeight - 100 : parseInt(height) || 700);
-    
-    // For large graphs, we might need a larger viewBox to prevent node overlap
-    const scaledWidth = Math.max(width, width * combinedScaleFactor);
-    const scaledHeight = Math.max(heightNum, heightNum * Math.max(1, combinedScaleFactor * 0.8));
-    
-    // Return scaled dimensions for viewBox (allows proper scaling for large graphs)
-    // But the SVG container will still fit within the actual container bounds
     return { width: scaledWidth, heightNum: scaledHeight, combinedScaleFactor };
-  }, [nodes.length, edges.length, height, canvasContainerRef.current?.clientWidth, canvasContainerRef.current?.clientHeight, resizeCounter]);
+  }, [nodes.length, edges.length, height]);
 
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {
@@ -429,9 +400,9 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return icons[group] || '🔵'; // Default blue circle
   };
 
-  // Get node radius based on type
-  const getNodeRadius = (group: string): number => {
-    const radii: { [key: string]: number } = {
+  // Get node radius based on type and zoom level for better visual balance
+  const getNodeRadius = useCallback((group: string): number => {
+    const baseRadii: { [key: string]: number } = {
       'Industry': 32,      // Largest - top hierarchy
       'Sector': 26,        // Second largest 
       'Department': 22,    // Medium
@@ -442,8 +413,15 @@ const GraphViz: React.FC<GraphVizProps> = ({
       'SubModule': 16,     // Smallest
       'Module': 28
     };
-    return radii[group] || 20;
-  };
+    
+    const baseRadius = baseRadii[group] || 20;
+    
+    // Scale inversely with zoom - as user zooms in, nodes get relatively smaller to maintain visual balance
+    // This prevents nodes from becoming too dominant at high zoom levels
+    const zoomAdjustment = Math.max(0.7, Math.min(1.3, 1 / Math.sqrt(manualZoom)));
+    
+    return Math.round(baseRadius * zoomAdjustment);
+  }, [manualZoom]);
 
   // Memoize connected components calculation
   const memoizedComponents = useMemo(() => {
@@ -1100,7 +1078,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   // Manual zoom controls
   const handleZoomIn = useCallback(() => {
-    const newZoom = Math.min(manualZoom * 1.2, 3);
+    const newZoom = Math.min(manualZoom * 1.2, 5);
     console.log(`[GraphViz] Zoom in: ${manualZoom.toFixed(2)} → ${newZoom.toFixed(2)}`);
     setManualZoom(newZoom);
   }, [manualZoom]);
@@ -1236,54 +1214,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return edge.from !== focusedNodeId && edge.to !== focusedNodeId;
   }, [focusedNodeId]);
 
-  // Drag handlers
-  const handleMouseDown = (node: GraphNode, event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation(); // Prevent interfering with background panning
-    setDraggedNode(node.id);
-    
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      // Simplified coordinate conversion for center-based transform
-      const center = getZoomCenter();
-      const screenX = e.clientX - rect.left;
-      const screenY = e.clientY - rect.top;
-      
-      // Convert screen coordinates to graph space by reversing the exact transform steps
-      // Original transform: translate(cx + panX, cy + panY) scale(zoom) translate(-cx, -cy)
-      // Reverse: translate(cx, cy) scale(1/zoom) translate(-cx - panX, -cy - panY)
-      const x = (screenX - center.x - panOffset.x) / manualZoom + center.x;
-      const y = (screenY - center.y - panOffset.y) / manualZoom + center.y;
-      
-      // Debug dragging coordinates
-      if (Math.abs(screenX - center.x) > 5 || Math.abs(screenY - center.y) > 5) {
-        console.log(`[GraphViz] Drag: screen(${screenX.toFixed(1)}, ${screenY.toFixed(1)}) → graph(${x.toFixed(1)}, ${y.toFixed(1)})`);
-      }
-      
-      batchedUpdateNodes(prev => prev.map(n => 
-        n.id === node.id 
-          ? { ...n, x, y, fx: x, fy: y, vx: 0, vy: 0 }
-          : n
-      ));
-    };
-
-    const handleMouseUp = () => {
-      setDraggedNode(null);
-      batchedUpdateNodes(prev => prev.map(n => 
-        n.id === node.id 
-          ? { ...n, fx: undefined, fy: undefined }
-          : n
-      ));
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      console.log('🧹 Mouse event listeners removed');
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  };
 
 
   // Show empty state if no data
@@ -1335,7 +1265,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 <strong>{componentCount}</strong> subgraphs
               </div>
               <div className="graph-stat zoom-info">
-                <strong>{Math.round((manualZoom / combinedScaleFactor) * 100)}%</strong> zoom
+                <strong>{Math.round(manualZoom * 100)}%</strong> zoom
               </div>
               {performanceConfig.useSimpleRendering && (
                 <div className="graph-stat performance-mode" style={{color: '#e67e22'}}>
@@ -1435,7 +1365,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
               viewBox={getViewBox()}
               preserveAspectRatio="xMidYMid meet"
               style={{ 
-                cursor: isPanning ? 'grabbing' : (draggedNode ? 'grabbing' : 'grab'),
+                cursor: isPanning ? 'grabbing' : 'grab',
                 maxWidth: '100%',
                 maxHeight: '100%',
                 overflow: 'visible',
@@ -1699,7 +1629,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
               
               const radius = getNodeRadius(node.group);
               const gradient = performanceConfig.disableGradients ? getNodeColor(node.group) : getNodeGradient(node.group);
-              const isDragged = draggedNode === node.id;
               const isFocused = focusedNodeId === node.id;
               const shouldFade = shouldFadeNode(node.id);
               
@@ -1713,7 +1642,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     fill={gradient}
                     stroke={isFocused ? '#e74c3c' : '#ffffff'}
                     strokeWidth={isFocused ? 5 : 3}
-                    opacity={shouldFade ? 0.25 : (isDragged ? 0.8 : 1)}
+                    opacity={shouldFade ? 0.25 : 1}
                     filter={performanceConfig.disableShadows ? "none" : "url(#nodeShadow)"}
                     style={{ 
                       cursor: 'pointer',
@@ -1721,7 +1650,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     }}
                     onClick={(e) => handleNodeClick(node, e)}
                     onDoubleClick={(e) => handleNodeDoubleClick(node, e)}
-                    onMouseDown={(e) => handleMouseDown(node, e)}
                   />
                   
                   {/* Node label with dynamic spacing */}

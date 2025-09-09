@@ -94,19 +94,17 @@ async function listDatabases() {
 const GRAPH_SCHEMA = {
   nodeTypes: [
     'Industry', 'Sector', 'Department', 'PainPoint',
-    'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'SubModule', 'Module'
+    'ProjectOpportunity', 'Role', 'SubModule', 'Module'
   ],
   relationshipTypes: [
-    'HAS_SECTOR', 'EXPERIENCES', 'HAS_OPPORTUNITY', 'ADDRESSES',
-    'IS_INSTANCE_OF', 'REQUIRES_ROLE', 'NEEDS_SUBMODULE', 'CONTAINS', 'USES_MODULE'
+    'HAS_SECTOR', 'EXPERIENCES', 'ADDRESSES', 'REQUIRES_ROLE', 'CONTAINS', 'USES_MODULE'
   ],
   nodeProperties: {
     'Industry': ['name'],
     'Sector': ['name'],
     'Department': ['name'],
     'PainPoint': ['name', 'impact'],
-    'ProjectOpportunity': ['title', 'priority', 'business_case', 'budget_range', 'duration'],
-    'ProjectBlueprint': ['title'],
+    'ProjectOpportunity': ['name', 'priority', 'business_case', 'budget_range', 'duration'],
     'Role': ['name'],
     'SubModule': ['name'],
     'Module': ['name']
@@ -2956,10 +2954,6 @@ app.get('/api/admin/nodes/:type', async (req, res) => {
       case 'projects':
         query = 'MATCH (n:ProjectOpportunity) RETURN n ORDER BY n.title';
         break;
-      case 'blueprint':
-      case 'blueprints':
-        query = 'MATCH (n:ProjectBlueprint) RETURN n ORDER BY n.title';
-        break;
       case 'role':
       case 'roles':
         query = 'MATCH (n:Role) RETURN n ORDER BY n.name';
@@ -3009,9 +3003,9 @@ app.get('/api/admin/stats', async (req, res) => {
       { type: 'Department', query: 'MATCH (n:Department) RETURN count(n) as count' },
       { type: 'PainPoint', query: 'MATCH (n:PainPoint) RETURN count(n) as count' },
       { type: 'ProjectOpportunity', query: 'MATCH (n:ProjectOpportunity) RETURN count(n) as count' },
-      { type: 'ProjectBlueprint', query: 'MATCH (n:ProjectBlueprint) RETURN count(n) as count' },
       { type: 'Role', query: 'MATCH (n:Role) RETURN count(n) as count' },
-      { type: 'SubModule', query: 'MATCH (n:SubModule) RETURN count(n) as count' }
+      { type: 'SubModule', query: 'MATCH (n:SubModule) RETURN count(n) as count' },
+      { type: 'Module', query: 'MATCH (n:Module) RETURN count(n) as count' }
     ];
     
     for (const { type, query } of nodeCountQueries) {
@@ -3235,9 +3229,9 @@ app.get('/api/admin/orphans', async (req, res) => {
 
 // Get specific node with its direct connections for visualization
 app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
-  const session = driver.session();
   const { nodeId } = req.params;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   console.log('[API] Node graph request received:', {
     rawNodeId: nodeId,
@@ -3319,7 +3313,7 @@ app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
     // Add center node
     const centerNodeData = {
       id: centerNode.identity.toString(),
-      label: centerNode.properties.name || centerNode.properties.title || 'Unnamed',
+      label: centerNode.properties.name || 'Unnamed',
       group: centerNode.labels[0] || 'Unknown',
       properties: centerNode.properties
     };
@@ -3331,7 +3325,7 @@ app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
       if (conn.node && conn.relationship) {
         const connectedNodeData = {
           id: conn.node.identity.toString(),
-          label: conn.node.properties.name || conn.node.properties.title || 'Unnamed',
+          label: conn.node.properties.name || 'Unnamed',
           group: conn.node.labels[0] || 'Unknown',
           properties: conn.node.properties
         };
@@ -3379,9 +3373,9 @@ app.get('/api/admin/node/:nodeId/graph', async (req, res) => {
 
 // Get all connections for a specific node
 app.get('/api/admin/node/:nodeId/connections', async (req, res) => {
-  const session = driver.session();
   const { nodeId } = req.params;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
+  const session = getVersionSession(version);
   
   try {
     // Query to find all connections (both incoming and outgoing) for a specific node
@@ -3420,7 +3414,7 @@ app.get('/api/admin/node/:nodeId/connections', async (req, res) => {
           properties: conn.relationship.properties,
           targetNode: {
             id: conn.target.identity.toString(),
-            label: conn.target.properties.name || conn.target.properties.title || 'Unnamed',
+            label: conn.target.properties.name || 'Unnamed',
             group: conn.target.labels[0] || 'Unknown',
             properties: conn.target.properties
           }
@@ -3441,7 +3435,7 @@ app.get('/api/admin/node/:nodeId/connections', async (req, res) => {
           properties: conn.relationship.properties,
           sourceNode: {
             id: conn.source.identity.toString(),
-            label: conn.source.properties.name || conn.source.properties.title || 'Unnamed',
+            label: conn.source.properties.name || 'Unnamed',
             group: conn.source.labels[0] || 'Unknown',
             properties: conn.source.properties
           }
@@ -3484,7 +3478,6 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
       'departments': 'Department',
       'painpoints': 'PainPoint',
       'projects': 'ProjectOpportunity', // This will trigger our comprehensive project case
-      'blueprints': 'ProjectBlueprint',
       'roles': 'Role',
       'modules': 'Module',
       'submodules': 'SubModule',
@@ -3504,9 +3497,9 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
       // Comprehensive query to get all nodes and relationships
       const allNodesQuery = `
         MATCH (n) 
-        WHERE n:Industry OR n:Sector OR n:Department OR n:PainPoint OR n:ProjectOpportunity OR n:ProjectBlueprint OR n:Role OR n:Module OR n:SubModule
+        WHERE n:Industry OR n:Sector OR n:Department OR n:PainPoint OR n:ProjectOpportunity OR n:Role OR n:Module OR n:SubModule
         OPTIONAL MATCH (n)-[r]-(m) 
-        WHERE m:Industry OR m:Sector OR m:Department OR m:PainPoint OR m:ProjectOpportunity OR m:ProjectBlueprint OR m:Role OR m:Module OR m:SubModule
+        WHERE m:Industry OR m:Sector OR m:Department OR m:PainPoint OR m:ProjectOpportunity OR m:Role OR m:Module OR m:SubModule
         RETURN n, r, m
       `;
       
@@ -3522,12 +3515,12 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
         if (!nodeMap.has(nodeId)) {
           const nodeLabels = node.labels;
           const primaryNodeLabel = nodeLabels.find(label => 
-            ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'Module', 'SubModule'].includes(label)
+            ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'Role', 'Module', 'SubModule'].includes(label)
           ) || nodeLabels[0];
           
           nodeMap.set(nodeId, {
             id: nodeId,
-            label: node.properties.name || node.properties.title || 'Unnamed',
+            label: node.properties.name || 'Unnamed',
             group: primaryNodeLabel,
             properties: node.properties
           });
@@ -3544,7 +3537,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
             
             nodeMap.set(connectedId, {
               id: connectedId,
-              label: connectedNode.properties.name || connectedNode.properties.title || 'Unnamed',
+              label: connectedNode.properties.name || 'Unnamed',
               group: primaryConnectedLabel,
               properties: connectedNode.properties
             });
@@ -3584,134 +3577,34 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
         break;
         
       case 'ProjectOpportunity':
-        // Projects: Show ProjectBlueprint, Module, and SubModule nodes with all relationships
-        // Start from ProjectBlueprint since ProjectOpportunity nodes may not exist in current database
+        // Projects: Show ProjectOpportunity nodes with their connections to Modules, PainPoints, and Roles
+        // Updated for base-4 schema without ProjectBlueprint nodes
         const projectQuery = `
-          MATCH (pb:ProjectBlueprint)
-          OPTIONAL MATCH (pb)-[r1:REQUIRES_ROLE]->(role:Role)
-          OPTIONAL MATCH (pb)-[r2:CONTAINS]->(m:Module)
-          OPTIONAL MATCH (m)-[r3:CONTAINS]->(sm:SubModule)
-          OPTIONAL MATCH (po:ProjectOpportunity)-[r4:IS_INSTANCE_OF]->(pb)
-          OPTIONAL MATCH (po)-[r5:ADDRESSES]->(pp:PainPoint)
-          OPTIONAL MATCH (po)-[r6:USES_MODULE]->(m2:Module)
-          OPTIONAL MATCH (m2)-[r7:CONTAINS]->(sm2:SubModule)
-          RETURN pb, r1, role, r2, m, r3, sm, po, r4, r5, pp, r6, m2, r7, sm2
+          MATCH (po:ProjectOpportunity)
+          OPTIONAL MATCH (po)-[r1:ADDRESSES]->(pp:PainPoint)
+          OPTIONAL MATCH (po)-[r2:USES_MODULE]->(m:Module)
+          OPTIONAL MATCH (m)-[r3:REQUIRES_ROLE]->(role:Role)
+          OPTIONAL MATCH (m)-[r4:CONTAINS]->(sm:SubModule)
+          RETURN po, r1, pp, r2, m, r3, role, r4, sm
         `;
         
         const projectResult = await session.run(projectQuery);
         
         projectResult.records.forEach(record => {
-          const blueprint = record.get('pb');
-          const role = record.get('role');
-          const module1 = record.get('m');
-          const submodule1 = record.get('sm');
           const opportunity = record.get('po');
           const painPoint = record.get('pp');
-          const module2 = record.get('m2');
-          const submodule2 = record.get('sm2');
+          const module = record.get('m');
+          const role = record.get('role');
+          const submodule = record.get('sm');
           
-          const r1 = record.get('r1'); // REQUIRES_ROLE (blueprint->role)
-          const r2 = record.get('r2'); // CONTAINS (blueprint->module)
-          const r3 = record.get('r3'); // CONTAINS (module->submodule)
-          const r4 = record.get('r4'); // IS_INSTANCE_OF (opportunity->blueprint)
-          const r5 = record.get('r5'); // ADDRESSES (opportunity->painpoint)
-          const r6 = record.get('r6'); // USES_MODULE (opportunity->module)
-          const r7 = record.get('r7'); // CONTAINS (module2->submodule2)
+          const r1 = record.get('r1'); // ADDRESSES (opportunity->painpoint)
+          const r2 = record.get('r2'); // USES_MODULE (opportunity->module)
+          const r3 = record.get('r3'); // REQUIRES_ROLE (module->role)
+          const r4 = record.get('r4'); // CONTAINS (module->submodule)
           
-          // Add ProjectBlueprint node (always present since we start from it)
-          if (blueprint) {
-            const blueprintId = blueprint.identity.toString();
-            if (!nodeMap.has(blueprintId)) {
-              nodeMap.set(blueprintId, {
-                id: blueprintId,
-                label: blueprint.properties.title || 'Unnamed Blueprint',
-                group: 'ProjectBlueprint',
-                properties: blueprint.properties
-              });
-            }
-            
-            // Add Role and relationship
-            if (role && r1) {
-              const roleId = role.identity.toString();
-              if (!nodeMap.has(roleId)) {
-                nodeMap.set(roleId, {
-                  id: roleId,
-                  label: role.properties.name || 'Unnamed Role',
-                  group: 'Role',
-                  properties: role.properties
-                });
-              }
-              
-              const edgeId = `${blueprintId}-${roleId}-REQUIRES_ROLE`;
-              if (!edgeMap.has(edgeId)) {
-                edgeMap.set(edgeId, {
-                  id: edgeId,
-                  from: blueprintId,
-                  to: roleId,
-                  label: 'REQUIRES_ROLE',
-                  type: 'REQUIRES_ROLE',
-                  properties: r1.properties
-                });
-              }
-            }
-            
-            // Add Module and relationship
-            if (module1 && r2) {
-              const moduleId = module1.identity.toString();
-              if (!nodeMap.has(moduleId)) {
-                nodeMap.set(moduleId, {
-                  id: moduleId,
-                  label: module1.properties.name || 'Unnamed Module',
-                  group: 'Module',
-                  properties: module1.properties
-                });
-              }
-              
-              const edgeId = `${blueprintId}-${moduleId}-CONTAINS`;
-              if (!edgeMap.has(edgeId)) {
-                edgeMap.set(edgeId, {
-                  id: edgeId,
-                  from: blueprintId,
-                  to: moduleId,
-                  label: 'CONTAINS',
-                  type: 'CONTAINS',
-                  properties: r2.properties
-                });
-              }
-              
-              // Add SubModule connected to this module
-              if (submodule1 && r3) {
-                const submoduleId = submodule1.identity.toString();
-                if (!nodeMap.has(submoduleId)) {
-                  nodeMap.set(submoduleId, {
-                    id: submoduleId,
-                    label: submodule1.properties.name || 'Unnamed SubModule',
-                    group: 'SubModule',
-                    properties: submodule1.properties
-                  });
-                }
-                
-                const subEdgeId = `${moduleId}-${submoduleId}-CONTAINS`;
-                if (!edgeMap.has(subEdgeId)) {
-                  edgeMap.set(subEdgeId, {
-                    id: subEdgeId,
-                    from: moduleId,
-                    to: submoduleId,
-                    label: 'CONTAINS',
-                    type: 'CONTAINS',
-                    properties: r3.properties
-                  });
-                }
-              }
-            }
-          }
-          
-          // Add ProjectOpportunity relationships if they exist
-          if (opportunity && blueprint && r4) {
+          // Add ProjectOpportunity node (always present since we start from it)
+          if (opportunity) {
             const opportunityId = opportunity.identity.toString();
-            const blueprintId = blueprint.identity.toString();
-            
-            // Add opportunity node
             if (!nodeMap.has(opportunityId)) {
               nodeMap.set(opportunityId, {
                 id: opportunityId,
@@ -3721,21 +3614,8 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
               });
             }
             
-            // Add opportunity->blueprint relationship
-            const edgeId = `${opportunityId}-${blueprintId}-IS_INSTANCE_OF`;
-            if (!edgeMap.has(edgeId)) {
-              edgeMap.set(edgeId, {
-                id: edgeId,
-                from: opportunityId,
-                to: blueprintId,
-                label: 'IS_INSTANCE_OF',
-                type: 'IS_INSTANCE_OF',
-                properties: r4.properties
-              });
-            }
-            
-            // Add opportunity->painpoint relationship
-            if (painPoint && r5) {
+            // Add PainPoint and relationship
+            if (painPoint && r1) {
               const painPointId = painPoint.identity.toString();
               if (!nodeMap.has(painPointId)) {
                 nodeMap.set(painPointId, {
@@ -3754,20 +3634,20 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
                   to: painPointId,
                   label: 'ADDRESSES',
                   type: 'ADDRESSES',
-                  properties: r5.properties
+                  properties: r1.properties
                 });
               }
             }
             
-            // Add opportunity->module relationship and its submodules
-            if (module2 && r6) {
-              const moduleId = module2.identity.toString();
+            // Add Module and relationship
+            if (module && r2) {
+              const moduleId = module.identity.toString();
               if (!nodeMap.has(moduleId)) {
                 nodeMap.set(moduleId, {
                   id: moduleId,
-                  label: module2.properties.name || 'Unnamed Module',
+                  label: module.properties.name || 'Unnamed Module',
                   group: 'Module',
-                  properties: module2.properties
+                  properties: module.properties
                 });
               }
               
@@ -3779,19 +3659,44 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
                   to: moduleId,
                   label: 'USES_MODULE',
                   type: 'USES_MODULE',
-                  properties: r6.properties
+                  properties: r2.properties
                 });
               }
               
-              // Add submodules for this module
-              if (submodule2 && r7) {
-                const submoduleId = submodule2.identity.toString();
+              // Add Role connected to module
+              if (role && r3) {
+                const roleId = role.identity.toString();
+                if (!nodeMap.has(roleId)) {
+                  nodeMap.set(roleId, {
+                    id: roleId,
+                    label: role.properties.name || 'Unnamed Role',
+                    group: 'Role',
+                    properties: role.properties
+                  });
+                }
+                
+                const roleEdgeId = `${moduleId}-${roleId}-REQUIRES_ROLE`;
+                if (!edgeMap.has(roleEdgeId)) {
+                  edgeMap.set(roleEdgeId, {
+                    id: roleEdgeId,
+                    from: moduleId,
+                    to: roleId,
+                    label: 'REQUIRES_ROLE',
+                    type: 'REQUIRES_ROLE',
+                    properties: r3.properties
+                  });
+                }
+              }
+              
+              // Add SubModule connected to module
+              if (submodule && r4) {
+                const submoduleId = submodule.identity.toString();
                 if (!nodeMap.has(submoduleId)) {
                   nodeMap.set(submoduleId, {
                     id: submoduleId,
-                    label: submodule2.properties.name || 'Unnamed SubModule',
+                    label: submodule.properties.name || 'Unnamed SubModule',
                     group: 'SubModule',
-                    properties: submodule2.properties
+                    properties: submodule.properties
                   });
                 }
                 
@@ -3803,7 +3708,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
                     to: submoduleId,
                     label: 'CONTAINS',
                     type: 'CONTAINS',
-                    properties: r7.properties
+                    properties: r4.properties
                   });
                 }
               }
@@ -4049,7 +3954,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
           const node = record.get('n');
           const nodeData = {
             id: node.identity.toString(),
-            label: node.properties.name || node.properties.title || 'Unnamed',
+            label: node.properties.name || 'Unnamed',
             group: primaryLabel,
             properties: node.properties
           };
@@ -4293,8 +4198,8 @@ async function generateCypherExport(session, version = GRAPH_VERSIONS.BASE) {
       const sourceLabel = sourceNode.labels[0].replace(/_admin_draft$/, '');
       const targetLabel = targetNode.labels[0].replace(/_admin_draft$/, '');
       
-      const sourceIdentifier = sourceNode.properties.name || sourceNode.properties.title;
-      const targetIdentifier = targetNode.properties.name || targetNode.properties.title;
+      const sourceIdentifier = sourceNode.properties.name;
+      const targetIdentifier = targetNode.properties.name;
       
       if (!sourceIdentifier || !targetIdentifier) {
         return; // Skip if we can't identify the nodes

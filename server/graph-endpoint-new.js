@@ -280,7 +280,7 @@ app.get('/api/admin/graph/:nodeType', async (req, res) => {
           const node = record.get('n');
           const nodeData = {
             id: node.identity.toString(),
-            label: node.properties.name || node.properties.title || 'Unnamed',
+            label: node.properties.name || 'Unnamed',
             group: primaryLabel,
             properties: node.properties
           };

@@ -191,7 +191,7 @@ const App: React.FC = () => {
     if (!builderStats) return 0;
     
     // Include all node types that exist in the database
-    const nodeTypes = ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'SubModule'];
+    const nodeTypes = ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'Role', 'SubModule', 'Module'];
     return nodeTypes.reduce((total, nodeType) => {
       return total + (builderStats[nodeType] || 0);
     }, 0);
@@ -1725,7 +1725,7 @@ const App: React.FC = () => {
                   >
                     <div className="node-circle project-gradient">
                       <span className="node-icon">🚀</span>
-                      <span className="node-count">{getNodeCount('ProjectOpportunity') + getNodeCount('ProjectBlueprint')}</span>
+                      <span className="node-count">{getNodeCount('ProjectOpportunity')}</span>
                     </div>
                     <span className="node-label">Projects</span>
                   </button>
@@ -1785,7 +1785,7 @@ const App: React.FC = () => {
                         <>
                           <div className="detail-section">
                             <h4>Type</h4>
-                            <p>{selectedNodeForDetails.labels ? selectedNodeForDetails.labels.join(', ') : 'Unknown'}</p>
+                            <p>{selectedNodeForDetails.labels ? selectedNodeForDetails.labels.join(', ') : selectedNodeForDetails.group || 'Unknown'}</p>
                           </div>
                           
                           {selectedNodeForDetails.properties && (
@@ -1984,9 +1984,9 @@ const App: React.FC = () => {
                       <div className="validation-help">
                         <p><strong>💡 How to fix these issues:</strong></p>
                         <ul>
-                          <li>Check that all node types match: Industry, Sector, Department, PainPoint, ProjectOpportunity, ProjectBlueprint, Role, SubModule, Module</li>
-                          <li>Ensure all relationship types are valid: HAS_SECTOR, EXPERIENCES, HAS_OPPORTUNITY, ADDRESSES, IS_INSTANCE_OF, REQUIRES_ROLE, NEEDS_SUBMODULE, USES_MODULE, CONTAINS</li>
-                          <li>Include required properties: 'name' for most nodes, 'title' for ProjectOpportunity/ProjectBlueprint</li>
+                          <li>Check that all node types match: Industry, Sector, Department, PainPoint, ProjectOpportunity, Role, SubModule, Module</li>
+                          <li>Ensure all relationship types are valid: HAS_SECTOR, EXPERIENCES, ADDRESSES, REQUIRES_ROLE, CONTAINS, USES_MODULE</li>
+                          <li>Include required properties: 'name' for most nodes, 'title' for ProjectOpportunity</li>
                         </ul>
                       </div>
                     </div>
