@@ -346,6 +346,41 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return `${bounds.minX} ${bounds.minY} ${bounds.maxX - bounds.minX} ${bounds.maxY - bounds.minY}`;
   }, [calculateNodeBounds]);
 
+  // Calculate center point for zoom operations
+  const getZoomCenter = useCallback(() => {
+    // Use viewport center for consistent zoom behavior
+    return {
+      x: width / 2,
+      y: heightNum / 2
+    };
+  }, [width, heightNum]);
+
+  // Generate center-based transform string for zoom and pan
+  const getCenterBasedTransform = useCallback(() => {
+    const center = getZoomCenter();
+    
+    // Apply transformations: translate to center + pan, scale, translate back from center
+    // Formula: translate(cx + panX, cy + panY) scale(zoom) translate(-cx, -cy)
+    const transform = `translate(${center.x + panOffset.x}, ${center.y + panOffset.y}) scale(${manualZoom}) translate(${-center.x}, ${-center.y})`;
+    
+    // Debug logging for transform changes and node positions
+    if (manualZoom !== 1 || panOffset.x !== 0 || panOffset.y !== 0) {
+      console.log(`[GraphViz] Transform: center=(${center.x},${center.y}), pan=(${panOffset.x},${panOffset.y}), zoom=${manualZoom.toFixed(2)}`);
+      
+      // Log a few node positions for debugging clustering
+      if (simulationNodes.length > 0) {
+        const sampleNodes = simulationNodes.slice(0, 3).map(n => ({
+          id: n.id,
+          position: `(${n.x?.toFixed(1)}, ${n.y?.toFixed(1)})`,
+          label: n.label
+        }));
+        console.log(`[GraphViz] Sample node positions:`, sampleNodes);
+      }
+    }
+    
+    return transform;
+  }, [getZoomCenter, panOffset.x, panOffset.y, manualZoom]);
+
   // Color scheme for different node types
   const getNodeColor = (group: string): string => {
     const colors: { [key: string]: string } = {
@@ -493,18 +528,264 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return memoizedComponents;
   }, [memoizedComponents]);
 
-  // Advanced force simulation with subgraph separation and hierarchy
+  // Build hierarchy structure from nodes and edges
+  const buildHierarchy = useCallback((nodes: GraphNode[], edges: any[]) => {
+    console.log(`[GraphViz] buildHierarchy DEBUG: Processing ${nodes.length} nodes, ${edges.length} edges`);
+    console.log(`[GraphViz] Node sample:`, nodes.slice(0, 3).map(n => ({ id: n.id, label: n.label, group: n.group })));
+    console.log(`[GraphViz] Edge sample:`, edges.slice(0, 3).map(e => ({ source: e.source, target: e.target, type: e.type })));
+    
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const childrenMap = new Map<string, string[]>(); // parent -> children
+    const parentMap = new Map<string, string>(); // child -> parent
+    
+    // Build parent-child relationships from edges
+    edges.forEach((edge, index) => {
+      const sourceId = edge.source?.toString() || edge.source;
+      const targetId = edge.target?.toString() || edge.target;
+      
+      if (nodeMap.has(sourceId) && nodeMap.has(targetId)) {
+        // Add child to parent's children list
+        if (!childrenMap.has(sourceId)) {
+          childrenMap.set(sourceId, []);
+        }
+        childrenMap.get(sourceId)!.push(targetId);
+        
+        // Set parent for child
+        parentMap.set(targetId, sourceId);
+        
+        if (index < 5) { // Log first 5 relationships for debugging
+          console.log(`[GraphViz] Relationship ${index}: ${sourceId} -> ${targetId}`);
+        }
+      } else {
+        if (index < 5) {
+          console.log(`[GraphViz] Skipped edge ${index}: source ${sourceId} in map: ${nodeMap.has(sourceId)}, target ${targetId} in map: ${nodeMap.has(targetId)}`);
+        }
+      }
+    });
+    
+    console.log(`[GraphViz] Built ${parentMap.size} parent-child relationships`);
+    console.log(`[GraphViz] Children map size: ${childrenMap.size}`);
+    
+    // Find root nodes (nodes with no parents in this component)
+    const rootNodes = nodes.filter(node => !parentMap.has(node.id));
+    console.log(`[GraphViz] Found ${rootNodes.length} root nodes:`, rootNodes.map(n => `${n.label}(${n.group})`));
+    
+    // If no root nodes found, use node type hierarchy as fallback
+    if (rootNodes.length === 0) {
+      console.log(`[GraphViz] No root nodes found, using type-based hierarchy`);
+      const industryNodes = nodes.filter(n => n.group === 'Industry');
+      if (industryNodes.length > 0) {
+        console.log(`[GraphViz] Using ${industryNodes.length} Industry nodes as roots`);
+        rootNodes.push(...industryNodes);
+      } else {
+        // Fallback: use all nodes as a single layer
+        console.log(`[GraphViz] No Industry nodes, treating all as root level`);
+        return {
+          layers: [nodes],
+          childrenMap,
+          parentMap,
+          rootNodes: nodes
+        };
+      }
+    }
+    
+    // Build layers using BFS from root nodes
+    const layers: GraphNode[][] = [];
+    const visited = new Set<string>();
+    const queue: { node: GraphNode; level: number }[] = [];
+    
+    // Start with root nodes at level 0
+    rootNodes.forEach(root => {
+      queue.push({ node: root, level: 0 });
+    });
+    
+    while (queue.length > 0) {
+      const { node, level } = queue.shift()!;
+      
+      if (visited.has(node.id)) continue;
+      visited.add(node.id);
+      
+      // Ensure layers array is long enough
+      while (layers.length <= level) {
+        layers.push([]);
+      }
+      
+      layers[level].push(node);
+      
+      // Add children to next level
+      const children = childrenMap.get(node.id) || [];
+      children.forEach(childId => {
+        const childNode = nodeMap.get(childId);
+        if (childNode && !visited.has(childId)) {
+          queue.push({ node: childNode, level: level + 1 });
+        }
+      });
+    }
+    
+    // Add any remaining nodes (disconnected) to appropriate layers based on type
+    const unvisited = nodes.filter(node => !visited.has(node.id));
+    if (unvisited.length > 0) {
+      console.log(`[GraphViz] Processing ${unvisited.length} unvisited nodes by type`);
+      
+      // Organize unvisited nodes by semantic hierarchy
+      const typeHierarchy = {
+        'Industry': 0,
+        'Sector': 1,
+        'Department': 1,
+        'PainPoint': 2,
+        'ProjectOpportunity': 3,
+        'ProjectBlueprint': 4,
+        'Role': 5,
+        'Module': 5,
+        'SubModule': 6
+      };
+      
+      unvisited.forEach(node => {
+        const targetLevel = typeHierarchy[node.group as keyof typeof typeHierarchy] ?? layers.length;
+        
+        // Ensure layers array is long enough
+        while (layers.length <= targetLevel) {
+          layers.push([]);
+        }
+        
+        layers[targetLevel].push(node);
+        console.log(`[GraphViz] Added ${node.label}(${node.group}) to layer ${targetLevel}`);
+      });
+    }
+    
+    // If still only one layer, force type-based organization
+    if (layers.length <= 1 && nodes.length > 1) {
+      console.log(`[GraphViz] Forcing type-based hierarchy organization`);
+      const typeBasedLayers: GraphNode[][] = [];
+      
+      const typeOrder = ['Industry', 'Sector', 'Department', 'PainPoint', 'ProjectOpportunity', 'ProjectBlueprint', 'Role', 'Module', 'SubModule'];
+      
+      typeOrder.forEach(nodeType => {
+        const nodesOfType = nodes.filter(n => n.group === nodeType);
+        if (nodesOfType.length > 0) {
+          typeBasedLayers.push(nodesOfType);
+          console.log(`[GraphViz] Type-based layer ${typeBasedLayers.length - 1}: ${nodesOfType.length} ${nodeType} nodes`);
+        }
+      });
+      
+      // Add any remaining node types not in the standard hierarchy
+      const handledTypes = new Set(typeOrder);
+      const remainingNodes = nodes.filter(n => !handledTypes.has(n.group));
+      if (remainingNodes.length > 0) {
+        typeBasedLayers.push(remainingNodes);
+        console.log(`[GraphViz] Type-based layer ${typeBasedLayers.length - 1}: ${remainingNodes.length} other nodes`);
+      }
+      
+      return {
+        layers: typeBasedLayers,
+        childrenMap,
+        parentMap,
+        rootNodes: typeBasedLayers[0] || []
+      };
+    }
+    
+    console.log(`[GraphViz] Final hierarchy: ${layers.length} layers, ${layers.map((l, i) => `L${i}:${l.length}`).join(', ')}`);
+    
+    return {
+      layers,
+      childrenMap,
+      parentMap,
+      rootNodes
+    };
+  }, []);
+
+  // Position nodes in hierarchical tree structure
+  const positionHierarchicalTree = useCallback((
+    hierarchy: any,
+    nodeSpacing: number,
+    layerHeight: number,
+    canvasWidth: number,
+    startY: number
+  ) => {
+    const positionedNodes: GraphNode[] = [];
+    
+    hierarchy.layers.forEach((layer: GraphNode[], layerIndex: number) => {
+      const layerY = startY + (layerIndex * layerHeight);
+      
+      // Calculate total width needed for this layer
+      const totalLayerWidth = (layer.length - 1) * nodeSpacing;
+      const layerStartX = Math.max(nodeSpacing, (canvasWidth - totalLayerWidth) / 2);
+      
+      layer.forEach((node, nodeIndex) => {
+        const nodeX = layerStartX + (nodeIndex * nodeSpacing);
+        
+        const positionedNode = {
+          ...node,
+          x: nodeX,
+          y: layerY,
+          fx: nodeX, // Fix position to prevent physics movement
+          fy: layerY,
+          vx: 0,
+          vy: 0
+        };
+        
+        positionedNodes.push(positionedNode);
+      });
+      
+      console.log(`[GraphViz] Layer ${layerIndex}: ${layer.length} nodes at Y=${layerY}, spanning X=${layerStartX} to ${layerStartX + totalLayerWidth}`);
+    });
+    
+    return positionedNodes;
+  }, []);
+
+  // Hierarchical tree layout calculation with parent-child alignment
+  const calculateStaticLayout = useCallback((nodes: GraphNode[], edges: any[]) => {
+    console.log(`[GraphViz] Calculating hierarchical tree layout for ${nodes.length} nodes`);
+    
+    // Find connected components for organized layout
+    const components = findConnectedComponents(nodes, edges);
+    const allPositionedNodes: GraphNode[] = [];
+    
+    // Calculate safe spacing to prevent any overlaps
+    const maxRadius = Math.max(...nodes.map(n => getNodeRadius(n.group)));
+    const safeNodeSpacing = (maxRadius * 2) + 120; // Extra space for labels
+    const layerHeight = 150; // Vertical spacing between hierarchy levels
+    const componentPadding = 200; // Space between separate components
+    
+    console.log(`[GraphViz] Hierarchical layout: ${components.length} components, ${safeNodeSpacing}px node spacing, ${layerHeight}px layer height`);
+    
+    let currentComponentY = componentPadding;
+    
+    components.forEach((component, componentIndex) => {
+      console.log(`[GraphViz] Processing component ${componentIndex}: ${component.length} nodes`);
+      
+      // Build hierarchy for this component
+      const hierarchy = buildHierarchy(component, edges);
+      console.log(`[GraphViz] Hierarchy levels:`, hierarchy.layers.map((layer, i) => `L${i}:${layer.length}`).join(', '));
+      
+      // Calculate positions for each layer
+      const componentNodes = positionHierarchicalTree(hierarchy, safeNodeSpacing, layerHeight, width, currentComponentY);
+      
+      allPositionedNodes.push(...componentNodes);
+      
+      // Move to next component position (add height of current component)
+      const componentHeight = hierarchy.layers.length * layerHeight;
+      currentComponentY += componentHeight + componentPadding;
+    });
+    
+    console.log(`[GraphViz] Hierarchical layout complete: ${allPositionedNodes.length} positioned nodes`);
+    return allPositionedNodes;
+  }, [findConnectedComponents, getNodeRadius, width, buildHierarchy, positionHierarchicalTree]);
+
+  // Advanced force simulation with subgraph separation and hierarchy  
   const runSimulation = useCallback(() => {
     if (simulationNodes.length === 0) return;
 
     const activeGraphData = currentGraphData;
     
-    // Adaptive force parameters based on performance config and node overlap prevention
-    const repelForce = performanceConfig.simplifyForces ? 5000 : 8000; // Significantly increased for better separation
+    // Enhanced force parameters to prevent clustering with center-based transform
+    const repelForce = performanceConfig.simplifyForces ? 12000 : 15000; // Much stronger repulsion to prevent clustering
     const linkForce = performanceConfig.simplifyForces ? 0.02 : 0.03;
-    const linkDistance = performanceConfig.simplifyForces ? 180 : 250; // Much increased distance to reduce overlap
+    const linkDistance = performanceConfig.simplifyForces ? 250 : 350; // Increased distance to ensure separation
     const hierarchyForce = performanceConfig.simplifyForces ? 0.005 : 0.008;
-    const minNodeDistance = 80; // Minimum distance between node centers
+    const minNodeDistance = 120; // Increased minimum distance between node centers
+    
+    console.log(`[GraphViz] Force params: repel=${repelForce}, linkDist=${linkDistance}, minDist=${minNodeDistance}`);
 
     const newNodes = simulationNodes.map(node => ({ ...node }));
     const components = findConnectedComponents(newNodes, activeGraphData.edges);
@@ -624,7 +905,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
             // Calculate minimum distance based on node sizes to prevent overlap
             const radiusA = getNodeRadius(nodeA.group);
             const radiusB = getNodeRadius(nodeB.group);
-            const minDistance = Math.max(minNodeDistance, radiusA + radiusB + 60); // Increased padding between nodes
+            const minDistance = Math.max(minNodeDistance, radiusA + radiusB + 80); // Further increased padding for label space
             
             if (distance < Math.max(searchRadius, minDistance)) {
               const force = repelForce / (distance * distance);
@@ -652,7 +933,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
             // Calculate minimum distance based on node sizes to prevent overlap
             const radiusA = getNodeRadius(nodeA.group);
             const radiusB = getNodeRadius(nodeB.group);
-            const minDistance = Math.max(minNodeDistance, radiusA + radiusB + 60); // Increased padding between nodes
+            const minDistance = Math.max(minNodeDistance, radiusA + radiusB + 80); // Further increased padding for label space
             
             if (distance < Math.max(300, minDistance)) {
               const force = repelForce / (distance * distance);
@@ -739,7 +1020,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   // Initialize node positions with better spacing and hierarchy (smooth updates)
   useEffect(() => {
-    console.log('🔄 GraphViz useEffect triggered');
+    console.log('🔄 GraphViz useEffect triggered - STATIC LAYOUT MODE');
     console.log('🔄 Props: nodes.length=', nodes.length, 'edges.length=', edges.length);
     
     const activeData = currentGraphData;
@@ -752,116 +1033,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
       return;
     }
 
-    // Create a map of existing positions to preserve them
-    const existingPositions = new Map<string, { x: number, y: number, vx: number, vy: number }>();
-    if (simulationNodes && simulationNodes.length > 0) {
-      simulationNodes.forEach(node => {
-        existingPositions.set(node.id, { x: node.x || 0, y: node.y || 0, vx: node.vx || 0, vy: node.vy || 0 });
-      });
-    }
-
-    // Find connected components for initial positioning
-    const components = findConnectedComponents(activeData.nodes, activeData.edges);
-    const allUpdatedNodes: GraphNode[] = [];
+    // Use static layout calculation to guarantee non-overlapping nodes
+    console.log('🔄 Calculating static layout for', activeData.nodes.length, 'nodes');
+    const staticLayoutNodes = calculateStaticLayout(activeData.nodes, activeData.edges);
     
-    components.forEach((component, componentIndex) => {
-      // Calculate grid layout parameters (same as simulation)
-      const numComponents = components.length;
-      const componentsPerRow = Math.ceil(Math.sqrt(numComponents));
-      const maxComponentsPerRow = Math.max(2, Math.min(componentsPerRow, Math.floor(width / 350)));
-      
-      // Calculate centering offsets (same logic as simulation)
-      const actualComponentsPerRow = Math.min(maxComponentsPerRow, numComponents);
-      const actualRows = Math.ceil(numComponents / maxComponentsPerRow);
-      const gridWidth = actualComponentsPerRow * 350; // Using 350 as base separation
-      const gridHeight = actualRows * (heightNum / Math.max(1, actualRows));
-      const centerOffsetX = numComponents === 1 ? 0 : Math.max(0, (width - gridWidth) / 2);
-      const centerOffsetY = numComponents === 1 ? 0 : Math.max(0, (heightNum - gridHeight) / 2);
-      
-      // Position each subgraph in centered grid pattern
-      const row = Math.floor(componentIndex / maxComponentsPerRow);
-      const col = componentIndex % maxComponentsPerRow;
-      
-      const baseX = numComponents === 1 ? width / 2 : centerOffsetX + (col + 0.5) * (gridWidth / actualComponentsPerRow);
-      const baseY = numComponents === 1 ? heightNum / 2 : centerOffsetY + (row + 0.5) * (gridHeight / actualRows);
-      
-      component.forEach((node, nodeIndex) => {
-        // Use existing position if available, otherwise calculate new position
-        const existing = existingPositions.get(node.id);
-        
-        let x, y, vx, vy;
-        if (existing) {
-          // Preserve existing position and velocity for smooth transitions
-          x = existing.x;
-          y = existing.y;
-          vx = existing.vx;
-          vy = existing.vy;
-        } else {
-          // Calculate new position only for new nodes
-          x = baseX + (Math.random() - 0.5) * 200;
-          y = baseY + (Math.random() - 0.5) * 150;
-          
-          // Apply initial hierarchy positioning
-          if (node.group === 'Industry') {
-            y = baseY - 120 + (Math.random() - 0.5) * 30;
-          } else if (node.group === 'Sector' || node.group === 'Department') {
-            y = baseY - 30 + (Math.random() - 0.5) * 30;
-          } else if (node.group === 'PainPoint') {
-            y = baseY + 80 + (Math.random() - 0.5) * 40;
-          } else if (node.group === 'ProjectOpportunity' || node.group === 'ProjectBlueprint') {
-            y = baseY + 150 + (Math.random() - 0.5) * 30;
-          } else {
-            y = baseY + 20 + (Math.random() - 0.5) * 30;
-          }
-          
-          // Ensure nodes stay in bounds
-          const radius = getNodeRadius(node.group);
-          x = Math.max(radius + 20, Math.min(width - radius - 20, x));
-          y = Math.max(radius + 20, Math.min(heightNum - radius - 20, y));
-          
-          vx = 0;
-          vy = 0;
-        }
-        
-        allUpdatedNodes.push({
-          ...node,
-          x,
-          y,
-          vx,
-          vy
-        });
-      });
-    });
-    
-    // Handle isolated nodes (not in any component)
-    activeData.nodes.forEach((node, i) => {
-      if (!allUpdatedNodes.find(n => n.id === node.id)) {
-        const existing = existingPositions.get(node.id);
-        
-        if (existing) {
-          // Preserve existing position
-          allUpdatedNodes.push({
-            ...node,
-            x: existing.x,
-            y: existing.y,
-            vx: existing.vx,
-            vy: existing.vy
-          });
-        } else {
-          // New isolated node gets random position
-          allUpdatedNodes.push({
-            ...node,
-            x: Math.random() * (width - 100) + 50,
-            y: Math.random() * (heightNum - 100) + 50,
-            vx: 0,
-            vy: 0
-          });
-        }
-      }
-    });
-    
-    batchedUpdateNodes(() => allUpdatedNodes);
-  }, [nodes, edges, width, heightNum, findConnectedComponents, batchedUpdateNodes]);
+    console.log('🔄 Static layout complete:', staticLayoutNodes.length, 'positioned nodes');
+    batchedUpdateNodes(() => staticLayoutNodes);
+  }, [nodes, edges, width, heightNum, calculateStaticLayout, batchedUpdateNodes]);
 
   // Toggle side panel visibility
 
@@ -881,93 +1059,15 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return avgVelocity < velocityThreshold;
   }, [simulationNodes]);
 
-  // 30fps animation loop with intelligent stopping
+  // STATIC LAYOUT MODE - No animation needed since nodes are pre-positioned
   useEffect(() => {
-    let timeoutId: number;
-    
-    const animate = (currentTime: number) => {
-      // Throttle to 30fps
-      if (currentTime - lastFrameTime.current >= frameInterval) {
-        lastFrameTime.current = currentTime;
-        
-        // Performance monitoring
-        const frameStart = performance.now();
-        
-        // Check if simulation should stop
-        const stable = checkSimulationStability();
-        if (stable && !simulationStable) {
-          console.log('🎯 Simulation stabilized - stopping animation');
-          console.log('📊 Performance metrics:', {
-            avgFps: Math.round(performanceMetrics.current.currentFps),
-            totalFrames: performanceMetrics.current.frameCount,
-            avgSimulationTime: Math.round(performanceMetrics.current.simulationTime / Math.max(1, performanceMetrics.current.frameCount)),
-            nodeCount: simulationNodes.length,
-            performanceMode: performanceConfig.useSimpleRendering
-          });
-          setSimulationStable(true);
-          setIsAnimationRunning(false);
-          return;
-        }
-        
-        if (!stable && simulationStable) {
-          setSimulationStable(false);
-        }
-        
-        const simulationStart = performance.now();
-        runSimulation();
-        const simulationEnd = performance.now();
-        
-        // Update performance metrics
-        const frameEnd = performance.now();
-        const frameTime = frameEnd - frameStart;
-        const simTime = simulationEnd - simulationStart;
-        
-        performanceMetrics.current.frameCount++;
-        performanceMetrics.current.totalFrameTime += frameTime;
-        performanceMetrics.current.simulationTime += simTime;
-        
-        // Calculate FPS every second
-        const now = Date.now();
-        if (now - performanceMetrics.current.lastSecond >= 1000) {
-          performanceMetrics.current.currentFps = performanceMetrics.current.frameCount;
-          performanceMetrics.current.frameCount = 0;
-          performanceMetrics.current.lastSecond = now;
-          
-          // Log performance warnings
-          if (performanceMetrics.current.currentFps < 20) {
-            console.warn(`⚠️ Low FPS detected: ${performanceMetrics.current.currentFps} (${simulationNodes.length} nodes)`);
-          }
-          if (simTime > 16) { // More than one frame time at 60fps
-            console.warn(`⚠️ Slow simulation: ${Math.round(simTime)}ms per frame`);
-          }
-        }
-      }
-      
-      // Continue animation if still running
-      if (isAnimationRunning) {
-        timeoutId = window.setTimeout(() => {
-          animate(performance.now());
-        }, frameInterval);
-      }
-    };
-
-    if (simulationNodes.length > 0 && !simulationStable) {
-      if (!isAnimationRunning) {
-        console.log('🏃 Starting animation loop at 30fps');
-        setIsAnimationRunning(true);
-        lastFrameTime.current = performance.now();
-        animate(performance.now());
-      }
-    }
-
-    return () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      // Ensure animation is stopped on cleanup
+    // In static layout mode, nodes are positioned once and don't need physics simulation
+    if (simulationNodes.length > 0) {
+      console.log('📍 Static layout active - nodes positioned, simulation stable');
+      setSimulationStable(true);
       setIsAnimationRunning(false);
-    };
-  }, [runSimulation, simulationNodes.length, checkSimulationStability, simulationStable, isAnimationRunning]);
+    }
+  }, [simulationNodes.length]);
 
 
   // Handle node interactions
@@ -1000,14 +1100,19 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
   // Manual zoom controls
   const handleZoomIn = useCallback(() => {
-    setManualZoom(prev => Math.min(prev * 1.2, 3)); // Max 3x zoom
-  }, []);
+    const newZoom = Math.min(manualZoom * 1.2, 3);
+    console.log(`[GraphViz] Zoom in: ${manualZoom.toFixed(2)} → ${newZoom.toFixed(2)}`);
+    setManualZoom(newZoom);
+  }, [manualZoom]);
 
   const handleZoomOut = useCallback(() => {
-    setManualZoom(prev => Math.max(prev / 1.2, 0.2)); // Min 0.2x zoom (zoom out)
-  }, []);
+    const newZoom = Math.max(manualZoom / 1.2, 0.2);
+    console.log(`[GraphViz] Zoom out: ${manualZoom.toFixed(2)} → ${newZoom.toFixed(2)}`);
+    setManualZoom(newZoom);
+  }, [manualZoom]);
 
   const handleResetView = useCallback(() => {
+    console.log('[GraphViz] Reset view: zoom=1, pan=(0,0)');
     setManualZoom(1);
     setPanOffset({ x: 0, y: 0 });
   }, []);
@@ -1141,9 +1246,21 @@ const GraphViz: React.FC<GraphVizProps> = ({
     if (!rect) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      // Use unified coordinate system with panOffset and manualZoom
-      const x = (e.clientX - rect.left - panOffset.x) / manualZoom;
-      const y = (e.clientY - rect.top - panOffset.y) / manualZoom;
+      // Simplified coordinate conversion for center-based transform
+      const center = getZoomCenter();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      
+      // Convert screen coordinates to graph space by reversing the exact transform steps
+      // Original transform: translate(cx + panX, cy + panY) scale(zoom) translate(-cx, -cy)
+      // Reverse: translate(cx, cy) scale(1/zoom) translate(-cx - panX, -cy - panY)
+      const x = (screenX - center.x - panOffset.x) / manualZoom + center.x;
+      const y = (screenY - center.y - panOffset.y) / manualZoom + center.y;
+      
+      // Debug dragging coordinates
+      if (Math.abs(screenX - center.x) > 5 || Math.abs(screenY - center.y) > 5) {
+        console.log(`[GraphViz] Drag: screen(${screenX.toFixed(1)}, ${screenY.toFixed(1)}) → graph(${x.toFixed(1)}, ${y.toFixed(1)})`);
+      }
       
       batchedUpdateNodes(prev => prev.map(n => 
         n.id === node.id 
@@ -1448,8 +1565,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
             onClick={handleGraphBackgroundClick}
           />
 
-          {/* Main graph group with zoom and pan transformations */}
-          <g transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${manualZoom})`}>
+          {/* Main graph group with center-based zoom and pan transformations */}
+          <g transform={getCenterBasedTransform()}>
             
           {/* Edges */}
           <g className="edges">
@@ -1607,12 +1724,12 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     onMouseDown={(e) => handleMouseDown(node, e)}
                   />
                   
-                  {/* Node label */}
+                  {/* Node label with dynamic spacing */}
                   <text
                     x={node.x}
-                    y={node.y + radius + 15}
+                    y={node.y + radius + Math.max(20, 25 / Math.max(manualZoom, 0.5))} // Dynamic spacing based on zoom
                     textAnchor="middle"
-                    fontSize="12"
+                    fontSize={Math.max(10, 12 / Math.max(manualZoom, 0.7))} // Scale font size with zoom
                     fill="#2c3e50"
                     fontWeight={isFocused ? '700' : '500'}
                     opacity={shouldFade ? 0.3 : 1}
@@ -1623,8 +1740,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     }}
                   >
                     {(() => {
-                      // Split long labels into multiple lines
-                      const maxCharsPerLine = 15;
+                      // Adaptive label splitting based on zoom level
+                      const maxCharsPerLine = Math.max(10, Math.floor(15 * Math.max(manualZoom, 0.8)));
                       const words = node.label.split(' ');
                       const lines: string[] = [];
                       let currentLine = '';

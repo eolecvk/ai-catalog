@@ -1001,7 +1001,7 @@ const App: React.FC = () => {
         nodesCount: data.nodes.length,
         edgesCount: data.edges.length,
         centerNodeId: data.centerNodeId,
-        actualNodes: data.nodes.map(n => ({ id: n.id, label: n.label, group: n.group }))
+        actualNodes: data.nodes.map((n: any) => ({ id: n.id, label: n.label, group: n.group }))
       });
       
       // Update graph data smoothly without loading state or delays
@@ -1016,13 +1016,14 @@ const App: React.FC = () => {
       
       console.log(`[App] Successfully updated graph for node ${nodeId} - blocking auto-refresh`);
     } catch (error) {
+      const err = error as Error;
       console.error('[App] Failed to fetch node connections:', {
         nodeId: nodeId,
-        error: error.message,
-        errorStack: error.stack,
+        error: err.message,
+        errorStack: err.stack,
         nodeData: nodeData
       });
-      alert(`Failed to load node connections for ${nodeData?.label || nodeId}: ${error.message}`);
+      alert(`Failed to load node connections for ${nodeData?.label || nodeId}: ${err.message}`);
     }
   };
 
