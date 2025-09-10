@@ -985,6 +985,15 @@ const GraphViz: React.FC<GraphVizProps> = ({
     batchedUpdateNodes(() => newNodes);
   }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, nodes, edges, batchedUpdateNodes, performanceConfig]);
 
+  // Update component count when nodes/edges change
+  useEffect(() => {
+    const components = findConnectedComponents(nodes, edges);
+    const numComponents = components.length;
+    if (numComponents !== componentCount) {
+      setComponentCount(numComponents);
+    }
+  }, [nodes, edges, findConnectedComponents, componentCount]);
+
   // Restart animation when graph data changes
   useEffect(() => {
     if (simulationNodes.length > 0) {
@@ -1340,6 +1349,66 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 gap: '6px',
                 alignItems: 'flex-end'
               }}>
+                {/* Version Management Controls */}
+                {(onVersionChange || onManageVersions) && (
+                  <div className="version-controls" style={{
+                    display: 'flex',
+                    gap: '4px',
+                    background: 'rgba(0, 0, 0, 0.85)',
+                    padding: '6px',
+                    borderRadius: '6px',
+                    pointerEvents: 'auto'
+                  }}>
+                    {/* Version Selector */}
+                    {onVersionChange && availableVersions.length > 1 && (
+                      <select
+                        value={graphVersion}
+                        onChange={(e) => onVersionChange(e.target.value)}
+                        title="Select Database Version"
+                        style={{
+                          background: 'rgba(255,255,255,0.1)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          color: 'white',
+                          borderRadius: '3px',
+                          fontSize: '10px',
+                          padding: '2px 4px',
+                          minWidth: '80px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {availableVersions.map(version => (
+                          <option key={version} value={version} style={{ background: '#2c3e50', color: 'white' }}>
+                            {version === 'base' ? '🔒 Base' : version}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    
+                    {/* Manage Versions Button */}
+                    {onManageVersions && (
+                      <button
+                        onClick={onManageVersions}
+                        title="Manage All Database Versions"
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          background: 'rgba(255,255,255,0.1)',
+                          color: 'white',
+                          borderRadius: '3px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          fontSize: '10px'
+                        }}
+                      >
+                        🗂️
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* Zoom Controls */}
                 <div className="integrated-zoom-controls" style={{
                   display: 'flex',
@@ -1420,17 +1489,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
                   </button>
                 </div>
 
-                {/* Version Info */}
-                <div style={{
-                  background: 'rgba(0, 0, 0, 0.85)',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  fontSize: '10px',
-                  color: 'rgba(255,255,255,0.7)',
-                  pointerEvents: 'auto'
-                }}>
-                  {graphVersion === 'base' ? '🔒 Base' : `✏️ ${graphVersion}`}
-                </div>
               </div>
             </div>
 
@@ -1859,14 +1917,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
 
 // Memoize the entire component to prevent unnecessary re-renders
 const GraphVizMemoized = memo(GraphViz, (prevProps, nextProps) => {
-  // Custom comparison for better performance
+  // Custom comparison for better performance - exclude graphVersion since it's only used for API calls, not rendering
   return (
     prevProps.nodes.length === nextProps.nodes.length &&
     prevProps.edges.length === nextProps.edges.length &&
     prevProps.nodeType === nextProps.nodeType &&
     prevProps.height === nextProps.height &&
     prevProps.focusedNode === nextProps.focusedNode &&
-    prevProps.graphVersion === nextProps.graphVersion &&
     prevProps.hasData === nextProps.hasData &&
     // Deep compare first few nodes for changes
     JSON.stringify(prevProps.nodes.slice(0, 5)) === JSON.stringify(nextProps.nodes.slice(0, 5)) &&

@@ -61,9 +61,9 @@ const GraphHeroSection = memo<{
             graphVersion={currentGraphVersion}
             onGraphDataUpdate={handleGraphDataUpdate}
             hasData={hasGraphData}
-            availableVersions={[]}
-            onVersionChange={undefined}
-            onManageVersions={undefined}
+            availableVersions={availableVersions}
+            onVersionChange={onVersionChange}
+            onManageVersions={onManageVersions}
           />
         </GraphErrorBoundary>
       ) : (
@@ -1225,11 +1225,14 @@ const App: React.FC = () => {
     }
   }, [builderAuthenticated, selectedNodeType, fetchGraphData, isShowingNodeFocus]);
 
-  // Refresh data when version changes
+  // Refresh data when version changes (optimized to minimize re-renders)
   useEffect(() => {
     if (builderAuthenticated) {
+      // Always update stats when version changes
       fetchBuilderStats(currentGraphVersion);
+      
       // Only refresh graph data if not showing node-specific focus
+      // This will cause minimal re-renders since GraphViz is memoized and only updates when actual data changes
       if (!isShowingNodeFocus) {
         if (selectedNodeType) {
           fetchGraphData(selectedNodeType);
@@ -1613,12 +1616,6 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      <header className="app-header builder-mode compact">
-        <div className="header-content">
-          <h1>AI Project Map</h1>
-        </div>
-      </header>
-
       {builderAuthenticated ? (
         <>
         {/* Enhanced Two-Panel Layout */}
