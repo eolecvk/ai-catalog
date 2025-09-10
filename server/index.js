@@ -4373,85 +4373,154 @@ app.post('/api/admin/import', express.text({ limit: '10mb' }), async (req, res) 
 // Promote imported version to base
 app.post('/api/admin/promote/:versionName', async (req, res) => {
   const { versionName } = req.params;
-  const session = driver.session();
   
   try {
-    // Check if version exists
-    const versionCheckQuery = `MATCH (n) WHERE any(label in labels(n) WHERE label ENDS WITH "_${versionName}") RETURN count(n) as count`;
-    const versionResult = await session.run(versionCheckQuery);
-    const versionCount = versionResult.records[0].get('count').toNumber();
+    // Check if version database exists
+    const versionDbName = getDatabaseName(versionName);
+    const databases = await listDatabases();
+    const versionDb = databases.find(db => db.name === versionDbName);
     
-    if (versionCount === 0) {
+    if (!versionDb) {
       return res.status(404).json({ error: `Version "${versionName}" not found` });
     }
     
-    // Create timestamp for backup
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0] + '_' + 
-                     new Date().toTimeString().split(' ')[0].replace(/:/g, '-');
-    const backupVersionName = `base_backup_${timestamp}`;
-    
-    // Step 1: Backup current base to timestamped version
-    const nodeTypes = GRAPH_SCHEMA.nodeTypes;
-    
-    for (const nodeType of nodeTypes) {
-      const backupQuery = `
-        MATCH (n:${nodeType})
-        CREATE (copy:${nodeType}_${backupVersionName})
-        SET copy = properties(n)
-      `;
-      await session.run(backupQuery);
+    // Prevent promoting base to itself
+    if (versionName === 'base' || versionName === GRAPH_VERSIONS.BASE) {
+      return res.status(400).json({ error: 'Cannot promote base version to itself' });
     }
     
-    // Backup relationships
-    const relTypes = GRAPH_SCHEMA.relationshipTypes;
-    for (const relType of relTypes) {
-      const backupRelQuery = `
-        MATCH (a)-[r:${relType}]->(b)
-        MATCH (a_backup) WHERE any(label in labels(a_backup) WHERE label ENDS WITH "_${backupVersionName}")
-          AND a_backup.name = a.name OR a_backup.title = a.title
-        MATCH (b_backup) WHERE any(label in labels(b_backup) WHERE label ENDS WITH "_${backupVersionName}")
-          AND b_backup.name = b.name OR b_backup.title = b.title
-        CREATE (a_backup)-[r_backup:${relType}]->(b_backup)
-        SET r_backup = properties(r)
-      `;
-      await session.run(backupRelQuery);
+    // Step 1: Create backup of current base
+    const backupVersionName = `base-backup-${Date.now()}`;
+    const backupDbName = getDatabaseName(backupVersionName);
+    
+    // Create backup database and copy current base
+    await createDatabase(backupDbName);
+    
+    // Copy base data to backup
+    const baseSession = driver.session({ database: 'neo4j' }); // Base database
+    const backupSession = driver.session({ database: backupDbName });
+    
+    try {
+      // Get all data from base
+      const allDataQuery = `MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m`;
+      const baseData = await baseSession.run(allDataQuery);
+      
+      // Copy nodes first, keeping track of ID mappings
+      const nodeIdMap = new Map();
+      const processedNodes = new Set();
+      
+      for (const record of baseData.records) {
+        const node = record.get('n');
+        if (node && !processedNodes.has(node.identity.toString())) {
+          processedNodes.add(node.identity.toString());
+          
+          const labels = node.labels.join(':');
+          const createNodeQuery = `CREATE (n:${labels}) SET n = $props RETURN id(n) as newId`;
+          const result = await backupSession.run(createNodeQuery, { props: node.properties });
+          const newId = result.records[0].get('newId');
+          nodeIdMap.set(node.identity.toString(), newId);
+        }
+      }
+      
+      // Copy relationships
+      const processedRels = new Set();
+      for (const record of baseData.records) {
+        const rel = record.get('r');
+        const startNode = record.get('n');
+        const endNode = record.get('m');
+        
+        if (rel && startNode && endNode && !processedRels.has(rel.identity.toString())) {
+          processedRels.add(rel.identity.toString());
+          
+          const startId = nodeIdMap.get(startNode.identity.toString());
+          const endId = nodeIdMap.get(endNode.identity.toString());
+          
+          if (startId && endId) {
+            const relType = rel.type;
+            const createRelQuery = `
+              MATCH (a) WHERE id(a) = $startId
+              MATCH (b) WHERE id(b) = $endId
+              CREATE (a)-[r:${relType}]->(b)
+              SET r = $props
+            `;
+            await backupSession.run(createRelQuery, {
+              startId: startId,
+              endId: endId,
+              props: rel.properties
+            });
+          }
+        }
+      }
+      
+    } finally {
+      await backupSession.close();
     }
     
-    // Step 2: Delete current base
-    await session.run('MATCH (n) WHERE none(label in labels(n) WHERE label CONTAINS "_") DETACH DELETE n');
+    // Step 2: Clear current base
+    await baseSession.run('MATCH (n) DETACH DELETE n');
     
-    // Step 3: Promote imported version to base
-    for (const nodeType of nodeTypes) {
-      const promoteQuery = `
-        MATCH (n:${nodeType}_${versionName})
-        CREATE (base:${nodeType})
-        SET base = properties(n)
-        DELETE n
-      `;
-      await session.run(promoteQuery);
-    }
+    // Step 3: Copy version data to base
+    const versionSession = driver.session({ database: versionDbName });
     
-    // Promote relationships
-    for (const relType of relTypes) {
-      const promoteRelQuery = `
-        MATCH (a)-[r:${relType}]->(b) 
-        WHERE any(label in labels(a) WHERE label ENDS WITH "_${versionName}")
-          AND any(label in labels(b) WHERE label ENDS WITH "_${versionName}")
-        MATCH (a_base) WHERE any(label in labels(a_base) WHERE not label CONTAINS "_")
-          AND (a_base.name = a.name OR a_base.title = a.title)
-        MATCH (b_base) WHERE any(label in labels(b_base) WHERE not label CONTAINS "_")
-          AND (b_base.name = b.name OR b_base.title = b.title)
-        CREATE (a_base)-[r_base:${relType}]->(b_base)
-        SET r_base = properties(r)
-        DELETE r
-      `;
-      await session.run(promoteRelQuery);
+    try {
+      const versionData = await versionSession.run(`MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m`);
+      
+      // Copy nodes from version to base
+      const versionNodeIdMap = new Map();
+      const versionProcessedNodes = new Set();
+      
+      for (const record of versionData.records) {
+        const node = record.get('n');
+        if (node && !versionProcessedNodes.has(node.identity.toString())) {
+          versionProcessedNodes.add(node.identity.toString());
+          
+          const labels = node.labels.join(':');
+          const createNodeQuery = `CREATE (n:${labels}) SET n = $props RETURN id(n) as newId`;
+          const result = await baseSession.run(createNodeQuery, { props: node.properties });
+          const newId = result.records[0].get('newId');
+          versionNodeIdMap.set(node.identity.toString(), newId);
+        }
+      }
+      
+      // Copy relationships from version to base
+      const versionProcessedRels = new Set();
+      for (const record of versionData.records) {
+        const rel = record.get('r');
+        const startNode = record.get('n');
+        const endNode = record.get('m');
+        
+        if (rel && startNode && endNode && !versionProcessedRels.has(rel.identity.toString())) {
+          versionProcessedRels.add(rel.identity.toString());
+          
+          const startId = versionNodeIdMap.get(startNode.identity.toString());
+          const endId = versionNodeIdMap.get(endNode.identity.toString());
+          
+          if (startId && endId) {
+            const relType = rel.type;
+            const createRelQuery = `
+              MATCH (a) WHERE id(a) = $startId
+              MATCH (b) WHERE id(b) = $endId
+              CREATE (a)-[r:${relType}]->(b)
+              SET r = $props
+            `;
+            await baseSession.run(createRelQuery, {
+              startId: startId,
+              endId: endId,
+              props: rel.properties
+            });
+          }
+        }
+      }
+      
+    } finally {
+      await versionSession.close();
+      await baseSession.close();
     }
     
     res.json({
       success: true,
       message: `Version "${versionName}" promoted to base successfully`,
-      backupVersionName,
+      backupName: backupVersionName,
       promotedVersion: versionName
     });
     
@@ -4461,8 +4530,6 @@ app.post('/api/admin/promote/:versionName', async (req, res) => {
       error: 'Failed to promote version', 
       details: error.message 
     });
-  } finally {
-    await session.close();
   }
 });
 

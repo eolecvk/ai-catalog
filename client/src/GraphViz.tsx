@@ -1307,57 +1307,57 @@ const GraphViz: React.FC<GraphVizProps> = ({
               padding: '1rem'
             }}
           >
-            {/* Professional Graph Controls Overlay */}
-            <div className="graph-controls-overlay" style={{
+            {/* Unified Graph Controls Bar */}
+            <div className="graph-controls-bar" style={{
               position: 'absolute',
               top: '8px',
               left: '8px',
               right: '8px',
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'flex-start',
+              alignItems: 'center',
               pointerEvents: 'none',
-              zIndex: 10
+              zIndex: 10,
+              height: '40px'
             }}>
-              {/* Left side: Stats */}
-              <div className="graph-stats-section" style={{
+              {/* Left side: Graph Stats */}
+              <div className="graph-stats" style={{
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
+                alignItems: 'center',
+                gap: '12px',
                 background: 'rgba(0, 0, 0, 0.85)',
                 padding: '8px 12px',
                 borderRadius: '6px',
                 pointerEvents: 'auto',
-                maxWidth: '200px'
+                fontSize: '11px',
+                color: 'rgba(255,255,255,0.9)'
               }}>
-                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '11px', color: 'rgba(255,255,255,0.9)' }}>
-                  <span><strong style={{color: '#3498db'}}>{nodes.length}</strong> nodes</span>
-                  <span><strong style={{color: '#e74c3c'}}>{edges.length}</strong> edges</span>
-                  <span><strong style={{color: '#f39c12'}}>{componentCount}</strong> groups</span>
-                </div>
+                <span><strong style={{color: '#3498db'}}>{nodes.length}</strong> nodes</span>
+                <span><strong style={{color: '#e74c3c'}}>{edges.length}</strong> edges</span>
+                <span><strong style={{color: '#f39c12'}}>{componentCount}</strong> groups</span>
                 {performanceConfig.useSimpleRendering && (
-                  <div style={{ fontSize: '10px', color: '#e67e22' }}>
+                  <span style={{ color: '#e67e22' }}>
                     <strong>⚡</strong> Performance Mode
-                  </div>
+                  </span>
                 )}
               </div>
 
-              {/* Right side: Controls */}
-              <div className="graph-controls-section" style={{
+              {/* Right side: All Controls in One Line */}
+              <div className="graph-controls" style={{
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '6px',
-                alignItems: 'flex-end'
+                alignItems: 'center',
+                gap: '8px',
+                pointerEvents: 'auto'
               }}>
                 {/* Version Management Controls */}
                 {(onVersionChange || onManageVersions) && (
                   <div className="version-controls" style={{
                     display: 'flex',
+                    alignItems: 'center',
                     gap: '4px',
                     background: 'rgba(0, 0, 0, 0.85)',
                     padding: '6px',
-                    borderRadius: '6px',
-                    pointerEvents: 'auto'
+                    borderRadius: '6px'
                   }}>
                     {/* Version Selector */}
                     {onVersionChange && availableVersions.length > 1 && (
@@ -1373,7 +1373,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
                           fontSize: '10px',
                           padding: '2px 4px',
                           minWidth: '80px',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
+                          height: '24px'
                         }}
                       >
                         {availableVersions.map(version => (
@@ -1410,13 +1411,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
                 )}
 
                 {/* Zoom Controls */}
-                <div className="integrated-zoom-controls" style={{
+                <div className="zoom-controls" style={{
                   display: 'flex',
+                  alignItems: 'center',
                   gap: '4px',
                   background: 'rgba(0, 0, 0, 0.85)',
                   padding: '6px',
-                  borderRadius: '6px',
-                  pointerEvents: 'auto'
+                  borderRadius: '6px'
                 }}>
                   <div style={{ 
                     fontSize: '11px', 
@@ -1488,7 +1489,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     ⌂
                   </button>
                 </div>
-
               </div>
             </div>
 
@@ -1500,6 +1500,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
               viewBox={getViewBox()}
               preserveAspectRatio="xMidYMid meet"
               style={{ 
+                paddingTop: '56px', // Space for the controls bar
                 cursor: isPanning ? 'grabbing' : 'grab',
                 maxWidth: '100%',
                 maxHeight: '100%',
