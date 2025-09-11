@@ -89,6 +89,25 @@ async function listDatabases() {
   }
 }
 
+// Check if a database version has actual content (nodes)
+async function hasVersionContent(version) {
+  try {
+    const session = getVersionSession(version);
+    try {
+      // Count total nodes in the database
+      const result = await session.run('MATCH (n) RETURN count(n) as nodeCount');
+      const nodeCount = result.records[0]?.get('nodeCount')?.toNumber() || 0;
+      return nodeCount > 0;
+    } finally {
+      await session.close();
+    }
+  } catch (error) {
+    // If we can't connect to the database or it doesn't exist, it has no content
+    console.log(`Version '${version}' has no accessible content:`, error.message);
+    return false;
+  }
+}
+
 // Schema definition for validation
 const GRAPH_SCHEMA = {
   nodeTypes: [
@@ -2774,23 +2793,34 @@ app.get('/api/admin/versions', async (req, res) => {
   try {
     // Get all databases and extract version names
     const databases = await listDatabases();
-    const versions = [GRAPH_VERSIONS.BASE]; // Always include base
+    const versions = [];
     
-    databases.forEach(db => {
+    // Check if base version has content before including it
+    const baseHasContent = await hasVersionContent(GRAPH_VERSIONS.BASE);
+    if (baseHasContent) {
+      versions.push(GRAPH_VERSIONS.BASE);
+    }
+    
+    // Check all catalog databases for content
+    for (const db of databases) {
       if (db.name.startsWith('catalog-')) {
         // Extract version name from database name
         const versionName = db.name.replace('catalog-', '');
         if (versionName && !versions.includes(versionName)) {
-          versions.push(versionName);
+          // Only include versions that have actual content
+          const hasContent = await hasVersionContent(versionName);
+          if (hasContent) {
+            versions.push(versionName);
+          }
         }
       }
-    });
+    }
     
     res.json({
       versions: versions,
       metadata: {
         totalVersions: versions.length,
-        note: `API calls use explicit version parameters. Base version is used when no version specified.`
+        note: `Only versions with actual data are listed. API calls use explicit version parameters.`
       }
     });
   } catch (error) {

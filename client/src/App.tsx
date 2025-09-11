@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
-import { Industry, Sector, Department, PainPoint, Project, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
+import { Industry, Sector, Department, PainPoint, SelectionState, NewPainPointForm, NewProjectForm, GraphNode, GraphEdge, ChatQueryResult } from './types';
 import GraphViz from './GraphViz';
 import ChatInterface, { ChatInterfaceRef } from './components/ChatInterface';
 import GraphErrorBoundary from './components/GraphErrorBoundary';
@@ -72,6 +72,38 @@ const GraphHeroSection = memo<{
             <div className="welcome-icon">🔍</div>
             <h3>Ready to Explore</h3>
             <p>Ask the AI Assistant to explore the catalog and discover insights about industries, sectors, pain points, and AI project opportunities.</p>
+            
+            {/* Version management for welcome screen */}
+            {availableVersions.length > 0 && currentGraphVersion && (
+              <div className="version-info-display">
+                <div className="version-label">
+                  <span className="version-icon">📂</span>
+                  <span>Current Version: <strong>{currentGraphVersion}</strong></span>
+                </div>
+                {availableVersions.length > 1 && (
+                  <div className="version-actions-compact">
+                    <select 
+                      className="version-select-compact"
+                      value={currentGraphVersion}
+                      onChange={(e) => onVersionChange(e.target.value)}
+                    >
+                      {availableVersions.map(version => (
+                        <option key={version} value={version}>
+                          {version === 'base' ? '📂 Base' : `📦 ${version}`}
+                        </option>
+                      ))}
+                    </select>
+                    <button 
+                      className="version-manage-btn-compact"
+                      onClick={onManageVersions}
+                      title="Manage Versions"
+                    >
+                      ⚙️
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -87,8 +119,7 @@ const App: React.FC = () => {
   const [sectors, setSectors] = useState<{[key: string]: Sector[]}>({});
   const [departments, setDepartments] = useState<Department[]>([]);
   const [painPoints, setPainPoints] = useState<PainPoint[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Removed unused state variables: projects, loading
   const [currentStep, setCurrentStep] = useState(1);
   const [businessContextSubstep, setBusinessContextSubstep] = useState<'industries' | 'sectors'>('industries');
   const [currentSectorPage, setCurrentSectorPage] = useState(0);
@@ -130,12 +161,12 @@ const App: React.FC = () => {
   });
 
   // Builder mode state (default to builder mode)
-  const [builderAuthenticated, setBuilderAuthenticated] = useState(true);
+  const [builderAuthenticated] = useState(true); // Removed unused setBuilderAuthenticated
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [builderStats, setBuilderStats] = useState<any>(null);
   const [builderLoading, setBuilderLoading] = useState(false);
-  const [currentGraphVersion, setCurrentGraphVersion] = useState('base');
-  const [availableVersions, setAvailableVersions] = useState<string[]>(['base']);
+  const [currentGraphVersion, setCurrentGraphVersion] = useState<string>('');
+  const [availableVersions, setAvailableVersions] = useState<string[]>([]);
   
   // Builder modals and forms
   const [showBuilderNodeModal, setShowBuilderNodeModal] = useState(false);
@@ -347,7 +378,6 @@ const App: React.FC = () => {
   };
 
   const fetchDepartments = async () => {
-    setLoading(true);
     try {
       const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
       const response = await api.get(`/api/departments${versionParam}`);
@@ -355,23 +385,15 @@ const App: React.FC = () => {
       setDepartments(data);
     } catch (error) {
       console.error('Error fetching departments:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
   const fetchProjects = async () => {
-    setLoading(true);
     try {
-      const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
-      const response = await api.post(`/api/projects${versionParam}`, selections);
-      const data = await response.json();
-      setProjects(data);
-      setCurrentStep(4); // Go to step 4 for projects
+      // Projects functionality removed
+      setCurrentStep(4); // Go to step 4
     } catch (error) {
       console.error('Error fetching projects:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -394,7 +416,6 @@ const App: React.FC = () => {
     if (currentStep > 1) {
       setScopeChoice('');
       setPainPoints([]);
-      setProjects([]);
       setCurrentStep(1);
     }
     
@@ -556,6 +577,12 @@ const App: React.FC = () => {
 
   // Builder API functions
   const fetchBuilderStats = async (version = currentGraphVersion) => {
+    // Skip if no version is available yet
+    if (!version) {
+      console.log('[App] Skipping fetchBuilderStats: no version available');
+      return;
+    }
+    
     setBuilderLoading(true);
     try {
       console.log(`[App] Fetching builder stats for version: ${version}`);
@@ -850,12 +877,27 @@ const App: React.FC = () => {
       if (response.ok) {
         alert(`✅ Version deleted successfully!\n\nDeleted version: ${versionName}\nNodes removed: ${result.deletedNodes}`);
         
-        // Refresh available versions
+        // Refresh available versions first
         await fetchAvailableVersions();
         
-        // If we were viewing the deleted version, switch to base
+        // If we were viewing the deleted version, switch to first available version
         if (currentGraphVersion === versionName) {
-          setCurrentGraphVersion('base');
+          // Get updated versions after refresh
+          const response = await api.get('/api/admin/versions');
+          if (response.ok) {
+            const data = await response.json();
+            const versions = Array.isArray(data) ? data : (data.versions || []);
+            
+            if (versions.length > 0) {
+              // Switch to first available version (preferably 'base' if it exists)
+              const targetVersion = versions.includes('base') ? 'base' : versions[0];
+              setCurrentGraphVersion(targetVersion);
+            } else {
+              // No versions available - this shouldn't happen but handle gracefully
+              console.warn('No versions available after deletion');
+              setCurrentGraphVersion('base'); // Fallback
+            }
+          }
         }
         
         // Clear import result if it was for this version
@@ -871,33 +913,41 @@ const App: React.FC = () => {
     }
   };
 
-  const fetchAvailableVersions = async () => {
+  const fetchAvailableVersions = useCallback(async () => {
     try {
-      const response = await api.get('/api/admin/versions');
+      // Add cache-busting timestamp to ensure fresh data
+      const response = await api.get(`/api/admin/versions?_t=${Date.now()}`);
       if (response.ok) {
         const data = await response.json();
         
         // Handle both old and new API response formats
+        let versions: string[] = [];
         if (Array.isArray(data)) {
           // Old format: just array of versions
-          setAvailableVersions(data);
-          console.log('Available versions:', data);
+          versions = data;
         } else {
           // New format: object with versions array and metadata
-          const versions = data.versions || [];
+          versions = data.versions || [];
+        }
+        
+        // Simple alphabetical sorting with base first
+        const sortedVersions = [...versions].sort((a, b) => {
+          // Base version comes first
+          if (a === 'base' && b !== 'base') return -1;
+          if (b === 'base' && a !== 'base') return 1;
           
-          // Simple alphabetical sorting with base first
-          const sortedVersions = [...versions].sort((a, b) => {
-            // Base version comes first
-            if (a === 'base' && b !== 'base') return -1;
-            if (b === 'base' && a !== 'base') return 1;
-            
-            // Sort other versions alphabetically
-            return a.localeCompare(b);
-          });
-          
-          setAvailableVersions(sortedVersions);
-          console.log('Available versions:', sortedVersions);
+          // Sort other versions alphabetically
+          return a.localeCompare(b);
+        });
+        
+        setAvailableVersions(sortedVersions);
+        console.log('Available versions:', sortedVersions);
+        
+        // If current version is empty or doesn't exist in available versions, switch to first available
+        if (sortedVersions.length > 0 && (!currentGraphVersion || !sortedVersions.includes(currentGraphVersion))) {
+          const targetVersion = sortedVersions.includes('base') ? 'base' : sortedVersions[0];
+          console.log(`Current version '${currentGraphVersion}' not found, switching to '${targetVersion}'`);
+          setCurrentGraphVersion(targetVersion);
         }
       } else {
         console.error('Failed to fetch versions:', response.status, response.statusText);
@@ -905,11 +955,17 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Error fetching versions:', error);
     }
-  };
+  }, [currentGraphVersion]);
 
 
   // Fetch graph data for visualization
   const fetchGraphData = useCallback(async (nodeType: string) => {
+    // Skip if no version is available yet
+    if (!currentGraphVersion) {
+      console.log('[App] Skipping fetchGraphData: no version available');
+      return;
+    }
+    
     setGraphLoading(true);
     setFocusedGraphNode(null); // Reset focused node when loading new data
     setIsShowingNodeFocus(false); // Clear node focus when fetching general graph data
@@ -1168,16 +1224,24 @@ const App: React.FC = () => {
   // Load builder data when authenticated
   useEffect(() => {
     if (builderAuthenticated) {
+      // First fetch available versions, then other data once version is set
       fetchAvailableVersions();
-      fetchBuilderStats();
-      loadFilterOptions();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [builderAuthenticated]);
 
+  // Load stats and filter options after current version is set
+  useEffect(() => {
+    if (builderAuthenticated && currentGraphVersion) {
+      fetchBuilderStats();
+      loadFilterOptions();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builderAuthenticated, currentGraphVersion]);
+
   // Load graph data when authenticated or when specific node type is selected
   useEffect(() => {
-    if (builderAuthenticated) {
+    if (builderAuthenticated && currentGraphVersion) {
       // Only refresh graph data if not showing node-specific focus
       if (!isShowingNodeFocus) {
         // If a specific node type was selected from overview, use it
@@ -1206,11 +1270,11 @@ const App: React.FC = () => {
         console.log('Skipping auto-refresh: user is viewing focused node data');
       }
     }
-  }, [builderAuthenticated, selectedNodeType, fetchGraphData, isShowingNodeFocus]);
+  }, [builderAuthenticated, currentGraphVersion, selectedNodeType, fetchGraphData, isShowingNodeFocus]);
 
   // Refresh data when version changes (optimized to minimize re-renders)
   useEffect(() => {
-    if (builderAuthenticated) {
+    if (builderAuthenticated && currentGraphVersion) {
       // Always update stats when version changes
       fetchBuilderStats(currentGraphVersion);
       
@@ -1229,12 +1293,23 @@ const App: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentGraphVersion, builderAuthenticated, selectedNodeType, isShowingNodeFocus]);
 
+  // Refresh versions when window regains focus (user returns to tab)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (builderAuthenticated) {
+        fetchAvailableVersions();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [builderAuthenticated, fetchAvailableVersions]);
+
   const resetSelections = () => {
     setSelections({ viewMode: '', industries: [], sectors: [], departments: [], painPoints: [] });
     setScopeChoice('');
     setSectors({});
     setPainPoints([]);
-    setProjects([]);
     setCurrentStep(1);
     setBusinessContextSubstep('industries');
     setCurrentSectorPage(0);
@@ -1281,7 +1356,6 @@ const App: React.FC = () => {
         });
         setScopeChoice('');
         setPainPoints([]);
-        setProjects([]);
         setCurrentStep(1);
         setBusinessContextSubstep('industries');
         setCurrentSectorPage(0);
@@ -1301,7 +1375,6 @@ const App: React.FC = () => {
         });
         setScopeChoice('');
         setPainPoints([]);
-        setProjects([]);
         setCurrentStep(2);
         setScopeSubstep('choice');
         break;
@@ -1310,7 +1383,6 @@ const App: React.FC = () => {
         // Go back to pain point selection - clear projects
         setSelections({ ...selections, painPoints: [] });
         setPainPoints([]);
-        setProjects([]);
         setCurrentStep(3);
         // Refetch pain points for current selections
         if (selections.sectors.length > 0 || selections.departments.length > 0) {
@@ -1418,7 +1490,6 @@ const App: React.FC = () => {
 
   const handleCreatePainPoint = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     
     try {
       const payload = {
@@ -1444,14 +1515,11 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Error creating pain point:', error);
       alert('Failed to create pain point');
-    } finally {
-      setLoading(false);
     }
   };
   
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     
     try {
       const payload = {
@@ -1482,8 +1550,6 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error('Error creating project:', error);
-    } finally {
-      setLoading(false);
     }
   };
   
@@ -2026,11 +2092,17 @@ const App: React.FC = () => {
 
       {/* Manage Versions Modal */}
       {showManageVersionsModal && (
-        <div className="modal-backdrop" onClick={() => setShowManageVersionsModal(false)}>
+        <div className="modal-backdrop" onClick={() => {
+          setShowManageVersionsModal(false);
+          fetchAvailableVersions(); // Refresh versions when closing modal
+        }}>
           <div className="modal-content manage-versions-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>🗂️ Manage Catalog Versions</h2>
-              <button className="modal-close" onClick={() => setShowManageVersionsModal(false)}>×</button>
+              <button className="modal-close" onClick={() => {
+                setShowManageVersionsModal(false);
+                fetchAvailableVersions(); // Refresh versions when closing modal
+              }}>×</button>
             </div>
             
             <div className="manage-versions-content">
@@ -2038,9 +2110,13 @@ const App: React.FC = () => {
                 <p>Manage your catalog versions. You can view or delete versions. API calls will use the currently selected version.</p>
               </div>
               
-              {availableVersions.length <= 1 ? (
+              {availableVersions.length === 0 ? (
                 <div className="no-versions-message">
-                  <p>🔒 Only base version exists. Import new data to create additional versions.</p>
+                  <p>🔒 No versions available. Import data to create catalog versions.</p>
+                </div>
+              ) : availableVersions.length === 1 ? (
+                <div className="no-versions-message">
+                  <p>🔒 Only one version exists ({availableVersions[0]}). Import new data to create additional versions.</p>
                 </div>
               ) : (
                 <div className="versions-list">
@@ -2084,7 +2160,7 @@ const App: React.FC = () => {
               
               <div className="manage-versions-footer">
                 <div className="manage-versions-actions">
-                  {currentGraphVersion === 'base' && (
+                  {(currentGraphVersion === 'base' || (availableVersions.length === 1 && !currentGraphVersion.includes('draft'))) && (
                     <button 
                       className="modal-btn modal-btn-primary"
                       onClick={createDraftVersion}

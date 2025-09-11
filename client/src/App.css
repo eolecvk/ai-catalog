@@ -5267,6 +5267,76 @@ button.node-card {
   line-height: 1.5;
 }
 
+/* Version management for welcome/no data screens */
+.version-info-display {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: rgba(41, 128, 185, 0.05);
+  border: 1px solid rgba(41, 128, 185, 0.2);
+  border-radius: 8px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.version-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: #1a202c;
+  font-size: 0.95rem;
+}
+
+.version-icon {
+  font-size: 1rem;
+}
+
+.version-actions-compact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.version-select-compact {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(41, 128, 185, 0.3);
+  border-radius: 6px;
+  background: white;
+  color: #1a202c;
+  font-size: 0.9rem;
+  min-width: 140px;
+  cursor: pointer;
+}
+
+.version-select-compact:hover {
+  border-color: rgba(41, 128, 185, 0.5);
+}
+
+.version-select-compact:focus {
+  outline: none;
+  border-color: #2980b9;
+  box-shadow: 0 0 0 2px rgba(41, 128, 185, 0.2);
+}
+
+.version-manage-btn-compact {
+  padding: 0.5rem;
+  border: 1px solid rgba(41, 128, 185, 0.3);
+  border-radius: 6px;
+  background: white;
+  color: #1a202c;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.version-manage-btn-compact:hover {
+  background: rgba(41, 128, 185, 0.1);
+  border-color: rgba(41, 128, 185, 0.5);
+}
+
 .example-queries {
   text-align: left;
   background: rgba(41, 128, 185, 0.08);

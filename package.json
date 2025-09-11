@@ -17,7 +17,7 @@
     "wait:neo4j": "node -e \"const neo4j=require('neo4j-driver');const d=neo4j.driver('bolt://localhost:7687',neo4j.auth.basic('neo4j','password123'));async function wait(){let retries=30;while(retries>0){try{const s=d.session();await s.run('RETURN 1');await s.close();console.log('Neo4j ready!');break;}catch(e){console.log('Waiting for Neo4j...');retries--;await new Promise(r=>setTimeout(r,2000));}if(retries===0){console.error('Neo4j failed to start');process.exit(1);}}await d.close()}wait();\"",
     "server": "nodemon server/index.js",
     "client": "cd client && PORT=3001 REACT_APP_CLEAN_OUTPUT=true npm start",
-    "build": "npm run build --prefix client",
+    "build": "cd client && npm install && npm run build",
     "install-all": "npm install && cd client && npm install",
     "reset:db": "node scripts/reset-db.js",
     "stop:services": "docker compose down",

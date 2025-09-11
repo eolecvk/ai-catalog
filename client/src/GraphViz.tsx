@@ -177,21 +177,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
     console.log('- edges prop:', edges.length);
     console.log('- Sample node IDs from props:', nodes.slice(0, 5).map(n => n.id));
   }, [nodes, edges]);
-  const animationRef = useRef<number>();
   const [isAnimationRunning, setIsAnimationRunning] = useState(false);
   const [simulationStable, setSimulationStable] = useState(false);
-  const lastFrameTime = useRef<number>(0);
-  const frameInterval = 1000 / 30; // 30fps = ~33.33ms per frame
-  
-  // Performance monitoring
-  const performanceMetrics = useRef({
-    frameCount: 0,
-    totalFrameTime: 0,
-    lastSecond: Date.now(),
-    currentFps: 0,
-    simulationTime: 0,
-    renderTime: 0
-  });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   // Batched state updates to reduce re-renders
@@ -282,7 +269,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return memoizedCanvasSize;
   }, [memoizedCanvasSize]);
 
-  const { width, heightNum, combinedScaleFactor } = getCanvasSize();
+  const { width, heightNum } = getCanvasSize();
 
   // Calculate actual bounds of all positioned nodes
   const calculateNodeBounds = useCallback(() => {
@@ -1282,6 +1269,40 @@ const GraphViz: React.FC<GraphVizProps> = ({
             <div className="welcome-icon">📊</div>
             <h3>No Data Available</h3>
             <p>Click on a node type card to explore the catalog, or try a different selection.</p>
+            
+            {/* Version management for no data screen */}
+            {availableVersions && availableVersions.length > 0 && graphVersion && (
+              <div className="version-info-display">
+                <div className="version-label">
+                  <span className="version-icon">📂</span>
+                  <span>Current Version: <strong>{graphVersion}</strong></span>
+                </div>
+                {availableVersions.length > 1 && onVersionChange && (
+                  <div className="version-actions-compact">
+                    <select 
+                      className="version-select-compact"
+                      value={graphVersion}
+                      onChange={(e) => onVersionChange(e.target.value)}
+                    >
+                      {availableVersions.map(version => (
+                        <option key={version} value={version}>
+                          {version === 'base' ? '📂 Base' : `📦 ${version}`}
+                        </option>
+                      ))}
+                    </select>
+                    {onManageVersions && (
+                      <button 
+                        className="version-manage-btn-compact"
+                        onClick={onManageVersions}
+                        title="Manage Versions"
+                      >
+                        ⚙️
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
