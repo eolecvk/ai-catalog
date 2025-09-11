@@ -803,9 +803,18 @@ Focus on the logical structure of the analytical operation.
   async handleLookupQuery(query, intentAnalysis, conversationHistory) {
     console.log('[ExecutionPlanner] Handling lookup query');
     
-    // Direct execution plan for simple lookups
+    // Enhanced execution plan with entity validation and business context fallback
     return {
       plan: [
+        {
+          task_type: 'validate_entity',
+          params: {
+            entities: intentAnalysis.entities_mentioned,
+            query_context: query
+          },
+          on_failure: 'continue',
+          reasoning: 'Validate that mentioned entities exist in database schema'
+        },
         {
           task_type: 'generate_cypher',
           params: {
@@ -818,9 +827,23 @@ Focus on the logical structure of the analytical operation.
         },
         {
           task_type: 'execute_cypher',
-          params: { query: '$step1.output' },
+          params: { 
+            query: '$step2.output.query',
+            params: '$step2.output.params'
+          },
           on_failure: 'continue',
           reasoning: 'Execute lookup query'
+        },
+        {
+          task_type: 'clarify_with_user',
+          params: {
+            provide_business_context_if_needed: true,
+            original_query: query,
+            entities_mentioned: intentAnalysis.entities_mentioned,
+            conversation_state: 'handle_empty_or_failed_results'
+          },
+          on_failure: 'halt',
+          reasoning: 'Provide business context analysis if entities not found or query returns empty results'
         }
       ]
     };
@@ -844,7 +867,9 @@ REQUIRED: Use this EXACT template with EXACTLY 3 steps:
       "params": {
         "goal": "Find projects for ${companyMapping.company}",
         "entities": ${JSON.stringify(companyMapping.relevant_sectors)},
-        "proxy_context": "Using proxy mapping",
+        "proxy_context": "Using proxy mapping for ${companyMapping.company}",
+        "query_type": "company_proxy",
+        "original_company": "${companyMapping.company}",
         "business_intelligence_mode": true
       },
       "on_failure": "continue",

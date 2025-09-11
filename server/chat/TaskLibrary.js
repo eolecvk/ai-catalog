@@ -386,10 +386,33 @@ JSON format:
   async generateCompanyProxyCypher(params) {
     console.log('[TaskLibrary] Generating company proxy Cypher query');
     
-    const { goal, entities, proxy_context } = params;
+    const { goal, entities, proxy_context, original_company } = params;
+    
+    // If we have the mapped entities, use them directly instead of LLM generation
+    if (entities && entities.length > 0) {
+      console.log(`[TaskLibrary] Using direct proxy mapping for entities: ${entities.join(', ')}`);
+      
+      // Generate a comprehensive query that looks for projects via the pain points pathway
+      const query = `
+        MATCH path = (s:Sector)-[:EXPERIENCES]->(pp:PainPoint)<-[:ADDRESSES]-(po:ProjectOpportunity)
+        WHERE s.name IN $proxyEntities
+        RETURN path
+        LIMIT 50
+      `;
+      
+      return {
+        success: true,
+        output: {
+          query: query,
+          params: { proxyEntities: entities },
+          explanation: `Finding projects for ${original_company || 'company'} by analyzing relevant sectors: ${entities.join(', ')}`,
+          connectionStrategy: 'proxy_mapping_direct'
+        }
+      };
+    }
     
     const prompt = `
-Generate a Cypher query that uses proxy entities to represent a real company.
+Generate a Cypher query that uses the PROVIDED proxy entities (NOT company name matching).
 
 # Graph Schema
 ${this.graphSchema.relationships.join('\n')}
@@ -397,25 +420,28 @@ ${this.graphSchema.relationships.join('\n')}
 # Query Goal
 ${goal}
 
-# Proxy Entities (representing the company)
+# IMPORTANT: Use these EXACT proxy entities (do NOT search for company name):
 ${entities ? entities.join(', ') : 'None specified'}
 
-# Proxy Context
-${proxy_context || 'Using closest relevant sectors'}
+# Company being analyzed
+${original_company || 'Unknown company'}
 
-# Your Task
-Create a Cypher query that finds relevant data for these proxy entities while being transparent about the proxy approach.
+# Critical Instructions:
+1. Use ONLY the provided proxy entities in WHERE clauses
+2. DO NOT use CONTAINS or search for the company name  
+3. Use exact matches: WHERE sector.name IN $proxyEntities
+4. These proxy entities represent the company in our database
 
 ⚠️ CRITICAL Cypher Syntax Rules:
 - ALWAYS include relationship variables in RETURN statements
-- For visualization: RETURN node1, relationship, node2 
+- For visualization: RETURN node1, relationship, node2 OR RETURN path
 - Never use relationships(node) - only relationships(path)
 
 Respond with ONLY pure JSON:
 {
-  "query": "MATCH (sector:Sector)-[r:EXPERIENCES]->(pain:PainPoint) WHERE sector.name IN $proxyEntities RETURN sector, r, pain",
-  "params": {"proxyEntities": entities || []},
-  "explanation": "Finding pain points for proxy sectors representing the company",
+  "query": "MATCH (s:Sector)-[r1:EXPERIENCES]->(pp:PainPoint)<-[r2:ADDRESSES]-(po:ProjectOpportunity) WHERE s.name IN $proxyEntities RETURN s, r1, pp, r2, po",
+  "params": {"proxyEntities": ["Retail Banking", "Commercial Banking"]},
+  "explanation": "Finding projects for [company] through proxy sectors",
   "connectionStrategy": "proxy_mapping"
 }
 `;
@@ -599,7 +625,9 @@ Respond with ONLY pure JSON:
   async executeCypher(params) {
     console.log('[TaskLibrary] Executing execute_cypher:', params);
     
-    const { query, queryParams } = params;
+    // Handle both 'queryParams' and 'params' parameter names for backward compatibility
+    const { query, queryParams, params: queryParamsAlt } = params;
+    const actualParams = queryParams || queryParamsAlt || {};
     
     if (!query) {
       return { success: false, error: 'Missing query parameter' };
@@ -617,9 +645,9 @@ Respond with ONLY pure JSON:
     const session = this.driver.session();
     try {
       console.log(`[TaskLibrary] Executing validated query: ${query}`);
-      console.log(`[TaskLibrary] Query params:`, queryParams || {});
+      console.log(`[TaskLibrary] Query params:`, actualParams);
       
-      const result = await session.run(query, queryParams || {});
+      const result = await session.run(query, actualParams);
       
       const graphData = this.formatGraphData(result);
       
@@ -636,7 +664,7 @@ Respond with ONLY pure JSON:
       console.error('Cypher execution error:', error);
       
       // Try LLM-powered error analysis and auto-correction
-      const recoveryResult = await this.attemptQueryRecovery(query, error.message, queryParams);
+      const recoveryResult = await this.attemptQueryRecovery(query, error.message, actualParams);
       
       if (recoveryResult.success) {
         console.log(`[TaskLibrary] 🔧 Auto-recovered from Cypher error using LLM correction`);
@@ -899,6 +927,113 @@ Provide 3-5 specific, implementable suggestions or ideas.
       };
     }
   }
+  
+  // NEW METHOD: Get business intelligence about potential companies
+  async getBusinessIntelligence(query, entities) {
+    console.log('[TaskLibrary] Getting business intelligence for:', { query, entities });
+    
+    const prompt = `
+Analyze this query to determine if it mentions a company name that's not in our database entities.
+
+Database entities: Industry, Sector, Department, PainPoint, ProjectOpportunity, ProjectBlueprint, Role, Module, SubModule
+
+Query: "${query}"
+Entities mentioned: ${JSON.stringify(entities)}
+
+Return JSON only:
+{
+  "isCompanyQuery": true/false,
+  "companyName": "detected company name or null",
+  "businessIntelligence": "What you know about this company's business sectors",
+  "message": "Response message for user",
+  "suggestions": ["suggestion1", "suggestion2", "suggestion3", "suggestion4"]
+}
+
+Guidelines:
+- If entities like "ANZ", "Tesla", "Amazon" are mentioned but not in database entities → isCompanyQuery: true
+- Provide business intelligence about the company's actual business sectors
+- Suggest equivalent sectors from our database (Banking, Insurance, etc.)
+- Keep message under 100 words
+`;
+
+    try {
+      const response = await this.llmManager.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 500
+      }, null, { stage: 'business_intelligence' });
+
+      console.log('[TaskLibrary] Raw LLM response for business intelligence:', response);
+      
+      let cleanResponse = response.trim();
+      
+      // Remove common markdown artifacts
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      }
+      if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      console.log('[TaskLibrary] Cleaned response for parsing:', cleanResponse);
+      
+      const result = JSON.parse(cleanResponse);
+      
+      // If company detected, enhance the message with database context
+      if (result.isCompanyQuery && result.companyName) {
+        result.message = result.message || `I understand you're asking about ${result.companyName}. While ${result.companyName} isn't in our project database, I can help you explore similar business challenges in related sectors.`;
+        
+        result.suggestions = result.suggestions || [
+          'Show me all industries',
+          'Find pain points in banking',
+          'Browse commercial banking projects',
+          'What opportunities exist in financial services?'
+        ];
+      }
+      
+      console.log('[TaskLibrary] Business intelligence result:', result);
+      return result;
+      
+    } catch (error) {
+      console.error('[TaskLibrary] Business intelligence analysis failed:', error);
+      console.error('[TaskLibrary] Error type:', error.constructor.name);
+      console.error('[TaskLibrary] Error message:', error.message);
+      
+      if (error instanceof SyntaxError && error.message.includes('JSON')) {
+        console.error('[TaskLibrary] JSON parsing failed - LLM response was not valid JSON');
+      }
+      
+      // Fallback detection logic
+      const queryLower = query.toLowerCase();
+      const commonCompanies = ['anz', 'tesla', 'amazon', 'netflix', 'microsoft', 'apple', 'google', 'facebook', 'uber'];
+      const detectedCompany = commonCompanies.find(company => queryLower.includes(company));
+      
+      if (detectedCompany) {
+        console.log(`[TaskLibrary] Using fallback detection for company: ${detectedCompany.toUpperCase()}`);
+        return {
+          isCompanyQuery: true,
+          companyName: detectedCompany.toUpperCase(),
+          businessIntelligence: `${detectedCompany.toUpperCase()} is a major company`,
+          message: `I understand you're asking about ${detectedCompany.toUpperCase()}. While ${detectedCompany.toUpperCase()} isn't in our project database, I can help you explore similar business challenges.`,
+          suggestions: [
+            'Show me all industries',
+            'Find pain points in banking',
+            'Browse available sectors',
+            'What business opportunities are available?'
+          ],
+          fallbackUsed: true,
+          originalError: error.message
+        };
+      }
+      
+      console.log('[TaskLibrary] No company detected in fallback, treating as non-company query');
+      return { 
+        isCompanyQuery: false, 
+        companyName: null, 
+        fallbackUsed: true,
+        originalError: error.message 
+      };
+    }
+  }
 
   async clarifyWithUser(params) {
     console.log('[TaskLibrary] Executing clarify_with_user:', params);
@@ -913,6 +1048,10 @@ Provide 3-5 specific, implementable suggestions or ideas.
       corrected_entities,
       show_exploration_data,
       provide_final_answer,
+      // NEW: Business context detection parameter
+      provide_business_context_if_needed,
+      original_query,
+      entities_mentioned,
       // BUSINESS CONTEXT PARAMETERS - These should be preserved, not overridden
       business_context_aware,
       detected_company,
@@ -920,6 +1059,36 @@ Provide 3-5 specific, implementable suggestions or ideas.
       original_company,
       fallback_context
     } = params;
+    
+    // NEW: Handle business context detection for potential company queries
+    if (provide_business_context_if_needed && original_query && entities_mentioned) {
+      console.log('[TaskLibrary] 🔍 Analyzing query for business context:', { original_query, entities_mentioned });
+      
+      try {
+        // Ask LLM for business intelligence about the entities mentioned
+        const businessContextResult = await this.getBusinessIntelligence(original_query, entities_mentioned);
+        
+        if (businessContextResult.isCompanyQuery) {
+          console.log('[TaskLibrary] ✅ COMPANY DETECTED - Providing business context response');
+          
+          return {
+            success: true,
+            output: {
+              needsClarification: true,
+              message: businessContextResult.message,
+              suggestions: businessContextResult.suggestions,
+              business_context_aware: true,
+              detected_company: businessContextResult.companyName,
+              original_company: businessContextResult.companyName,
+              preserves_business_context: true
+            }
+          };
+        }
+      } catch (error) {
+        console.error('[TaskLibrary] Business intelligence lookup failed:', error);
+        // Continue to standard handling
+      }
+    }
     
     // CRITICAL: Preserve business context workflow - don't fall back to legacy responses
     if (business_context_aware || detected_company || business_context_error || original_company) {
@@ -1243,7 +1412,7 @@ Respond with ONLY JSON:
         const session = this.driver.session();
         try {
           console.log(`[TaskLibrary] 🔄 Retrying with corrected query: ${recoveryResult.correctedQuery}`);
-          const result = await session.run(recoveryResult.correctedQuery, queryParams);
+          const result = await session.run(recoveryResult.correctedQuery, actualParams);
           
           const graphData = this.formatGraphData(result);
           

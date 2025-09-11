@@ -247,33 +247,35 @@ const GraphViz: React.FC<GraphVizProps> = ({
     };
   }, []);
 
-  // Memoize expensive calculations - removed window size dependencies for stable node sizing
+  // FIXED: Responsive canvas size calculation that adapts to container
   const memoizedCanvasSize = useMemo(() => {
-    console.log('🔄 Recalculating canvas size');
+    console.log('🔄 Recalculating canvas size, counter:', resizeCounter);
     
-    // Use fixed base dimensions to prevent node size changes on window resize
-    const baseWidth = 1200;
-    const baseHeight = parseInt(height) || 700;
+    // Get actual container dimensions if available, fallback to reasonable defaults
+    const containerWidth = canvasContainerRef.current?.clientWidth || 1200;
+    const containerHeight = canvasContainerRef.current?.clientHeight || 700;
     
-    // Auto-zoom calculation: zoom out when there are many nodes
+    // Use container dimensions as base, ensuring minimum sizes for usability
+    const baseWidth = Math.max(800, containerWidth);
+    const baseHeight = Math.max(500, containerHeight, parseInt(height) || 700);
+    
+    // Auto-scale based on content complexity
     const nodeCount = currentGraphData.nodes.length;
-    
-    // Estimate component count based on node count and edge density for initial sizing
     const estimatedComponentCount = Math.max(1, Math.min(nodeCount / 5, currentGraphData.edges.length === 0 ? nodeCount : Math.ceil(nodeCount / 10)));
     
-    // Scale factor based on complexity (more nodes = zoom out more)
-    const nodeScaleFactor = Math.max(1, Math.sqrt(nodeCount / 20)); // Starts scaling after 20 nodes
-    const componentScaleFactor = Math.max(1, estimatedComponentCount / 3); // Starts scaling after 3 components
+    // Scale factor based on complexity (more nodes = more space needed)
+    const nodeScaleFactor = Math.max(1, Math.sqrt(nodeCount / 20));
+    const componentScaleFactor = Math.max(1, estimatedComponentCount / 3);
     const combinedScaleFactor = Math.max(nodeScaleFactor, componentScaleFactor);
     
-    // Scale dimensions based on content complexity only, not container size
+    // Scale dimensions based on both container size AND content complexity
     const scaledWidth = Math.max(baseWidth, baseWidth * combinedScaleFactor);
     const scaledHeight = Math.max(baseHeight, baseHeight * Math.max(1, combinedScaleFactor * 0.8));
     
-    console.log('📏 Fixed canvas dimensions:', scaledWidth, 'x', scaledHeight, 'scale:', combinedScaleFactor);
+    console.log('📏 Responsive canvas dimensions:', scaledWidth, 'x', scaledHeight, 'container:', containerWidth, 'x', containerHeight);
     
     return { width: scaledWidth, heightNum: scaledHeight, combinedScaleFactor };
-  }, [nodes.length, edges.length, height]);
+  }, [nodes.length, edges.length, height, resizeCounter]);
 
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {
@@ -407,7 +409,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return icons[group] || '🔵'; // Default blue circle
   };
 
-  // Get node radius based on type and zoom level for better visual balance
+  // Get node radius based on type - FIXED: Remove zoom scaling that made nodes hard to click
   const getNodeRadius = useCallback((group: string): number => {
     const baseRadii: { [key: string]: number } = {
       'Industry': 32,      // Largest - top hierarchy
@@ -423,12 +425,10 @@ const GraphViz: React.FC<GraphVizProps> = ({
     
     const baseRadius = baseRadii[group] || 20;
     
-    // Scale inversely with zoom - as user zooms in, nodes get relatively smaller to maintain visual balance
-    // This prevents nodes from becoming too dominant at high zoom levels
-    const zoomAdjustment = Math.max(0.7, Math.min(1.3, 1 / Math.sqrt(manualZoom)));
-    
-    return Math.round(baseRadius * zoomAdjustment);
-  }, [manualZoom]);
+    // Keep consistent node sizes regardless of zoom level for reliable clicking
+    // Visual balance is maintained through the zoom transform itself
+    return baseRadius;
+  }, []);
 
   // Memoize connected components calculation
   const memoizedComponents = useMemo(() => {
@@ -1281,7 +1281,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
           <div className="welcome-content">
             <div className="welcome-icon">📊</div>
             <h3>No Data Available</h3>
-            <p>Click on a node type card to explore the graph, or try a different selection.</p>
+            <p>Click on a node type card to explore the catalog, or try a different selection.</p>
           </div>
         </div>
       </div>
@@ -1364,7 +1364,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
                       <select
                         value={graphVersion}
                         onChange={(e) => onVersionChange(e.target.value)}
-                        title="Select Database Version"
+                        title="Select Catalog Version"
                         style={{
                           background: 'rgba(255,255,255,0.1)',
                           border: '1px solid rgba(255,255,255,0.2)',
@@ -1389,7 +1389,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     {onManageVersions && (
                       <button
                         onClick={onManageVersions}
-                        title="Manage All Database Versions"
+                        title="Manage All Catalog Versions"
                         style={{
                           width: '24px',
                           height: '24px',
@@ -1826,6 +1826,21 @@ const GraphViz: React.FC<GraphVizProps> = ({
                     style={{ 
                       cursor: 'pointer',
                       transition: performanceConfig.disableAnimations ? 'none' : 'opacity 0.3s ease-in-out, stroke 0.3s ease-in-out, stroke-width 0.3s ease-in-out'
+                    }}
+                    onClick={(e) => handleNodeClick(node, e)}
+                    onDoubleClick={(e) => handleNodeDoubleClick(node, e)}
+                  />
+                  
+                  {/* FIXED: Invisible larger clickable area for better click detection */}
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r={radius + 10}  
+                    fill="transparent"
+                    stroke="none"
+                    style={{ 
+                      cursor: 'pointer',
+                      pointerEvents: 'all'
                     }}
                     onClick={(e) => handleNodeClick(node, e)}
                     onDoubleClick={(e) => handleNodeDoubleClick(node, e)}

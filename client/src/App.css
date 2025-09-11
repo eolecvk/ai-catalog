@@ -1610,13 +1610,15 @@
 .graph-viz-container {
   background: #f8f9fa;
   border-radius: 8px;
-  overflow-x: auto;
+  overflow: hidden; /* FIXED: Changed from overflow-x: auto to prevent scrollbars */
   max-width: 100%;
+  width: 100%; /* FIXED: Ensure full width */
   position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  box-sizing: border-box; /* FIXED: Include padding/border in size calculations */
 }
 
 .graph-controls {
@@ -2960,8 +2962,12 @@ html, body {
   min-height: 0;
   width: 100% !important;
   max-width: 100%;
+  height: 100%; /* FIXED: Ensure full height utilization */
   overflow: hidden;
   box-sizing: border-box;
+  position: relative; /* FIXED: For proper positioning of child elements */
+  display: flex; /* FIXED: Flex layout for content */
+  flex-direction: column; /* FIXED: Column layout */
 }
 
 .graph-side-panel {

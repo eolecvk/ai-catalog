@@ -44,7 +44,7 @@ const GraphHeroSection = memo<{
       {graphLoading ? (
         <div className="builder-loading">
           <div className="spinner"></div>
-          <p>Loading graph visualization...</p>
+          <p>Loading catalog visualization...</p>
         </div>
       ) : showGraphSection ? (
         <GraphErrorBoundary>
@@ -71,24 +71,7 @@ const GraphHeroSection = memo<{
           <div className="welcome-content">
             <div className="welcome-icon">🔍</div>
             <h3>Ready to Explore</h3>
-            <p>Ask the AI Assistant to explore the data and discover insights about industries, sectors, pain points, and AI project opportunities.</p>
-            <div className="example-queries">
-              <h4>Try asking:</h4>
-              <ul>
-                <li onClick={() => handleExampleQuestionClick("What projects are available for Banking?")}>
-                  "What projects are available for Banking?"
-                </li>
-                <li onClick={() => handleExampleQuestionClick("Show me pain points in Retail Banking")}>
-                  "Show me pain points in Retail Banking"
-                </li>
-                <li onClick={() => handleExampleQuestionClick("Find all Insurance sectors")}>
-                  "Find all Insurance sectors"
-                </li>
-                <li onClick={() => handleExampleQuestionClick("Compare opportunities in Banking and Insurance")}>
-                  "Compare opportunities in Banking and Insurance"
-                </li>
-              </ul>
-            </div>
+            <p>Ask the AI Assistant to explore the catalog and discover insights about industries, sectors, pain points, and AI project opportunities.</p>
           </div>
         </div>
       )}
@@ -348,7 +331,8 @@ const App: React.FC = () => {
     }
     
     try {
-      const response = await api.post('/api/sectors', { industries: selectedIndustries });
+      const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+      const response = await api.post(`/api/sectors${versionParam}`, { industries: selectedIndustries });
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -365,7 +349,8 @@ const App: React.FC = () => {
   const fetchDepartments = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/api/departments');
+      const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+      const response = await api.get(`/api/departments${versionParam}`);
       const data = await response.json();
       setDepartments(data);
     } catch (error) {
@@ -378,7 +363,8 @@ const App: React.FC = () => {
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      const response = await api.post('/api/projects', selections);
+      const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+      const response = await api.post(`/api/projects${versionParam}`, selections);
       const data = await response.json();
       setProjects(data);
       setCurrentStep(4); // Go to step 4 for projects
@@ -431,7 +417,8 @@ const App: React.FC = () => {
     // If at least one department has been selected, show only pain points connected to selected departments
     if (departments.length > 0) {
       try {
-        const response = await api.post('/api/department-painpoints', { departments });
+        const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+        const response = await api.post(`/api/department-painpoints${versionParam}`, { departments });
         const deptPainPoints = await response.json();
         setPainPoints(deptPainPoints);
       } catch (error) {
@@ -440,7 +427,8 @@ const App: React.FC = () => {
     } else if (sectors.length > 0) {
       // If no departments selected, fall back to sector pain points
       try {
-        const response = await api.post('/api/sector-painpoints', { sectors });
+        const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+        const response = await api.post(`/api/sector-painpoints${versionParam}`, { sectors });
         const sectorPainPoints = await response.json();
         setPainPoints(sectorPainPoints);
       } catch (error) {
@@ -848,37 +836,8 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePromoteVersion = async (versionName: string) => {
-    if (!window.confirm(`Are you sure you want to promote '${versionName}' to base? This will backup the current base graph.`)) {
-      return;
-    }
-
-    try {
-      const response = await api.post(`/api/admin/promote/${encodeURIComponent(versionName)}`);
-
-      const result = await response.json();
-
-      if (response.ok) {
-        alert(`✅ Version promoted successfully!\n\nNew base: ${versionName}\nBackup created: ${result.backupName}`);
-        
-        // Refresh available versions and switch to base
-        await fetchAvailableVersions();
-        setCurrentGraphVersion('base');
-      } else {
-        alert(`❌ Promotion failed: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Promotion error:', error);
-      alert('❌ Failed to promote version. Please check the console for details.');
-    }
-  };
 
   const handleDeleteVersion = async (versionName: string) => {
-    if (versionName === 'base') {
-      alert('❌ Cannot delete the base version');
-      return;
-    }
-
     if (!window.confirm(`⚠️ Are you sure you want to delete version '${versionName}'?\n\nThis action cannot be undone and will permanently remove all data in this version.`)) {
       return;
     }
@@ -916,9 +875,30 @@ const App: React.FC = () => {
     try {
       const response = await api.get('/api/admin/versions');
       if (response.ok) {
-        const versions = await response.json();
-        setAvailableVersions(versions);
-        console.log('Available versions:', versions);
+        const data = await response.json();
+        
+        // Handle both old and new API response formats
+        if (Array.isArray(data)) {
+          // Old format: just array of versions
+          setAvailableVersions(data);
+          console.log('Available versions:', data);
+        } else {
+          // New format: object with versions array and metadata
+          const versions = data.versions || [];
+          
+          // Simple alphabetical sorting with base first
+          const sortedVersions = [...versions].sort((a, b) => {
+            // Base version comes first
+            if (a === 'base' && b !== 'base') return -1;
+            if (b === 'base' && a !== 'base') return 1;
+            
+            // Sort other versions alphabetically
+            return a.localeCompare(b);
+          });
+          
+          setAvailableVersions(sortedVersions);
+          console.log('Available versions:', sortedVersions);
+        }
       } else {
         console.error('Failed to fetch versions:', response.status, response.statusText);
       }
@@ -954,6 +934,8 @@ const App: React.FC = () => {
       
       // For 'all' node type, use the correct endpoint
       const endpoint = nodeType === 'all' ? 'all' : nodeType;
+      // Add version parameter to existing params
+      params.set('version', currentGraphVersion);
       const response = await api.get(`/api/admin/graph/${endpoint}?${params.toString()}`);
       
       if (response.ok) {
@@ -1139,7 +1121,8 @@ const App: React.FC = () => {
   const loadFilterOptions = async () => {
     try {
       // Load industries
-      const industriesResponse = await api.get('/api/industries');
+      const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+      const industriesResponse = await api.get(`/api/industries${versionParam}`);
       if (industriesResponse.ok) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const industriesData = await industriesResponse.json();
@@ -1156,7 +1139,7 @@ const App: React.FC = () => {
 
       // Load sectors (all sectors initially)
       if (industries.length > 0) {
-        const sectorsResponse = await api.post('/api/sectors', { industries: industries.map(i => i.name) });
+        const sectorsResponse = await api.post(`/api/sectors${versionParam}`, { industries: industries.map(i => i.name) });
         if (sectorsResponse.ok) {
           const sectorsData = await sectorsResponse.json();
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1373,7 +1356,8 @@ const App: React.FC = () => {
     setSuggestingPainPoints(true);
     
     try {
-      const response = await api.post('/api/suggest-painpoint-names', {
+      const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
+      const response = await api.post(`/api/suggest-painpoint-names${versionParam}`, {
         sectors: newPainPointForm.sectors,
         departments: newPainPointForm.departments
       });
@@ -1916,13 +1900,13 @@ const App: React.FC = () => {
         <div className="modal-backdrop" onClick={() => setShowImportModal(false)}>
           <div className="modal-content import-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Import Graph Data</h2>
+              <h2>Import Catalog Data</h2>
               <button className="modal-close" onClick={() => setShowImportModal(false)}>×</button>
             </div>
             
             <div className="import-content">
               <div className="import-info">
-                <p>Import a Cypher script to create a new graph version. The import will validate the schema and create a separate version that can be promoted to base later.</p>
+                <p>Import a Cypher script to create a new catalog version. The import will validate the schema and create a separate version that can be promoted to base later.</p>
               </div>
               
               
@@ -1991,7 +1975,7 @@ const App: React.FC = () => {
                       className="modal-btn modal-btn-primary"
                       disabled={importLoading || !importFile || !importVersionName.trim()}
                     >
-                      {importLoading ? '⏳ Importing...' : '📥 Import Graph'}
+                      {importLoading ? '⏳ Importing...' : '📥 Import Catalog'}
                     </button>
                   </div>
                 </form>
@@ -2009,12 +1993,6 @@ const App: React.FC = () => {
                     <div className="import-success-actions">
                       <button 
                         className="modal-btn modal-btn-primary"
-                        onClick={() => handlePromoteVersion(importResult.versionName!)}
-                      >
-                        🚀 Promote to Base
-                      </button>
-                      <button 
-                        className="modal-btn modal-btn-secondary"
                         onClick={() => {
                           setCurrentGraphVersion(importResult.versionName!);
                           setShowImportModal(false);
@@ -2051,13 +2029,13 @@ const App: React.FC = () => {
         <div className="modal-backdrop" onClick={() => setShowManageVersionsModal(false)}>
           <div className="modal-content manage-versions-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>🗂️ Manage Graph Versions</h2>
+              <h2>🗂️ Manage Catalog Versions</h2>
               <button className="modal-close" onClick={() => setShowManageVersionsModal(false)}>×</button>
             </div>
             
             <div className="manage-versions-content">
               <div className="manage-versions-info">
-                <p>Manage your graph versions. You can view, promote, or delete versions. The base version cannot be deleted.</p>
+                <p>Manage your catalog versions. You can view or delete versions. API calls will use the currently selected version.</p>
               </div>
               
               {availableVersions.length <= 1 ? (
@@ -2070,62 +2048,35 @@ const App: React.FC = () => {
                     <div key={version} className={`version-item ${version === 'base' ? 'base-version' : ''}`}>
                       <div className="version-info">
                         <span className="version-name">
-                          {version === 'base' ? '🔒 Base' : `📦 ${version}`}
+                          {version === 'base' ? '📂 Base' : `📦 ${version}`}
                         </span>
                         {currentGraphVersion === version && (
-                          <span className="version-badge current">Current</span>
-                        )}
-                        {version === 'base' && (
-                          <span className="version-badge base">Protected</span>
+                          <span className="version-badge current">Viewing</span>
                         )}
                       </div>
                       
-                      {version !== 'base' && (
-                        <div className="version-actions">
-                          <button
-                            className="version-action-btn view"
-                            onClick={() => {
-                              setCurrentGraphVersion(version);
-                              setShowManageVersionsModal(false);
-                            }}
-                            title="View this version"
-                          >
-                            👁️ View
-                          </button>
-                          <button
-                            className="version-action-btn promote"
-                            onClick={() => {
-                              handlePromoteVersion(version);
-                              setShowManageVersionsModal(false);
-                            }}
-                            title="Promote to base"
-                          >
-                            🚀 Promote
-                          </button>
-                          <button
-                            className="version-action-btn delete"
-                            onClick={() => handleDeleteVersion(version)}
-                            title="Delete this version"
-                          >
-                            🗑️ Delete
-                          </button>
-                        </div>
-                      )}
-                      
-                      {version === 'base' && (
-                        <div className="version-actions">
-                          <button
-                            className="version-action-btn view"
-                            onClick={() => {
-                              setCurrentGraphVersion(version);
-                              setShowManageVersionsModal(false);
-                            }}
-                            title="View base version"
-                          >
-                            👁️ View
-                          </button>
-                        </div>
-                      )}
+                      <div className="version-actions">
+                        {/* View button - always available */}
+                        <button
+                          className="version-action-btn view"
+                          onClick={() => {
+                            setCurrentGraphVersion(version);
+                            setShowManageVersionsModal(false);
+                          }}
+                          title={`View ${version} version`}
+                        >
+                          👁️ View
+                        </button>
+                        
+                        {/* Delete button - available for all versions */}
+                        <button
+                          className="version-action-btn delete"
+                          onClick={() => handleDeleteVersion(version)}
+                          title="Delete this version"
+                        >
+                          🗑️ Delete
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2150,7 +2101,7 @@ const App: React.FC = () => {
                       setShowManageVersionsModal(false);
                       setShowImportModal(true);
                     }}
-                    title="Import Graph Data"
+                    title="Import Catalog Data"
                   >
                     📥 Import
                   </button>
@@ -2162,7 +2113,7 @@ const App: React.FC = () => {
                       handleExportGraph();
                     }}
                     disabled={exportLoading}
-                    title="Export Current Graph"
+                    title="Export Current Catalog"
                   >
                     {exportLoading ? '⏳' : '📤'} Export
                   </button>

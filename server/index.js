@@ -38,6 +38,8 @@ const GRAPH_VERSIONS = {
   ADMIN_DRAFT: 'admin_draft'
 };
 
+// Removed default version management - API calls use explicit version parameters
+
 // Database management functions
 function getDatabaseName(version) {
   if (version === GRAPH_VERSIONS.BASE || version === 'base') {
@@ -62,9 +64,6 @@ async function createDatabase(dbName) {
 }
 
 async function dropDatabase(dbName) {
-  if (dbName === 'neo4j') {
-    throw new Error('Cannot drop the default neo4j database');
-  }
   const systemSession = driver.session({ database: 'system' });
   try {
     await systemSession.run(`DROP DATABASE \`${dbName}\` IF EXISTS`);
@@ -112,7 +111,11 @@ const GRAPH_SCHEMA = {
 };
 
 // Helper function to get database session for a version
-function getVersionSession(version = GRAPH_VERSIONS.BASE) {
+function getVersionSession(version) {
+  // If no version specified, use base version
+  if (!version) {
+    version = GRAPH_VERSIONS.BASE;
+  }
   const dbName = getDatabaseName(version);
   return driver.session({ database: dbName });
 }
@@ -2783,7 +2786,13 @@ app.get('/api/admin/versions', async (req, res) => {
       }
     });
     
-    res.json(versions);
+    res.json({
+      versions: versions,
+      metadata: {
+        totalVersions: versions.length,
+        note: `API calls use explicit version parameters. Base version is used when no version specified.`
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2877,10 +2886,6 @@ app.delete('/api/admin/versions/:versionName', async (req, res) => {
   const { versionName } = req.params;
   
   try {
-    // Prevent deletion of base version
-    if (versionName === GRAPH_VERSIONS.BASE || versionName === 'base') {
-      return res.status(403).json({ error: 'Cannot delete base version' });
-    }
     
     const dbName = getDatabaseName(versionName);
     
@@ -2905,20 +2910,6 @@ app.delete('/api/admin/versions/:versionName', async (req, res) => {
   }
 });
 
-// Promote admin draft to base (make changes permanent)
-app.post('/api/admin/versions/promote-draft', async (req, res) => {
-  const session = driver.session();
-  
-  try {
-    // This is a complex operation - for now, we'll just return an error
-    // In a production system, this would involve careful migration of changes
-    res.status(501).json({ error: 'Draft promotion not implemented yet - this would replace base graph with draft changes' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  } finally {
-    await session.close();
-  }
-});
 
 // =====================
 // ADMIN API ENDPOINTS
@@ -3038,10 +3029,6 @@ app.post('/api/admin/nodes/:type', async (req, res) => {
   const nodeData = req.body;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
   
-  // Only allow creation in admin_draft version for safety
-  if (version === GRAPH_VERSIONS.BASE) {
-    return res.status(403).json({ error: 'Cannot modify base graph directly. Create a draft version first.' });
-  }
   
   try {
     let baseQuery = '';
@@ -3092,10 +3079,6 @@ app.put('/api/admin/nodes/:type/:id', async (req, res) => {
   const nodeData = req.body;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
   
-  // Only allow updates in admin_draft version for safety
-  if (version === GRAPH_VERSIONS.BASE) {
-    return res.status(403).json({ error: 'Cannot modify base graph directly. Create a draft version first.' });
-  }
   
   try {
     let baseQuery = '';
@@ -3149,10 +3132,6 @@ app.delete('/api/admin/nodes/:type/:id', async (req, res) => {
   const { type, id } = req.params;
   const version = req.query.version || GRAPH_VERSIONS.BASE;
   
-  // Only allow deletion in admin_draft version for safety
-  if (version === GRAPH_VERSIONS.BASE) {
-    return res.status(403).json({ error: 'Cannot modify base graph directly. Create a draft version first.' });
-  }
   
   try {
     const query = 'MATCH (n) WHERE ID(n) = $id DETACH DELETE n';
@@ -4370,168 +4349,6 @@ app.post('/api/admin/import', express.text({ limit: '10mb' }), async (req, res) 
   }
 });
 
-// Promote imported version to base
-app.post('/api/admin/promote/:versionName', async (req, res) => {
-  const { versionName } = req.params;
-  
-  try {
-    // Check if version database exists
-    const versionDbName = getDatabaseName(versionName);
-    const databases = await listDatabases();
-    const versionDb = databases.find(db => db.name === versionDbName);
-    
-    if (!versionDb) {
-      return res.status(404).json({ error: `Version "${versionName}" not found` });
-    }
-    
-    // Prevent promoting base to itself
-    if (versionName === 'base' || versionName === GRAPH_VERSIONS.BASE) {
-      return res.status(400).json({ error: 'Cannot promote base version to itself' });
-    }
-    
-    // Step 1: Create backup of current base
-    const backupVersionName = `base-backup-${Date.now()}`;
-    const backupDbName = getDatabaseName(backupVersionName);
-    
-    // Create backup database and copy current base
-    await createDatabase(backupDbName);
-    
-    // Copy base data to backup
-    const baseSession = driver.session({ database: 'neo4j' }); // Base database
-    const backupSession = driver.session({ database: backupDbName });
-    
-    try {
-      // Get all data from base
-      const allDataQuery = `MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m`;
-      const baseData = await baseSession.run(allDataQuery);
-      
-      // Copy nodes first, keeping track of ID mappings
-      const nodeIdMap = new Map();
-      const processedNodes = new Set();
-      
-      for (const record of baseData.records) {
-        const node = record.get('n');
-        if (node && !processedNodes.has(node.identity.toString())) {
-          processedNodes.add(node.identity.toString());
-          
-          const labels = node.labels.join(':');
-          const createNodeQuery = `CREATE (n:${labels}) SET n = $props RETURN id(n) as newId`;
-          const result = await backupSession.run(createNodeQuery, { props: node.properties });
-          const newId = result.records[0].get('newId');
-          nodeIdMap.set(node.identity.toString(), newId);
-        }
-      }
-      
-      // Copy relationships
-      const processedRels = new Set();
-      for (const record of baseData.records) {
-        const rel = record.get('r');
-        const startNode = record.get('n');
-        const endNode = record.get('m');
-        
-        if (rel && startNode && endNode && !processedRels.has(rel.identity.toString())) {
-          processedRels.add(rel.identity.toString());
-          
-          const startId = nodeIdMap.get(startNode.identity.toString());
-          const endId = nodeIdMap.get(endNode.identity.toString());
-          
-          if (startId && endId) {
-            const relType = rel.type;
-            const createRelQuery = `
-              MATCH (a) WHERE id(a) = $startId
-              MATCH (b) WHERE id(b) = $endId
-              CREATE (a)-[r:${relType}]->(b)
-              SET r = $props
-            `;
-            await backupSession.run(createRelQuery, {
-              startId: startId,
-              endId: endId,
-              props: rel.properties
-            });
-          }
-        }
-      }
-      
-    } finally {
-      await backupSession.close();
-    }
-    
-    // Step 2: Clear current base
-    await baseSession.run('MATCH (n) DETACH DELETE n');
-    
-    // Step 3: Copy version data to base
-    const versionSession = driver.session({ database: versionDbName });
-    
-    try {
-      const versionData = await versionSession.run(`MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m`);
-      
-      // Copy nodes from version to base
-      const versionNodeIdMap = new Map();
-      const versionProcessedNodes = new Set();
-      
-      for (const record of versionData.records) {
-        const node = record.get('n');
-        if (node && !versionProcessedNodes.has(node.identity.toString())) {
-          versionProcessedNodes.add(node.identity.toString());
-          
-          const labels = node.labels.join(':');
-          const createNodeQuery = `CREATE (n:${labels}) SET n = $props RETURN id(n) as newId`;
-          const result = await baseSession.run(createNodeQuery, { props: node.properties });
-          const newId = result.records[0].get('newId');
-          versionNodeIdMap.set(node.identity.toString(), newId);
-        }
-      }
-      
-      // Copy relationships from version to base
-      const versionProcessedRels = new Set();
-      for (const record of versionData.records) {
-        const rel = record.get('r');
-        const startNode = record.get('n');
-        const endNode = record.get('m');
-        
-        if (rel && startNode && endNode && !versionProcessedRels.has(rel.identity.toString())) {
-          versionProcessedRels.add(rel.identity.toString());
-          
-          const startId = versionNodeIdMap.get(startNode.identity.toString());
-          const endId = versionNodeIdMap.get(endNode.identity.toString());
-          
-          if (startId && endId) {
-            const relType = rel.type;
-            const createRelQuery = `
-              MATCH (a) WHERE id(a) = $startId
-              MATCH (b) WHERE id(b) = $endId
-              CREATE (a)-[r:${relType}]->(b)
-              SET r = $props
-            `;
-            await baseSession.run(createRelQuery, {
-              startId: startId,
-              endId: endId,
-              props: rel.properties
-            });
-          }
-        }
-      }
-      
-    } finally {
-      await versionSession.close();
-      await baseSession.close();
-    }
-    
-    res.json({
-      success: true,
-      message: `Version "${versionName}" promoted to base successfully`,
-      backupName: backupVersionName,
-      promotedVersion: versionName
-    });
-    
-  } catch (error) {
-    console.error('Promotion error:', error);
-    res.status(500).json({ 
-      error: 'Failed to promote version', 
-      details: error.message 
-    });
-  }
-});
 
 process.on('exit', () => {
   driver.close();

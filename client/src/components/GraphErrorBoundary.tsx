@@ -28,13 +28,13 @@ class GraphErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="error-state">
-          <h2>Graph visualization error</h2>
-          <p>Something went wrong while rendering the graph. Please try again.</p>
+          <h2>Catalog visualization error</h2>
+          <p>Something went wrong while rendering the catalog. Please try again.</p>
           <button 
             className="reset-button"
             onClick={() => this.setState({ hasError: false })}
           >
-            Reset Graph
+            Reset Catalog
           </button>
         </div>
       );

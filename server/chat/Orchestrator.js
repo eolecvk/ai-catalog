@@ -365,10 +365,18 @@ class Orchestrator {
       };
     }
 
-    // No specific result type identified
+    // Check if execution provided meaningful results
+    const hasMeaningfulResults = this.hasMeaningfulResults(executionLog);
+    
+    if (!hasMeaningfulResults) {
+      console.log('[Orchestrator] No meaningful results found, triggering empty result handling');
+      return await this.handleEmptyResults(executionLog);
+    }
+    
+    // No specific result type identified but has some meaningful data
     return {
       success: true,
-      message: 'All execution steps completed successfully.',
+      message: 'Execution completed with partial results.',
       queryResult: {
         type: 'generic',
         summary: this.generateExecutionSummary(executionLog),
@@ -414,23 +422,29 @@ class Orchestrator {
     
     for (const [key, value] of Object.entries(params)) {
       if (typeof value === 'string' && value.startsWith('$step')) {
-        // Dynamic reference to previous step output
-        const stepMatch = value.match(/\$step(\d+)\.output/);
+        // Dynamic reference to previous step output - support deeper property access
+        const stepMatch = value.match(/\$step(\d+)\.output(?:\.(.+))?/);
         if (stepMatch) {
           const stepNumber = stepMatch[1];
+          const propertyPath = stepMatch[2]; // e.g., "params" or "query"
           const stepResult = executionState.get(`step${stepNumber}`);
           
           if (stepResult && stepResult.output) {
-            // Handle different output types
-            if (stepResult.output.query) {
-              // Cypher query result
-              resolved[key] = stepResult.output.query;
-            } else if (stepResult.output.graphData) {
-              // Graph data result
-              resolved[key] = stepResult.output.graphData;
+            if (propertyPath) {
+              // Access specific property like $step1.output.params
+              resolved[key] = stepResult.output[propertyPath];
             } else {
-              // Generic output
-              resolved[key] = stepResult.output;
+              // Handle different output types for $step1.output
+              if (stepResult.output.query) {
+                // Cypher query result
+                resolved[key] = stepResult.output.query;
+              } else if (stepResult.output.graphData) {
+                // Graph data result
+                resolved[key] = stepResult.output.graphData;
+              } else {
+                // Generic output
+                resolved[key] = stepResult.output;
+              }
             }
           } else {
             console.warn(`[Orchestrator] Could not resolve reference: ${value}`);
@@ -774,6 +788,127 @@ class Orchestrator {
       error: `Progressive fallback failed: ${error}`,
       executionLog,
       fallbackAttempted: true
+    };
+  }
+
+  // Check if execution log contains any meaningful results
+  hasMeaningfulResults(executionLog) {
+    for (const logEntry of executionLog) {
+      // Check for successful cypher execution with data
+      if (logEntry.taskType === 'execute_cypher' && logEntry.success && logEntry.result.output) {
+        const nodeCount = logEntry.result.output.nodeCount || 0;
+        const edgeCount = logEntry.result.output.edgeCount || 0;
+        if (nodeCount > 0 || edgeCount > 0) {
+          return true;
+        }
+      }
+      
+      // Check for successful analysis results
+      if (logEntry.taskType === 'analyze_and_summarize' && logEntry.success && logEntry.result.output) {
+        if (logEntry.result.output.analysis || logEntry.result.output.creative_content) {
+          return true;
+        }
+      }
+      
+      // Check for creative content
+      if (logEntry.taskType === 'generate_creative_text' && logEntry.success && logEntry.result.output) {
+        if (logEntry.result.output.creative_content) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  // Handle empty results with meaningful user feedback
+  async handleEmptyResults(executionLog) {
+    console.log('[Orchestrator] Handling empty results with context-aware response');
+    
+    // Extract query context from execution log
+    const queryContext = this.extractQueryContext(executionLog);
+    
+    // Generate contextual empty result response
+    try {
+      const finalAnswerTask = await this.executeTask('clarify_with_user', {
+        provide_final_answer: true,
+        entity_issues: queryContext.entities.map(entity => ({
+          entity,
+          issue: 'empty_result',
+          suggestions: this.getContextualSuggestions(entity)
+        })),
+        corrected_entities: queryContext.entities.flatMap(entity => 
+          this.getContextualSuggestions(entity)
+        ),
+        conversation_state: 'provide_final_answer_empty_results',
+        query_context: queryContext
+      });
+      
+      if (finalAnswerTask.success && finalAnswerTask.output) {
+        return {
+          success: true,  // This is success from user perspective - we gave them helpful info
+          message: finalAnswerTask.output.message || 'I found some alternative suggestions for your query.',
+          queryResult: {
+            type: 'empty_result_handled',
+            summary: finalAnswerTask.output.message,
+            suggestions: finalAnswerTask.output.suggestions || [],
+            availableData: finalAnswerTask.output.availableData || [],
+            isEmpty: true,
+            contextPreserved: true,
+            reasoningSteps: this.convertExecutionLogToReasoningSteps(executionLog)
+          },
+          executionLog,
+          isEmpty: true,
+          wasEmptyResultHandled: true
+        };
+      }
+    } catch (error) {
+      console.error('[Orchestrator] Error in empty result handling:', error);
+    }
+    
+    // Fallback empty result response
+    return {
+      success: false,
+      message: queryContext.isCompanyQuery ? 
+        `I don't have specific data for ${queryContext.companyName}, but I can show you what's available in related areas.` :
+        'I couldn\'t find specific data matching your query. Let me suggest some alternatives.',
+      queryResult: {
+        type: 'empty_result',
+        summary: 'No matching data found',
+        isEmpty: true,
+        queryContext: queryContext,
+        reasoningSteps: this.convertExecutionLogToReasoningSteps(executionLog)
+      },
+      executionLog,
+      isEmpty: true
+    };
+  }
+
+  // Extract query context from execution log to understand what user was looking for
+  extractQueryContext(executionLog) {
+    let entities = [];
+    let isCompanyQuery = false;
+    let companyName = '';
+    
+    for (const logEntry of executionLog) {
+      if (logEntry.taskType === 'generate_cypher' && logEntry.params) {
+        if (logEntry.params.entities && Array.isArray(logEntry.params.entities)) {
+          entities = [...entities, ...logEntry.params.entities];
+        }
+        if (logEntry.params.proxy_context || logEntry.params.original_company) {
+          isCompanyQuery = true;
+          companyName = logEntry.params.original_company || 
+                       (logEntry.params.goal && logEntry.params.goal.includes('for ') ? 
+                        logEntry.params.goal.split('for ')[1] : '');
+        }
+      }
+    }
+    
+    return {
+      entities: [...new Set(entities)], // Remove duplicates
+      isCompanyQuery,
+      companyName: companyName.trim(),
+      executionAttempts: executionLog.length
     };
   }
 }

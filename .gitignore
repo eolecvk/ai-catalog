@@ -197,3 +197,4 @@ playwright-report/
 # ======================
 tmp/
 *.local
+.vercel

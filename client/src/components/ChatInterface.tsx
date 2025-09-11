@@ -60,8 +60,7 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
   // Backoff status polling
   const pollBackoffStatus = async () => {
     try {
-      const response = await fetch('/api/llm/backoff-status');
-      const status = await response.json();
+      const status = await chatApi.getBackoffStatus();
       
       if (status.isRetrying) {
         setBackoffStatus(status);
@@ -75,6 +74,25 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
       }
     } catch (error) {
       console.error('Failed to poll backoff status:', error);
+      
+      // If it's a 404, the endpoint doesn't exist or routing is wrong
+      if (error instanceof Error && error.message.includes('404')) {
+        console.warn('Backoff status endpoint not found (404). Stopping polling.');
+        if (backoffPollingRef.current) {
+          clearInterval(backoffPollingRef.current);
+          backoffPollingRef.current = null;
+        }
+        return;
+      }
+      
+      // For JSON parsing errors, also stop polling to avoid spam
+      if (error instanceof Error && error.message.includes('JSON.parse')) {
+        console.warn('JSON parsing error in backoff status - stopping polling');
+        if (backoffPollingRef.current) {
+          clearInterval(backoffPollingRef.current);
+          backoffPollingRef.current = null;
+        }
+      }
     }
   };
 
@@ -321,10 +339,34 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
 
           setMessages(prev => prev.slice(0, -1).concat(clarificationMessage));
         } else {
+          // Create detailed backend error message
+          let errorContent = `**Backend Error:** ${data.error || 'Failed to process query'}`;
+          
+          // Add additional error context if available
+          if ((data as any).executionLog && (data as any).executionLog.length > 0) {
+            const failedSteps = (data as any).executionLog.filter((step: any) => !step.success);
+            if (failedSteps.length > 0) {
+              errorContent += `\n\n**Failed Steps:**`;
+              failedSteps.forEach((step: any, index: number) => {
+                errorContent += `\n${index + 1}. ${step.taskType}: ${step.result?.error || 'Unknown error'}`;
+              });
+            }
+          }
+          
+          // Add timestamp and request ID for debugging
+          if (process.env.NODE_ENV === 'development') {
+            errorContent += `\n\n**Debug Info:**`;
+            errorContent += `\n- Request ID: ${(data as any).requestId || 'N/A'}`;
+            errorContent += `\n- Time: ${new Date().toISOString()}`;
+            if ((data as any).failedAt) {
+              errorContent += `\n- Failed at step: ${(data as any).failedAt}`;
+            }
+          }
+          
           const errorMessage: ChatMessageType = {
             id: generateMessageId(),
             type: 'system',
-            content: `Error: ${data.error || 'Failed to process query'}`,
+            content: errorContent,
             timestamp: new Date()
           };
 
@@ -333,10 +375,28 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
       }
     } catch (error) {
       console.error('Chat API error:', error);
+      
+      // Create detailed error message for debugging
+      let errorContent = 'Sorry, there was an error processing your request.';
+      
+      if (error instanceof Error) {
+        errorContent += `\n\n**Error Details:**\n- ${error.message}`;
+        
+        // If it's a network error, show more details
+        if (error.message.includes('fetch') || error.message.includes('network')) {
+          errorContent += '\n- Check if the backend server is running on port 5004';
+        }
+      }
+      
+      // Add environment info for debugging
+      if (process.env.NODE_ENV === 'development') {
+        errorContent += `\n\n**Debug Info:**\n- Time: ${new Date().toISOString()}\n- Environment: ${process.env.NODE_ENV}\n- Backend: ${process.env.REACT_APP_BACKEND_PORT || 'default'}`;
+      }
+      
       const errorMessage: ChatMessageType = {
         id: generateMessageId(),
         type: 'system',
-        content: 'Sorry, there was an error processing your request. Please try again.',
+        content: errorContent,
         timestamp: new Date()
       };
 
@@ -363,13 +423,13 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
     const welcomeMessage: ChatMessageType = {
       id: generateMessageId(),
       type: 'assistant',
-      content: 'Hi! I can help you explore your graph data. Try asking questions like:',
+      content: 'Hi! I can help you explore the catalog. Try asking questions like:',
       timestamp: new Date(),
       exampleQuestions: [
-        'Show me all industries',
-        'Find pain points in banking',
-        'What projects are available for retail?',
-        'Show relationships between sectors and departments'
+        'Find projects for ANZ',
+        'Show me painpoints for online banking',
+        'Show projects that require an AI engineer',
+        'What are the sectors with the most project opportunities'
       ]
     };
     setMessages([welcomeMessage]);
@@ -462,7 +522,7 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({
                 value={currentInput}
                 onChange={(e) => setCurrentInput(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask a question about your graph data..."
+                placeholder="Ask a question about the catalog..."
                 className="chat-input"
                 disabled={isProcessing}
               />
