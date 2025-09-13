@@ -10,6 +10,9 @@ const llmManager = require('./llm/LLMManager');
 // Import ChatProcessor for enhanced chat functionality
 const ChatProcessor = require('./chat/ChatProcessor');
 
+// Import TokenManager for OAuth authentication
+const TokenManager = require('./auth/TokenManager');
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -17,13 +20,33 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-const driver = neo4j.driver(
-  process.env.NEO4J_URI || 'bolt://localhost:7687',
-  neo4j.auth.basic(
-    process.env.NEO4J_USERNAME || 'neo4j',
-    process.env.NEO4J_PASSWORD || 'password123'
-  )
-);
+// Create Neo4j driver with OAuth bearer authentication
+let driver;
+
+if (process.env.NEO4J_CLIENT_ID && process.env.NEO4J_CLIENT_SECRET) {
+  // Use OAuth authentication with client credentials
+  const tokenManager = new TokenManager(process.env.NEO4J_CLIENT_ID, process.env.NEO4J_CLIENT_SECRET);
+  
+  driver = neo4j.driver(
+    process.env.NEO4J_URI || 'bolt://localhost:7687',
+    neo4j.authTokenManagers.bearer({
+      tokenProvider: async () => await tokenManager.generateAuthToken()
+    })
+  );
+  
+  console.log('Neo4j driver configured with OAuth bearer authentication');
+} else {
+  // Fallback to basic authentication
+  driver = neo4j.driver(
+    process.env.NEO4J_URI || 'bolt://localhost:7687',
+    neo4j.auth.basic(
+      process.env.NEO4J_USERNAME || 'neo4j',
+      process.env.NEO4J_PASSWORD || 'password123'
+    )
+  );
+  
+  console.log('Neo4j driver configured with basic authentication (fallback)');
+}
 
 // Initialize enhanced chat processor
 const chatProcessor = new ChatProcessor(driver);

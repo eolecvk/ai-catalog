@@ -159,7 +159,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
   }, [nodes.length]);
 
   // Use props directly - single source of truth from App.tsx
-  const currentGraphData = { nodes, edges };
+  const currentGraphData = useMemo(() => ({ nodes, edges }), [nodes, edges]);
   // Debug: Log when props change
   useEffect(() => {
     console.log('🎨 GRAPHVIZ - Data updated:', { nodes: nodes.length, edges: edges.length });
@@ -177,8 +177,6 @@ const GraphViz: React.FC<GraphVizProps> = ({
     console.log('- edges prop:', edges.length);
     console.log('- Sample node IDs from props:', nodes.slice(0, 5).map(n => n.id));
   }, [nodes, edges]);
-  const [isAnimationRunning, setIsAnimationRunning] = useState(false);
-  const [simulationStable, setSimulationStable] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   // Batched state updates to reduce re-renders
@@ -262,7 +260,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     console.log('📏 Responsive canvas dimensions:', scaledWidth, 'x', scaledHeight, 'container:', containerWidth, 'x', containerHeight);
     
     return { width: scaledWidth, heightNum: scaledHeight, combinedScaleFactor };
-  }, [nodes.length, edges.length, height, resizeCounter]);
+  }, [height, resizeCounter]);
 
   // Calculate adaptive canvas size based on available space and content
   const getCanvasSize = useCallback(() => {
@@ -346,7 +344,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     }
     
     return transform;
-  }, [getZoomCenter, panOffset.x, panOffset.y, manualZoom]);
+  }, [getZoomCenter, panOffset.x, panOffset.y, manualZoom, simulationNodes]);
 
   // Color scheme for different node types
   const getNodeColor = (group: string): string => {
@@ -744,7 +742,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
     return allPositionedNodes;
   }, [findConnectedComponents, getNodeRadius, width, buildHierarchy, positionHierarchicalTree]);
 
-  // Advanced force simulation with subgraph separation and hierarchy  
+  // Advanced force simulation with subgraph separation and hierarchy
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const runSimulation = useCallback(() => {
     if (simulationNodes.length === 0) return;
 
@@ -970,7 +969,7 @@ const GraphViz: React.FC<GraphVizProps> = ({
     });
 
     batchedUpdateNodes(() => newNodes);
-  }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, nodes, edges, batchedUpdateNodes, performanceConfig]);
+  }, [simulationNodes, width, heightNum, findConnectedComponents, componentCount, batchedUpdateNodes, performanceConfig, currentGraphData, getNodeRadius]);
 
   // Update component count when nodes/edges change
   useEffect(() => {
@@ -985,17 +984,17 @@ const GraphViz: React.FC<GraphVizProps> = ({
   useEffect(() => {
     if (simulationNodes.length > 0) {
       console.log('🔄 Graph data changed - restarting animation');
-      setSimulationStable(false);
-      setIsAnimationRunning(false); // Will be restarted by animation loop effect
+      // setSimulationStable(false);
+      // setIsAnimationRunning(false); // Will be restarted by animation loop effect
     }
-  }, [nodes, edges]);
+  }, [nodes, edges, simulationNodes.length]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       console.log('🧹 GraphViz cleanup: stopping animation and clearing timeouts');
-      setIsAnimationRunning(false);
-      setSimulationStable(true);
+      // setIsAnimationRunning(false);
+      // setSimulationStable(true);
     };
   }, []);
 
@@ -1020,12 +1019,13 @@ const GraphViz: React.FC<GraphVizProps> = ({
     
     console.log('🔄 Static layout complete:', staticLayoutNodes.length, 'positioned nodes');
     batchedUpdateNodes(() => staticLayoutNodes);
-  }, [nodes, edges, width, heightNum, calculateStaticLayout, batchedUpdateNodes]);
+  }, [nodes, edges, width, heightNum, calculateStaticLayout, batchedUpdateNodes, currentGraphData]);
 
   // Toggle side panel visibility
 
 
   // Check if simulation is stable (nodes have low velocity)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const checkSimulationStability = useCallback(() => {
     if (simulationNodes.length === 0) return true;
     
@@ -1045,8 +1045,8 @@ const GraphViz: React.FC<GraphVizProps> = ({
     // In static layout mode, nodes are positioned once and don't need physics simulation
     if (simulationNodes.length > 0) {
       console.log('📍 Static layout active - nodes positioned, simulation stable');
-      setSimulationStable(true);
-      setIsAnimationRunning(false);
+      // setSimulationStable(true);
+      // setIsAnimationRunning(false);
     }
   }, [simulationNodes.length]);
 

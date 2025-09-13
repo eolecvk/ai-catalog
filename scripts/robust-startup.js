@@ -89,8 +89,8 @@ class RobustStartup {
   async waitForNeo4j() {
     this.log('Waiting for Neo4j to be ready...');
     
-    const neo4j = require('neo4j-driver');
-    const driver = neo4j.driver('bolt://localhost:7687', neo4j.auth.basic('neo4j', 'password123'));
+    const createDriver = require('../server/auth/createDriver');
+    const driver = createDriver();
     
     let retries = 60; // Increase timeout for DozerDB
     let healthCheckPassed = false;
@@ -153,8 +153,8 @@ class RobustStartup {
   }
 
   async initializeDatabase(forceReset = false) {
-    const neo4j = require('neo4j-driver');
-    const driver = neo4j.driver('bolt://localhost:7687', neo4j.auth.basic('neo4j', 'password123'));
+    const createDriver = require('../server/auth/createDriver');
+    const driver = createDriver();
     
     try {
       // Check if database already has data

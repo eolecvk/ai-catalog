@@ -1,15 +1,9 @@
-const neo4j = require('neo4j-driver');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const driver = neo4j.driver(
-  process.env.NEO4J_URI || 'bolt://localhost:7687',
-  neo4j.auth.basic(
-    process.env.NEO4J_USERNAME || 'neo4j',
-    process.env.NEO4J_PASSWORD || 'password123'
-  )
-);
+const createDriver = require('../server/auth/createDriver');
+const driver = createDriver();
 
 async function resetDatabase() {
   const session = driver.session();

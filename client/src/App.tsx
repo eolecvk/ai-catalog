@@ -142,10 +142,6 @@ const App: React.FC = () => {
   });
   const [showSectorDropdown, setShowSectorDropdown] = useState(false);
   const [showDepartmentDropdown, setShowDepartmentDropdown] = useState(false);
-  const [suggestingImpact, setSuggestingImpact] = useState(false);
-  const [suggestingPainPoints, setSuggestingPainPoints] = useState(false);
-  const [showPainPointSuggestions, setShowPainPointSuggestions] = useState(false);
-  const [painPointSuggestions, setPainPointSuggestions] = useState<string[]>([]);
   const [newProjectForm, setNewProjectForm] = useState<NewProjectForm>({
     title: '',
     priority: 'Medium',
@@ -311,9 +307,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (showPainPointSuggestions) {
-          setShowPainPointSuggestions(false);
-        } else if (showPainPointModal) {
+        if (showPainPointModal) {
           setShowPainPointModal(false);
         } else if (showProjectModal) {
           setShowProjectModal(false);
@@ -323,7 +317,7 @@ const App: React.FC = () => {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showPainPointSuggestions, showPainPointModal, showProjectModal]);
+  }, [showPainPointModal, showProjectModal]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -333,16 +327,13 @@ const App: React.FC = () => {
         setShowSectorDropdown(false);
         setShowDepartmentDropdown(false);
       }
-      if (!target.closest('.name-suggestion-container')) {
-        setShowPainPointSuggestions(false);
-      }
     };
 
-    if (showSectorDropdown || showDepartmentDropdown || showPainPointSuggestions) {
+    if (showSectorDropdown || showDepartmentDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showSectorDropdown, showDepartmentDropdown, showPainPointSuggestions]);
+  }, [showSectorDropdown, showDepartmentDropdown]);
 
   const fetchIndustries = async () => {
     try {
@@ -397,6 +388,7 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleIndustrySelection = (industryName: string) => {
     const newIndustries = selections.industries.includes(industryName)
       ? selections.industries.filter(i => i !== industryName)
@@ -458,6 +450,7 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSectorSelection = (sectorName: string) => {
     const newSectors = selections.sectors.includes(sectorName)
       ? selections.sectors.filter(s => s !== sectorName)
@@ -466,6 +459,7 @@ const App: React.FC = () => {
     setSelections({ ...selections, sectors: newSectors });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleScopeSelection = (scope: 'company' | 'departments') => {
     setScopeChoice(scope);
     
@@ -478,6 +472,7 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleScopeNext = () => {
     if (scopeChoice === 'company') {
       // Proceed to pain points with sectors only
@@ -489,6 +484,7 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDepartmentSelection = (departmentName: string) => {
     const newDepartments = selections.departments.includes(departmentName)
       ? selections.departments.filter(d => d !== departmentName)
@@ -497,6 +493,7 @@ const App: React.FC = () => {
     setSelections({ ...selections, departments: newDepartments });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDepartmentNext = () => {
     if (selections.departments.length > 0 && scopeChoice === 'departments') {
       fetchPainPointsForCurrentSelections(selections.departments, selections.sectors);
@@ -504,12 +501,14 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleBackToScopeChoice = () => {
     setScopeSubstep('choice');
     setScopeChoice('');
     setSelections({ ...selections, departments: [] });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleBackToBusinessContext = () => {
     setCurrentStep(1);
     setBusinessContextSubstep('sectors');
@@ -518,6 +517,7 @@ const App: React.FC = () => {
     setSelections({ ...selections, departments: [] });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleClearProgress = () => {
     // Clear localStorage
     localStorage.removeItem('ai-catalog-state');
@@ -536,6 +536,7 @@ const App: React.FC = () => {
     });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handlePainPointSelection = (painPointName: string) => {
     const newPainPoints = selections.painPoints.includes(painPointName)
       ? selections.painPoints.filter(p => p !== painPointName)
@@ -544,6 +545,7 @@ const App: React.FC = () => {
     setSelections({ ...selections, painPoints: newPainPoints });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleProceedToSectors = () => {
     // Ensure sectors are loaded for selected industries
     if (selections.industries.length > 0) {
@@ -553,12 +555,14 @@ const App: React.FC = () => {
     setCurrentSectorPage(0);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleNextSectorPage = () => {
     if (currentSectorPage < selections.industries.length - 1) {
       setCurrentSectorPage(currentSectorPage + 1);
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handlePreviousSectorPage = () => {
     if (currentSectorPage > 0) {
       setCurrentSectorPage(currentSectorPage - 1);
@@ -568,6 +572,7 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleProceedToScope = () => {
     if (selections.sectors.length > 0) {
       setCurrentStep(2);
@@ -576,22 +581,22 @@ const App: React.FC = () => {
 
 
   // Builder API functions
-  const fetchBuilderStats = async (version = currentGraphVersion) => {
+  const fetchBuilderStats = useCallback(async (version = currentGraphVersion) => {
     // Skip if no version is available yet
     if (!version) {
       console.log('[App] Skipping fetchBuilderStats: no version available');
       return;
     }
-    
+
     setBuilderLoading(true);
     try {
       console.log(`[App] Fetching builder stats for version: ${version}`);
       const response = await api.get(`/api/admin/stats?version=${version}`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      
+
       const stats = await response.json();
       console.log('[App] Received builder stats:', stats);
       setBuilderStats(stats);
@@ -602,7 +607,7 @@ const App: React.FC = () => {
     } finally {
       setBuilderLoading(false);
     }
-  };
+  }, [currentGraphVersion]);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const fetchBuilderNodes = async (nodeType: string, version = currentGraphVersion) => {
@@ -1209,6 +1214,7 @@ const App: React.FC = () => {
   };
 
   // Reset filters when changing tabs
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const resetFilters = () => {
     setSelectedIndustries([]);
     setSelectedSector('');
@@ -1219,7 +1225,7 @@ const App: React.FC = () => {
   // Load database stats on app startup (always needed for node cards)
   useEffect(() => {
     fetchBuilderStats();
-  }, []);
+  }, [fetchBuilderStats]);
 
   // Load builder data when authenticated
   useEffect(() => {
@@ -1305,6 +1311,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('focus', handleFocus);
   }, [builderAuthenticated, fetchAvailableVersions]);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const resetSelections = () => {
     setSelections({ viewMode: '', industries: [], sectors: [], departments: [], painPoints: [] });
     setScopeChoice('');
@@ -1340,6 +1347,7 @@ const App: React.FC = () => {
     fetchGraphData(nodeType);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const navigateToStep = (stepNumber: number) => {
     // Only allow navigation to completed steps or current step
     if (stepNumber > currentStep) return;
@@ -1395,6 +1403,7 @@ const App: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSectorToggle = (sectorName: string) => {
     const newSectors = newPainPointForm.sectors.includes(sectorName)
       ? newPainPointForm.sectors.filter(s => s !== sectorName)
@@ -1402,6 +1411,7 @@ const App: React.FC = () => {
     setNewPainPointForm({...newPainPointForm, sectors: newSectors});
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDepartmentToggle = (departmentName: string) => {
     const newDepartments = newPainPointForm.departments.includes(departmentName)
       ? newPainPointForm.departments.filter(d => d !== departmentName)
@@ -1409,23 +1419,26 @@ const App: React.FC = () => {
     setNewPainPointForm({...newPainPointForm, departments: newDepartments});
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const removeSectorTag = (sectorName: string) => {
     const newSectors = newPainPointForm.sectors.filter(s => s !== sectorName);
     setNewPainPointForm({...newPainPointForm, sectors: newSectors});
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const removeDepartmentTag = (departmentName: string) => {
     const newDepartments = newPainPointForm.departments.filter(d => d !== departmentName);
     setNewPainPointForm({...newPainPointForm, departments: newDepartments});
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSuggestPainPointNames = async () => {
     if (newPainPointForm.sectors.length === 0 && newPainPointForm.departments.length === 0) {
       alert('Please select at least one sector or department first');
       return;
     }
     
-    setSuggestingPainPoints(true);
+    // setSuggestingPainPoints(true);
     
     try {
       const versionParam = currentGraphVersion && currentGraphVersion !== 'base' ? `?version=${encodeURIComponent(currentGraphVersion)}` : '';
@@ -1435,9 +1448,10 @@ const App: React.FC = () => {
       });
       
       if (response.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const data = await response.json();
-        setPainPointSuggestions(data.suggestions);
-        setShowPainPointSuggestions(true);
+        // setPainPointSuggestions(data.suggestions);
+        // setShowPainPointSuggestions(true);
       } else {
         const errorData = await response.json();
         alert(errorData.error || 'Failed to generate suggestions');
@@ -1446,22 +1460,24 @@ const App: React.FC = () => {
       console.error('Error getting pain point suggestions:', error);
       alert('Failed to generate suggestions');
     } finally {
-      setSuggestingPainPoints(false);
+      // setSuggestingPainPoints(false);
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSelectPainPointSuggestion = (suggestion: string) => {
     setNewPainPointForm({ ...newPainPointForm, name: suggestion });
-    setShowPainPointSuggestions(false);
+    // setShowPainPointSuggestions(false);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSuggestImpact = async () => {
     if (!newPainPointForm.name.trim()) {
       alert('Please enter a pain point name first');
       return;
     }
     
-    setSuggestingImpact(true);
+    // setSuggestingImpact(true);
     
     try {
       const response = await api.post('/api/suggest-impact', {
@@ -1484,10 +1500,11 @@ const App: React.FC = () => {
       console.error('Error getting impact suggestion:', error);
       alert('Failed to generate suggestion');
     } finally {
-      setSuggestingImpact(false);
+      // setSuggestingImpact(false);
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleCreatePainPoint = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -1518,6 +1535,7 @@ const App: React.FC = () => {
     }
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -1553,6 +1571,7 @@ const App: React.FC = () => {
     }
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const addRequiredRole = () => {
     setNewProjectForm({
       ...newProjectForm,
@@ -1560,6 +1579,7 @@ const App: React.FC = () => {
     });
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const removeRequiredRole = (index: number) => {
     setNewProjectForm({
       ...newProjectForm,
@@ -1567,12 +1587,14 @@ const App: React.FC = () => {
     });
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const updateRequiredRole = (index: number, field: 'name' | 'specialty', value: string) => {
     const updatedRoles = [...newProjectForm.requiredRoles];
     updatedRoles[index] = { ...updatedRoles[index], [field]: value };
     setNewProjectForm({ ...newProjectForm, requiredRoles: updatedRoles });
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const addSubModule = () => {
     setNewProjectForm({
       ...newProjectForm,
@@ -1580,6 +1602,7 @@ const App: React.FC = () => {
     });
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const removeSubModule = (index: number) => {
     setNewProjectForm({
       ...newProjectForm,
@@ -1587,12 +1610,14 @@ const App: React.FC = () => {
     });
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const updateSubModule = (index: number, value: string) => {
     const updatedSubModules = [...newProjectForm.subModules];
     updatedSubModules[index] = value;
     setNewProjectForm({ ...newProjectForm, subModules: updatedSubModules });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getAllSectors = () => {
     const allSectors: string[] = [];
     Object.values(sectors).forEach(sectorList => {
@@ -1618,6 +1643,7 @@ const App: React.FC = () => {
     return allSectors;
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getAllDepartments = () => {
     // If departments are not loaded yet or empty, return fallback departments immediately
     if (!departments || departments.length === 0) {
@@ -1656,6 +1682,7 @@ const App: React.FC = () => {
     ];
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'High': return '#e74c3c';

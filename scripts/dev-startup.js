@@ -57,8 +57,8 @@ class DevStartup {
   async waitForNeo4j() {
     this.log('Waiting for Neo4j connection...');
     
-    const neo4j = require('neo4j-driver');
-    const driver = neo4j.driver('bolt://localhost:7687', neo4j.auth.basic('neo4j', 'password123'));
+    const createDriver = require('../server/auth/createDriver');
+    const driver = createDriver();
     
     let retries = 30; // Keep original timeout for reliability
     let dots = '';
